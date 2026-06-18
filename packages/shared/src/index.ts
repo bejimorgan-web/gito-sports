@@ -4,8 +4,17 @@ export * from "./naming";
 export * from "./auth";
 export * from "./lifecycle";
 export * from "./operations";
-export * from "./sports";
-export * from "./streams";
 
-// ensure types are explicitly included for TS build consistency
-export type * from "./types";
+export {
+  type Sport,
+  type Team,
+  type Competition,
+  type Country,
+  type Match
+} from "./sports";
+
+export {
+  type Stream,
+  type Channel,
+  type ParsedChannel
+} from "./streams";
