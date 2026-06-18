@@ -1,5 +1,5 @@
-import type { EntityId, EntityStatus } from "./naming";
-import type { MatchLifecycleStatus } from "./lifecycle";
+import type { EntityId, EntityStatus } from "./naming.js";
+import type { MatchLifecycleStatus } from "./lifecycle.js";
 
 export type RegionType = "country" | "continent" | "international" | "custom";
 

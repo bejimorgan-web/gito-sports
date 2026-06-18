@@ -1,10 +1,10 @@
 import { Router } from "express";
 
-import type { AuthenticatedRequest } from "../middleware/protected";
+import type { AuthenticatedRequest } from "../middleware/protected.js";
 import type { CreateTeamRequest, UpdateTeamRequest } from "@gito/shared";
-import { createTeam, deleteTeam, getTeamById, listTeams, updateTeam } from "../repositories/teams-repository";
-import { getCatalogTeamById, listCatalogTeams } from "../repositories/catalog-shadow-repository";
-import { normalizeTeam } from "./asset-url";
+import { createTeam, deleteTeam, getTeamById, listTeams, updateTeam } from "../repositories/teams-repository.js";
+import { getCatalogTeamById, listCatalogTeams } from "../repositories/catalog-shadow-repository.js";
+import { normalizeTeam } from "./asset-url.js";
 
 export const teamsRouter = Router();
 

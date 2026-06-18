@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 
-import { WorkflowStateError } from "../services/workflow-state";
+import { WorkflowStateError } from "../services/workflow-state.js";
 
 export function workflowErrorHandler(
   error: unknown,

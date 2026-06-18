@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import { env } from "../config/env";
+import { env } from "../config/env.js";
 
 interface JwtPayload {
   sub: string;

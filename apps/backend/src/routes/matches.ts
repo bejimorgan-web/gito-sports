@@ -6,16 +6,16 @@ import type {
   MatchStreamAssignmentRequest,
   UpdateMatchRequest
 } from "@gito/shared";
-import { teamAssignedToCompetition } from "../repositories/competition-teams-repository";
-import { MatchService } from "../services/match-service";
+import { teamAssignedToCompetition } from "../repositories/competition-teams-repository.js";
+import { MatchService } from "../services/match-service.js";
 import {
   assignChannelToSchedulingMatch,
   deleteMatchStreamAssignment,
   getMatchStreamAssignmentById,
   listMatchStreamAssignments,
   updateMatchStreamAssignment
-} from "../repositories/match-streams-repository";
-import streamResolutionService from "../services/stream-resolution-service";
+} from "../repositories/match-streams-repository.js";
+import streamResolutionService from "../services/stream-resolution-service.js";
 
 export const matchesRouter = Router();
 

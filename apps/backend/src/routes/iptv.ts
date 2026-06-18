@@ -2,11 +2,11 @@ import { Router } from "express";
 
 import type { CreateProviderRequest } from "@gito/shared";
 
-import { IPTVService } from "../services/iptv-service";
-import { parseM3uPlaylist, M3uParseError } from "../services/m3u-parser";
-import { fetchXtreamChannels, testXtreamConnection, XtreamParseError } from "../services/xtream-codes";
-import { validateHttpStreamUrl } from "../services/url-validation";
-import { logChannelSyncTrace } from "../services/iptv-trace";
+import { IPTVService } from "../services/iptv-service.js";
+import { parseM3uPlaylist, M3uParseError } from "../services/m3u-parser.js";
+import { fetchXtreamChannels, testXtreamConnection, XtreamParseError } from "../services/xtream-codes.js";
+import { validateHttpStreamUrl } from "../services/url-validation.js";
+import { logChannelSyncTrace } from "../services/iptv-trace.js";
 
 type ChannelListMode = "active" | "includeInactive" | "debug" | "raw";
 

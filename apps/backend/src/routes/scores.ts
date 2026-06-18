@@ -1,6 +1,6 @@
 import { Response, Router } from "express";
 
-import { ScoreService } from "../services/score-service";
+import { ScoreService } from "../services/score-service.js";
 
 export const scoresRouter = Router();
 

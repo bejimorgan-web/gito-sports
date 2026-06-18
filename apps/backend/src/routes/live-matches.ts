@@ -1,8 +1,8 @@
 import { Router } from "express";
 
-import { protectedRoute } from "../middleware/protected";
-import { requireMatchPublishable } from "../middleware/transition-guards";
-import { MatchService } from "../services/match-service";
+import { protectedRoute } from "../middleware/protected.js";
+import { requireMatchPublishable } from "../middleware/transition-guards.js";
+import { MatchService } from "../services/match-service.js";
 
 export const liveMatchesRouter = Router();
 

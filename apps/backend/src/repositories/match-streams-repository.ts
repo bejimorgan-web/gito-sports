@@ -2,10 +2,10 @@ import crypto from "node:crypto";
 
 import type { Channel, Match, MatchStreamAssignment, MatchStreamAssignmentRequest, MatchStreamAssignmentResult } from "@gito/shared";
 
-import { getDatabase } from "../db/connection";
-import { getMatchById } from "./matches-repository";
-import { validateHttpStreamUrl } from "../services/url-validation";
-import { WorkflowStateError } from "../services/workflow-state";
+import { getDatabase } from "../db/connection.js";
+import { getMatchById } from "./matches-repository.js";
+import { validateHttpStreamUrl } from "../services/url-validation.js";
+import { WorkflowStateError } from "../services/workflow-state.js";
 
 function mapMatchStreamAssignmentRow(row: Record<string, string | number>): MatchStreamAssignment {
   return {

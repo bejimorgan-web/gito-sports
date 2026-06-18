@@ -1,5 +1,5 @@
 import type { Channel, CreateProviderRequest, IPTVProvider } from "@gito/shared";
-import { EventBus } from "../events/event-bus";
+import { EventBus } from "../events/event-bus.js";
 
 import {
   createProvider,
@@ -17,7 +17,7 @@ import {
   updateProvider,
   type IngestionReport,
   type ParityDiagnostic
-} from "../repositories/provider-repository";
+} from "../repositories/provider-repository.js";
 
 const channelCache = new Map<string, Channel[] | unknown[]>();
 

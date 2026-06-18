@@ -3,8 +3,8 @@ import crypto from "node:crypto";
 import type { CreateSportRequest, EntityId, Sport } from "@gito/shared";
 import { createSlug } from "@gito/shared";
 
-import { deleteEntity } from "../services/entityDeleteService";
-import { getDatabase } from "../db/connection";
+import { deleteEntity } from "../services/entityDeleteService.js";
+import { getDatabase } from "../db/connection.js";
 
 interface SportRow {
   id: string;

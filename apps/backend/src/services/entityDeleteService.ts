@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
-import { getDatabase } from "../db/connection";
-import { allowedDeletes, EntityType } from "./catalog_rules";
+import { getDatabase } from "../db/connection.js";
+import { allowedDeletes, EntityType } from "./catalog_rules.js";
 
 function now() {
   return new Date().toISOString();

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { env } from '../config/env';
+import { env } from '../config/env.js';
 
 export function validateUploadsAtStartup() {
   try {

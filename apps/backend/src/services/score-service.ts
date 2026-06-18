@@ -1,5 +1,5 @@
-import { env } from "../config/env";
-import { EventBus } from "../events/event-bus";
+import { env } from "../config/env.js";
+import { EventBus } from "../events/event-bus.js";
 
 type CacheEntry<T> = {
   expiresAt: number;

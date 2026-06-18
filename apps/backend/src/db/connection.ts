@@ -2,13 +2,13 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { DatabaseSync, allowSqliteInstantiation } from "./sqlite";
+import { DatabaseSync, allowSqliteInstantiation } from "./sqlite.js";
 
-import { env, runtimeConfig } from "../config/env";
-import { readInitialSchema } from "./schema";
-import { rehydrateSyncStateOnStartup } from "../system/startup";
-import { startBackupService } from "../services/database-backup-service";
-import { scheduleBackgroundJob } from "../background/backgroundJobRunner";
+import { env, runtimeConfig } from "../config/env.js";
+import { readInitialSchema } from "./schema.js";
+import { rehydrateSyncStateOnStartup } from "../system/startup.js";
+import { startBackupService } from "../services/database-backup-service.js";
+import { scheduleBackgroundJob } from "../background/backgroundJobRunner.js";
 
 let database: DatabaseSync | null = null;
 const EXPECTED_SCHEMA_VERSION = 1;

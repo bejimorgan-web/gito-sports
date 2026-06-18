@@ -1,8 +1,8 @@
 import crypto from "node:crypto";
 
 import type { Team } from "@gito/shared";
-import { getDatabase } from "../db/connection";
-import { getTeamById } from "./teams-repository";
+import { getDatabase } from "../db/connection.js";
+import { getTeamById } from "./teams-repository.js";
 
 export function assignTeamToCompetition(competitionId: string, teamId: string) {
   const db = getDatabase();

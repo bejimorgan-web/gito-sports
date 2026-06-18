@@ -1,7 +1,7 @@
 import type { Request } from "express";
 import { Router } from "express";
 
-import { MatchService } from "../services/match-service";
+import { MatchService } from "../services/match-service.js";
 
 function normalizeUploadsUrl(request: Request, url: string | undefined | null) {
   if (!url) {

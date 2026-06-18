@@ -1,8 +1,8 @@
 import crypto from "node:crypto";
 
 import type { Country, CreateCountryRequest } from "@gito/shared";
-import { deleteEntity } from "../services/entityDeleteService";
-import { getDatabase } from "../db/connection";
+import { deleteEntity } from "../services/entityDeleteService.js";
+import { getDatabase } from "../db/connection.js";
 
 interface CountryRow {
   id: string;

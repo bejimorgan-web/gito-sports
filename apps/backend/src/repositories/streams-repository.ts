@@ -1,6 +1,6 @@
 import type { Stream } from "@gito/shared";
 
-import { getDatabase } from "../db/connection";
+import { getDatabase } from "../db/connection.js";
 
 function mapStream(row: Record<string, string | number | null>): Stream {
   const status = (row.status ?? row.approval_status ?? "idle") as Stream["status"];

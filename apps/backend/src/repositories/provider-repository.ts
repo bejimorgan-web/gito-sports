@@ -1,12 +1,12 @@
 import crypto from "node:crypto";
-import { EventBus } from "../events/event-bus";
+import { EventBus } from "../events/event-bus.js";
 
 import type { Channel, CreateProviderRequest, IPTVProvider, ParsedChannel } from "@gito/shared";
 
 type ProviderSyncMode = "partial" | "full";
 
-import { getDatabase } from "../db/connection";
-import { logChannelSyncTrace } from "../services/iptv-trace";
+import { getDatabase } from "../db/connection.js";
+import { logChannelSyncTrace } from "../services/iptv-trace.js";
 
 // In-memory ingestion report storage (last report per provider)
 const latestIngestionReports = new Map<string, IngestionReport>();

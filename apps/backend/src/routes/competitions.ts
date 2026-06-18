@@ -1,6 +1,6 @@
 import { Router } from "express";
 
-import type { AuthenticatedRequest } from "../middleware/protected";
+import type { AuthenticatedRequest } from "../middleware/protected.js";
 import type { CreateCompetitionRequest, UpdateCompetitionRequest } from "@gito/shared";
 import {
   createCompetition,
@@ -8,15 +8,15 @@ import {
   getCompetitionById,
   listCompetitions,
   updateCompetition
-} from "../repositories/competitions-repository";
+} from "../repositories/competitions-repository.js";
 import {
   assignTeamToCompetition,
   listTeamsForCompetition,
   removeTeamFromCompetition,
   teamAssignedToCompetition
-} from "../repositories/competition-teams-repository";
-import { listCatalogCompetitions, getCatalogCompetitionById } from "../repositories/catalog-shadow-repository";
-import { normalizeCompetition } from "./asset-url";
+} from "../repositories/competition-teams-repository.js";
+import { listCatalogCompetitions, getCatalogCompetitionById } from "../repositories/catalog-shadow-repository.js";
+import { normalizeCompetition } from "./asset-url.js";
 
 export const competitionsRouter = Router();
 

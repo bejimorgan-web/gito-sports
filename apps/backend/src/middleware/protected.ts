@@ -1,6 +1,6 @@
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 
-import { verifyAccessToken } from "../services/jwt";
+import { verifyAccessToken } from "../services/jwt.js";
 
 export interface AuthenticatedRequest extends Request {
   operator?: {

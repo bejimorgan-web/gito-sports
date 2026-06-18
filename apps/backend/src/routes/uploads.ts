@@ -4,7 +4,7 @@ import path from "node:path";
 import express from "express";
 import multer from "multer";
 
-import { env } from "../config/env";
+import { env } from "../config/env.js";
 
 const uploadsRouter = express.Router();
 const uploadDirectory = path.join(path.dirname(env.databasePath), "uploads");

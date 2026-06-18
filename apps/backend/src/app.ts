@@ -2,27 +2,27 @@ import cors from "cors";
 import express from "express";
 import helmet from "helmet";
 
-import { workflowErrorHandler } from "./middleware/workflow-error";
-import { authRouter } from "./routes/auth";
+import { workflowErrorHandler } from "./middleware/workflow-error.js";
+import { authRouter } from "./routes/auth.js";
 import path from "node:path";
 import fs from "node:fs";
 
-import { healthRouter } from "./routes/health";
-import { systemRouter } from "./routes/system";
-import { iptvRouter } from "./routes/iptv";
-import { liveMatchesRouter } from "./routes/live-matches";
-import { matchesRouter } from "./routes/matches";
-import { mobileRouter } from "./routes/mobile";
-import { operationsRouter } from "./routes/operations";
-import { scoresRouter } from "./routes/scores";
-import { sportsRouter } from "./routes/sports";
-import { countriesRouter } from "./routes/countries";
-import { competitionsRouter } from "./routes/competitions";
-import { teamsRouter } from "./routes/teams";
-import { streamsRouter } from "./routes/streams";
-import { uploadsRouter } from "./routes/uploads";
-import { eventsRouter } from "./routes/events";
-import { env } from "./config/env";
+import { healthRouter } from "./routes/health.js";
+import { systemRouter } from "./routes/system.js";
+import { iptvRouter } from "./routes/iptv.js";
+import { liveMatchesRouter } from "./routes/live-matches.js";
+import { matchesRouter } from "./routes/matches.js";
+import { mobileRouter } from "./routes/mobile.js";
+import { operationsRouter } from "./routes/operations.js";
+import { scoresRouter } from "./routes/scores.js";
+import { sportsRouter } from "./routes/sports.js";
+import { countriesRouter } from "./routes/countries.js";
+import { competitionsRouter } from "./routes/competitions.js";
+import { teamsRouter } from "./routes/teams.js";
+import { streamsRouter } from "./routes/streams.js";
+import { uploadsRouter } from "./routes/uploads.js";
+import { eventsRouter } from "./routes/events.js";
+import { env } from "./config/env.js";
 
 export function createApp() {
   const app = express();

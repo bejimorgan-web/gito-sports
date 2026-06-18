@@ -1,6 +1,6 @@
-import type { EntityId } from "./naming";
-import type { Match } from "./sports";
-import type { Channel, IPTVProvider, ProviderType, Stream, StreamHealthStatus } from "./streams";
+import type { EntityId } from "./naming.js";
+import type { Match } from "./sports.js";
+import type { Channel, IPTVProvider, ProviderType, Stream, StreamHealthStatus } from "./streams.js";
 
 export interface ProviderConnectionTest {
   ok: boolean;

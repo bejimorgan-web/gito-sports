@@ -1,6 +1,6 @@
 import fs from "node:fs";
-import { getDatabase } from "../db/connection";
-import { env, runtimeConfig } from "../config/env";
+import { getDatabase } from "../db/connection.js";
+import { env, runtimeConfig } from "../config/env.js";
 
 export function rehydrateSyncStateOnStartup() {
   try {

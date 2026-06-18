@@ -1,6 +1,6 @@
 import { Router } from "express";
 
-import type { AuthenticatedRequest } from "../middleware/protected";
+import type { AuthenticatedRequest } from "../middleware/protected.js";
 import type { CreateCountryRequest, UpdateCountryRequest } from "@gito/shared";
 import {
   createCountry,
@@ -8,9 +8,9 @@ import {
   getCountryById,
   listCountries,
   updateCountry
-} from "../repositories/countries-repository";
-import { getHostCatalogById, listHostCatalog } from "../repositories/catalog-shadow-repository";
-import { normalizeCountry } from "./asset-url";
+} from "../repositories/countries-repository.js";
+import { getHostCatalogById, listHostCatalog } from "../repositories/catalog-shadow-repository.js";
+import { normalizeCountry } from "./asset-url.js";
 
 export const countriesRouter = Router();
 

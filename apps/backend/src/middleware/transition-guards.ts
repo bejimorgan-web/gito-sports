@@ -1,8 +1,8 @@
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 import type { Match, Stream } from "@gito/shared";
 
-import { getDatabase } from "../db/connection";
-import { assertMatchTransition, assertStreamTransition, WorkflowStateError } from "../services/workflow-state";
+import { getDatabase } from "../db/connection.js";
+import { assertMatchTransition, assertStreamTransition, WorkflowStateError } from "../services/workflow-state.js";
 
 export function requireStreamTransition(nextStatus: Stream["status"]): RequestHandler {
   return (request: Request, response: Response, next: NextFunction) => {

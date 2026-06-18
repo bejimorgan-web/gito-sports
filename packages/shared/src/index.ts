@@ -1,6 +1,6 @@
 // CORE TYPES
-export type { EntityId, EntityStatus } from "./naming";
-export { createSlug } from "./naming";
+export type { EntityId, EntityStatus } from "./naming.js";
+export { createSlug } from "./naming.js";
 
 // SPORTS
 export type {
@@ -20,14 +20,14 @@ export type {
   UpdateTeamRequest,
   CreateMatchRequest,
   UpdateMatchRequest
-} from "./sports";
+} from "./sports.js";
 
 export type {
   MatchLifecycleStatus,
   StreamLifecycleStatus
-} from "./lifecycle";
+} from "./lifecycle.js";
 
-export { canTransitionMatch, canTransitionStream } from "./lifecycle";
+export { canTransitionMatch, canTransitionStream } from "./lifecycle.js";
 
 // STREAMS
 export type {
@@ -37,7 +37,7 @@ export type {
   ChannelDebug,
   Stream,
   MatchStream
-} from "./streams";
+} from "./streams.js";
 
 export type {
   ProviderConnectionTest,
@@ -53,4 +53,4 @@ export type {
   UpdateProviderRequest,
   StreamHealthReport,
   OperationalLogEntry
-} from "./operations";
+} from "./operations.js";

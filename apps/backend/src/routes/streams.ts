@@ -1,10 +1,10 @@
 import { Router } from "express";
 
-import type { AuthenticatedRequest } from "../middleware/protected";
-import { protectedRoute } from "../middleware/protected";
-import { requireStreamTransition } from "../middleware/transition-guards";
-import { WorkflowStateError } from "../services/workflow-state";
-import { StreamService } from "../services/stream-service";
+import type { AuthenticatedRequest } from "../middleware/protected.js";
+import { protectedRoute } from "../middleware/protected.js";
+import { requireStreamTransition } from "../middleware/transition-guards.js";
+import { WorkflowStateError } from "../services/workflow-state.js";
+import { StreamService } from "../services/stream-service.js";
 
 export const streamsRouter = Router();
 

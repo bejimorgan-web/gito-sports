@@ -7,7 +7,7 @@
 
 import { Router, type Response } from "express";
 type SseResponse = Response & import("node:http").ServerResponse;
-import { EventBus } from "../events/event-bus";
+import { EventBus } from "../events/event-bus.js";
 
 export const eventsRouter = Router();
 

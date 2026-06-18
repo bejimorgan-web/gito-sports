@@ -1,6 +1,6 @@
-import { getDatabase } from "../db/connection";
-import { listMatchStreamAssignments } from "../repositories/match-streams-repository";
-import { validateHttpStreamUrl } from "../services/url-validation";
+import { getDatabase } from "../db/connection.js";
+import { listMatchStreamAssignments } from "../repositories/match-streams-repository.js";
+import { validateHttpStreamUrl } from "./url-validation.js";
 
 type AssignmentRow = Awaited<ReturnType<typeof listMatchStreamAssignments>>[0];
 

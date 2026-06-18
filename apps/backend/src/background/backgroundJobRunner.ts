@@ -1,4 +1,4 @@
-import { getDatabase } from "../db/connection";
+import { getDatabase } from "../db/connection.js";
 
 type JobFn = () => Promise<void> | void;
 

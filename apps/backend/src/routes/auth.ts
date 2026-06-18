@@ -1,6 +1,6 @@
 import { Router } from "express";
 
-import { createAccessToken } from "../services/jwt";
+import { createAccessToken } from "../services/jwt.js";
 
 export const authRouter = Router();
 

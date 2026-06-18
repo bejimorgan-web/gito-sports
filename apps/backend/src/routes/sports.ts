@@ -1,9 +1,9 @@
 import { Router } from "express";
 
 import type { CreateSportRequest, UpdateSportRequest } from "@gito/shared";
-import type { AuthenticatedRequest } from "../middleware/protected";
-import { normalizeSport } from "./asset-url";
-import { CatalogService } from "../services/catalog-service";
+import type { AuthenticatedRequest } from "../middleware/protected.js";
+import { normalizeSport } from "./asset-url.js";
+import { CatalogService } from "../services/catalog-service.js";
 
 export const sportsRouter = Router();
 

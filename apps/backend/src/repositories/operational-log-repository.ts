@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 
 import type { OperationalLogEntry } from "@gito/shared";
 
-import { getDatabase } from "../db/connection";
+import { getDatabase } from "../db/connection.js";
 
 function now() {
   return new Date().toISOString();

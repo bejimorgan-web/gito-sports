@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { allowSqliteInstantiation, DatabaseSync } from "../db/sqlite";
-import { env, runtimeConfig } from "../config/env";
+import { allowSqliteInstantiation, DatabaseSync } from "../db/sqlite.js";
+import { env, runtimeConfig } from "../config/env.js";
 
 const cleanupIntervalMs = 12 * 60 * 60 * 1000; // 12 hours
 

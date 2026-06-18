@@ -1,7 +1,7 @@
 import { Router } from "express";
 
-import { protectedRoute } from "../middleware/protected";
-import { listOperationalLogs } from "../repositories/operational-log-repository";
+import { protectedRoute } from "../middleware/protected.js";
+import { listOperationalLogs } from "../repositories/operational-log-repository.js";
 
 export const operationsRouter = Router();
 

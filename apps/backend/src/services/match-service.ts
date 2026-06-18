@@ -1,8 +1,8 @@
 import type { PublishedLiveMatch } from "@gito/shared";
 
-import { assignChannelToMatch, listPublishedLiveMatches, publishApprovedStreamForMatch } from "../repositories/operations-repository";
-import { createMatch, deleteMatch, getMatchById, listMatches, updateMatch } from "../repositories/matches-repository";
-import { getDatabase } from "../db/connection";
+import { assignChannelToMatch, listPublishedLiveMatches, publishApprovedStreamForMatch } from "../repositories/operations-repository.js";
+import { createMatch, deleteMatch, getMatchById, listMatches, updateMatch } from "../repositories/matches-repository.js";
+import { getDatabase } from "../db/connection.js";
 
 /**
  * Enhanced match data with visibility status.

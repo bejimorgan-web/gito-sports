@@ -4,8 +4,8 @@ import {
   listBackups,
   validateBackup,
   getBackupStats
-} from "../services/database-backup-service";
-import { startupHealthCheck } from "../system/startup";
+} from "../services/database-backup-service.js";
+import { startupHealthCheck } from "../system/startup.js";
 
 export const systemRouter = Router();
 

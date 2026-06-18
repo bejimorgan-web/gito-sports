@@ -6,8 +6,8 @@ import {
   publishStream,
   reassignStream,
   reportStreamHealth
-} from "../repositories/operations-repository";
-import { listStreams } from "../repositories/streams-repository";
+} from "../repositories/operations-repository.js";
+import { listStreams } from "../repositories/streams-repository.js";
 
 export const StreamService = {
   listStreams(filters?: { matchId?: string }): Stream[] {

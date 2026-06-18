@@ -1,5 +1,5 @@
-import type { EntityId, EntityStatus } from "./naming";
-import type { StreamLifecycleStatus } from "./lifecycle";
+import type { EntityId, EntityStatus } from "./naming.js";
+import type { StreamLifecycleStatus } from "./lifecycle.js";
 
 export type ProviderAuthType = "none" | "basic" | "token";
 

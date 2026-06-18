@@ -1,4 +1,4 @@
-import type { EntityId, EntityStatus } from "./naming";
+import type { EntityId, EntityStatus } from "./naming.js";
 
 export type OperatorRole = "admin" | "operator" | "viewer";
 

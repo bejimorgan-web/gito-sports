@@ -1,6 +1,6 @@
 import type { Sport } from "@gito/shared";
 
-import { createSport, deleteSport, getSportById, listSports, updateSport } from "../repositories/sports-repository";
+import { createSport, deleteSport, getSportById, listSports, updateSport } from "../repositories/sports-repository.js";
 
 export const CatalogService = {
   listSports(): Sport[] {

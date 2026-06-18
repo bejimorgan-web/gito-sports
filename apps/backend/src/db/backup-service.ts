@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { getDatabase } from "./connection";
-import { env, runtimeConfig } from "../config/env";
+import { getDatabase } from "./connection.js";
+import { env, runtimeConfig } from "../config/env.js";
 
 let running = false;
 

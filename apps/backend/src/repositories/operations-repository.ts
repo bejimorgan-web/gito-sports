@@ -10,12 +10,12 @@ import type {
 } from "@gito/shared";
 import { createSlug } from "@gito/shared";
 
-import { getDatabase } from "../db/connection";
-import { logOperationalEvent, shouldLogOperationalEvent } from "./operational-log-repository";
-import { updateProviderHealth } from "./provider-repository";
-import { validateHttpStreamUrl } from "../services/url-validation";
-import { assertMatchTransition, assertStreamTransition, WorkflowStateError } from "../services/workflow-state";
-import { EventBus } from "../events/event-bus";
+import { getDatabase } from "../db/connection.js";
+import { logOperationalEvent, shouldLogOperationalEvent } from "./operational-log-repository.js";
+import { updateProviderHealth } from "./provider-repository.js";
+import { validateHttpStreamUrl } from "../services/url-validation.js";
+import { assertMatchTransition, assertStreamTransition, WorkflowStateError } from "../services/workflow-state.js";
+import { EventBus } from "../events/event-bus.js";
 
 function now() {
   return new Date().toISOString();

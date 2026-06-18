@@ -1,4 +1,4 @@
-import { getDatabase } from "../db/connection";
+import { getDatabase } from "../db/connection.js";
 import type { Competition, Country, Team } from "@gito/shared";
 
 interface CountryRow {

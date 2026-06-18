@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
 
 import type { Match } from "@gito/shared";
-import { getDatabase } from "../db/connection";
-import { getTeamById } from "./teams-repository";
-import { getCompetitionById } from "./competitions-repository";
+import { getDatabase } from "../db/connection.js";
+import { getTeamById } from "./teams-repository.js";
+import { getCompetitionById } from "./competitions-repository.js";
 
 function mapMatchRow(row: any): Match {
   const home = getTeamById(row.home_team_id);
