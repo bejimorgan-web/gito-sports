@@ -7,13 +7,9 @@ import multer from "multer";
 import { env } from "../config/env.js";
 
 const uploadsRouter = express.Router();
-const uploadDirectory =
-  process.env.UPLOAD_DIR ??
-  (path.dirname(env.databasePath).startsWith("/data")
-    ? path.join("/tmp", "uploads")
-    : path.join(path.dirname(env.databasePath), "uploads"));
+const uploadDirectory = process.env.UPLOAD_DIR ?? path.join("/tmp", "uploads");
 fs.mkdirSync(uploadDirectory, { recursive: true });
-const debugLog = path.join(uploadDirectory, 'upload-debug.log');
+const debugLog = path.join(uploadDirectory, "upload-debug.log");
 function writeDebug(...parts: any[]) {
   try {
     const line = `[${new Date().toISOString()}] ` + parts.map((p) => (typeof p === 'string' ? p : JSON.stringify(p))).join(' ');

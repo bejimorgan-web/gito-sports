@@ -1,5 +1,5 @@
 import sqlite3
-db='apps/backend/data/gito.sqlite'
+db='/tmp/gito.sqlite'
 con=sqlite3.connect(db)
 cur=con.cursor()
 print('PRAGMA table_info(sports):')

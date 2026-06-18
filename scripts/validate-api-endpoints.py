@@ -8,7 +8,7 @@ import sqlite3
 import json
 from datetime import datetime
 
-PRODUCTION_DB = "data/gito.sqlite"
+PRODUCTION_DB = "/tmp/gito.sqlite"
 
 def log(msg: str):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

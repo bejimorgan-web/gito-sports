@@ -13,12 +13,12 @@ const port = Number(process.env.PORT ?? 4100);
 const canonicalDatabasePath = path.resolve(workspaceRoot, "data", "gito.sqlite");
 
 // For Render compatibility prefer explicit DATABASE_PATH or the platform writable
-// directory `/data/gito.sqlite`. Fall back to workspace `data/gito.sqlite` for
-// local development.
+// directory `/tmp/gito.sqlite`. Fall back to workspace `data/gito.sqlite` for
+// local development when DATABASE_PATH is not provided.
 const resolvedDatabasePath = process.env.DATABASE_PATH
   ? path.resolve(process.env.DATABASE_PATH)
   : process.env.NODE_ENV === "production"
-  ? "/data/gito.sqlite"
+  ? "/tmp/gito.sqlite"
   : canonicalDatabasePath;
 
 const databasePath = resolvedDatabasePath;
@@ -42,7 +42,7 @@ const dbReadOnlyMode = (process.env.DB_READONLY_MODE ?? "false").toLowerCase() =
 // Backup configuration
 const maxBackups = Number(process.env.MAX_BACKUPS ?? 20);
 const maxAgeDays = Number(process.env.MAX_AGE_DAYS ?? 7);
-const backupDir = process.env.BACKUP_DIR ?? "/data/backups";
+const backupDir = process.env.BACKUP_DIR ?? "/tmp/backups";
 const backupIntervalMs = Number(process.env.BACKUP_INTERVAL_MS ?? 15 * 60 * 1000);
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {

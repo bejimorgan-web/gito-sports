@@ -5,7 +5,7 @@ import sys
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 
-db_path = 'data/gito.sqlite'
+db_path = '/tmp/gito.sqlite'
 provider_id = '9fe16532-ac82-4650-9ae7-2dfab9f575f9'
 test_url = f'http://localhost:4100/iptv/providers/{provider_id}/test'
 

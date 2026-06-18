@@ -20,10 +20,10 @@ import os
 import json
 from datetime import datetime
 
-PRODUCTION_DB = "data/gito.sqlite"
-BACKUP_DB = "data/gito-backup-20260601-200650.sqlite"
+PRODUCTION_DB = "/tmp/gito.sqlite"
+BACKUP_DB = "/tmp/gito-backup-20260601-200650.sqlite"
 TIMESTAMP = datetime.now().strftime("%Y%m%d-%H%M%S")
-CORRUPTED_BACKUP = f"data/gito-corrupted-{TIMESTAMP}.sqlite"
+CORRUPTED_BACKUP = f"/tmp/gito-corrupted-{TIMESTAMP}.sqlite"
 
 def log(msg: str):
     """Print timestamped log message"""

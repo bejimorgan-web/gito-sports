@@ -1,14 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { env } from '../config/env.js';
 
 export function validateUploadsAtStartup() {
   try {
-    const uploadDirectory =
-      process.env.UPLOAD_DIR ??
-      (path.dirname(env.databasePath).startsWith("/data")
-        ? path.join("/tmp", "uploads")
-        : path.join(path.dirname(env.databasePath), 'uploads'));
+    const uploadDirectory = process.env.UPLOAD_DIR ?? path.join("/tmp", "uploads");
     fs.mkdirSync(uploadDirectory, { recursive: true });
     if (!fs.existsSync(uploadDirectory)) return;
 
