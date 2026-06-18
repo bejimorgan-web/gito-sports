@@ -27,7 +27,11 @@ import { env } from "./config/env.js";
 export function createApp() {
   const app = express();
 
-  const uploadDirectory = path.join(path.dirname(env.databasePath), "uploads");
+  const uploadDirectory =
+    process.env.UPLOAD_DIR ??
+    (path.dirname(env.databasePath).startsWith("/data")
+      ? path.join("/tmp", "uploads")
+      : path.join(path.dirname(env.databasePath), "uploads"));
   fs.mkdirSync(uploadDirectory, { recursive: true });
 
   app.use(helmet());

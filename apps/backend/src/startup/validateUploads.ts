@@ -4,7 +4,12 @@ import { env } from '../config/env.js';
 
 export function validateUploadsAtStartup() {
   try {
-    const uploadDirectory = path.join(path.dirname(env.databasePath), 'uploads');
+    const uploadDirectory =
+      process.env.UPLOAD_DIR ??
+      (path.dirname(env.databasePath).startsWith("/data")
+        ? path.join("/tmp", "uploads")
+        : path.join(path.dirname(env.databasePath), 'uploads'));
+    fs.mkdirSync(uploadDirectory, { recursive: true });
     if (!fs.existsSync(uploadDirectory)) return;
 
     const files = fs.readdirSync(uploadDirectory).filter(f => /\.(png|jpg|jpeg|gif|webp)$/i.test(f));
