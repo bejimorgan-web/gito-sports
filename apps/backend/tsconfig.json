@@ -4,15 +4,9 @@
     "outDir": "dist",
     "rootDir": "src",
     "types": ["node"],
-    "moduleResolution": "Bundler",
-    "baseUrl": ".",
-    "paths": {
-      "@gito/shared": ["../../packages/shared/src/index.ts"],
-      "@gito/shared/*": ["../../packages/shared/src/*"]
-    }
+    "composite": true,
+    "noEmit": false
   },
   "include": ["src/**/*.ts"],
-  "references": [
-    { "path": "../../packages/shared" }
-  ]
+  "exclude": ["node_modules", "dist"]
 }

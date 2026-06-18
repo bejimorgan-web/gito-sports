@@ -4,20 +4,23 @@
     "lib": ["ES2022", "DOM"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
+
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
+
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
+
     "skipLibCheck": true,
 
-    // ✅ FIX: prevent TS 7+ deprecation crash on Render
-    "ignoreDeprecations": "6.0",
-
+    "baseUrl": ".",
     "paths": {
       "@gito/shared": ["packages/shared/src/index.ts"],
       "@gito/shared/*": ["packages/shared/src/*"]
-    }
+    },
+
+    "ignoreDeprecations": "6.0"
   }
 }
