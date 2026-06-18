@@ -15,6 +15,5 @@ export {
 
 export {
   type Stream,
-  type Channel,
-  type ParsedChannel
+  type Channel
 } from "./streams";
