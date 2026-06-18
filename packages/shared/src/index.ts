@@ -1,19 +1,34 @@
-// packages/shared/src/index.ts
-
+// Core naming helpers
 export * from "./naming";
+
+// Authentication/shared security types
 export * from "./auth";
+
+// Lifecycle state helpers
 export * from "./lifecycle";
+
+// Operations/logging types
 export * from "./operations";
 
-export {
-  type Sport,
-  type Team,
-  type Competition,
-  type Country,
-  type Match
+// Sports types
+export type {
+  Sport,
+  CreateSportRequest,
+  UpdateSportRequest,
+  EntityId,
 } from "./sports";
 
-export {
-  type Stream,
-  type Channel
+// Stream types
+export type {
+  Stream,
+  StreamLifecycleStatus,
+  ParsedChannel,
+  ProviderConnectionTest,
 } from "./streams";
+
+// Match types
+export type {
+  Match,
+  MatchLifecycleStatus,
+  PublishedLiveMatch,
+} from "./matches";
