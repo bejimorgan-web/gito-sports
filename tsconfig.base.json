@@ -2,22 +2,27 @@
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2022"],
-
     "module": "ESNext",
-    "moduleResolution": "Node",
+    "moduleResolution": "Bundler",
 
     "strict": true,
     "skipLibCheck": true,
-
-    "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
 
     "resolveJsonModule": true,
+    "esModuleInterop": true,
 
     "baseUrl": ".",
     "paths": {
       "@gito/shared": ["packages/shared/src/index.ts"],
       "@gito/shared/*": ["packages/shared/src/*"]
-    }
+    },
+
+    "types": ["node"],
+
+    // 👇 THIS FIXES YOUR ERROR
+    "ignoreDeprecations": "6.0"
   }
 }
