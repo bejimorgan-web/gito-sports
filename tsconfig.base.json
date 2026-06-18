@@ -20,9 +20,6 @@
       "@gito/shared/*": ["packages/shared/src/*"]
     },
 
-    "types": ["node"],
-
-    // 👇 THIS FIXES YOUR ERROR
-    "ignoreDeprecations": "6.0"
+    "types": ["node"]
   }
 }
