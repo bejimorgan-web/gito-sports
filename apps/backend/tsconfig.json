@@ -2,30 +2,12 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "../..",
-    "moduleResolution": "Bundler",
-    "baseUrl": "../..",
-    "paths": {
-      "@gito/shared": [
-        "packages/shared/src/index.ts"
-      ],
-      "@gito/shared/*": [
-        "packages/shared/src/*"
-      ]
-    },
-    "types": [
-      "node"
-    ],
-    "skipLibCheck": true,
-    "declaration": false,
-    "sourceMap": true
+    "rootDir": "src",
+    "types": ["node"],
+    "skipLibCheck": true
   },
-  "include": [
-    "src/**/*.ts",
-    "../../packages/shared/src/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules",
-    "dist"
+  "include": ["src/**/*.ts"],
+  "references": [
+    { "path": "../../packages/shared" }
   ]
 }
