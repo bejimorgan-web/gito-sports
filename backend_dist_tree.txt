@@ -1,0 +1,1 @@
+Get-ChildItem -Path dist -Recurse -Force | Select-Object Mode,LastWriteTime,Length,FullName | Out-String
