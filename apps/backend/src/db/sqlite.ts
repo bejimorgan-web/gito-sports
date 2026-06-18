@@ -1,7 +1,11 @@
-import { DatabaseSync as NativeDatabaseSync } from "node:sqlite";
+import Database from "better-sqlite3";
 
 let allowDirectInstantiation = false;
 
+/**
+ * Safe wrapper that controls DB instantiation
+ * so only connection.ts can create the database.
+ */
 export function allowSqliteInstantiation<T>(callback: () => T): T {
   allowDirectInstantiation = true;
 
@@ -12,7 +16,12 @@ export function allowSqliteInstantiation<T>(callback: () => T): T {
   }
 }
 
-export class DatabaseSync extends NativeDatabaseSync {
+/**
+ * Wrapped SQLite database using better-sqlite3
+ */
+export class DatabaseSync {
+  private db: Database;
+
   constructor(path: string) {
     if (!allowDirectInstantiation) {
       throw new Error(
@@ -20,6 +29,24 @@ export class DatabaseSync extends NativeDatabaseSync {
       );
     }
 
-    super(path);
+    this.db = new Database(path);
+  }
+
+  // --- OPTIONAL SAFE WRAPPERS (add what you need) ---
+
+  prepare(sql: string) {
+    return this.db.prepare(sql);
+  }
+
+  exec(sql: string) {
+    return this.db.exec(sql);
+  }
+
+  transaction<T extends (...args: any[]) => any>(fn: T) {
+    return this.db.transaction(fn as any);
+  }
+
+  close() {
+    return this.db.close();
   }
 }
