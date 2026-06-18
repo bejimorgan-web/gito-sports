@@ -1,0 +1,20 @@
+{
+  "name": "gito-live-sports",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Professional live sports streaming and sports management platform.",
+  "workspaces": [
+    "apps/backend",
+    "apps/desktop",
+    "packages/shared"
+  ],
+  "scripts": {
+    "build": "npm run build -w packages/shared && npm run build -w @gito/backend",
+    "start": "npm run start -w @gito/backend",
+    "typecheck": "npm run typecheck -ws",
+    "lint": "npm run lint -ws"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,27 @@
+name: gito_live_sports_mobile
+description: Viewer-facing mobile live sports experience for GiTO Live Sports.
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_local_notifications: ^12.0.0
+  share_plus: ^4.5.3
+  timezone: ^0.9.4
+  video_player: ^2.7.1
+  wakelock_plus: ^1.6.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/app_logo.png
+    - assets/splash_image.png
