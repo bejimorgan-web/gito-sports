@@ -20,6 +20,7 @@
       "@gito/shared/*": ["packages/shared/src/*"]
     },
 
-    "types": ["node"]
+    "types": ["node"],
+    "ignoreDeprecations": 6.0
   }
 }
