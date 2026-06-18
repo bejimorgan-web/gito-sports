@@ -11,8 +11,10 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
-    "baseUrl": ".",
-    "ignoreDeprecations": "5.0",
+
+    // ✅ FIX: prevent TS 7+ deprecation crash on Render
+    "ignoreDeprecations": "6.0",
+
     "paths": {
       "@gito/shared": ["packages/shared/src/index.ts"],
       "@gito/shared/*": ["packages/shared/src/*"]
