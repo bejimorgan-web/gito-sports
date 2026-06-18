@@ -14,13 +14,6 @@
     "resolveJsonModule": true,
     "esModuleInterop": true,
 
-    "baseUrl": ".",
-    "paths": {
-      "@gito/shared": ["packages/shared/src/index.ts"],
-      "@gito/shared/*": ["packages/shared/src/*"]
-    },
-
-    "types": ["node"],
-    "ignoreDeprecations": 6.0
+    "types": ["node"]
   }
 }

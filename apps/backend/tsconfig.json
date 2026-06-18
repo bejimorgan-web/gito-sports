@@ -17,15 +17,7 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
 
-    "noUncheckedIndexedAccess": true,
-
-    "baseUrl": ".",
-    "paths": {
-      "@gito/shared": ["../../packages/shared/src/index.ts"],
-      "@gito/shared/*": ["../../packages/shared/src/*"]
-    }
-    ,
-    "ignoreDeprecations": 6.0
+    "noUncheckedIndexedAccess": true
   },
   "references": [{ "path": "../../packages/shared" }],
   "include": ["src/**/*.ts"]
