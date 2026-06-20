@@ -93,21 +93,49 @@ router.post('/import/all', (req: Request, res: Response) => {
   const contentLength = req.headers['content-length'];
   const rawBodyLength = reqAny.rawBodyLength;
   const rawBodyHash = reqAny.rawBodyHash;
-  
+
   console.log(`[migration/import/all] RECEIVED:`);
   console.log(`  content-length: ${contentLength}`);
   console.log(`  raw-body-length: ${rawBodyLength}`);
   console.log(`  raw-body-hash: ${rawBodyHash}`);
-  
+
   if (reqAny.rawBody) {
     const preview = reqAny.rawBody.slice(0, 200);
     const suffix = reqAny.rawBody.slice(-200);
     console.log(`  first-200-chars: ${preview}`);
     console.log(`  last-200-chars: ${suffix}`);
   }
-  
+
+  // --- Authentication (route-level, do not rely on upstream req.user) ---
+  const incomingAuthHeader = (req.headers.authorization ?? '').toString();
+  console.log('MIGRATION AUTH HEADER:', incomingAuthHeader || null);
+
+  const token = incomingAuthHeader.startsWith('Bearer ')
+    ? incomingAuthHeader.slice('Bearer '.length)
+    : incomingAuthHeader;
+
+  const isMigrationToken = Boolean(process.env.MIGRATION_IMPORT_TOKEN && token === process.env.MIGRATION_IMPORT_TOKEN);
+
+  let payload: any = null;
+  if (!isMigrationToken && token) {
+    try {
+      payload = verifyAccessToken(token);
+    } catch (err) {
+      console.error('[migration] verifyAccessToken error:', err && (err instanceof Error ? err.message : String(err)));
+      payload = null;
+    }
+  }
+
+  console.log('MIGRATION USER (token payload):', payload ?? null, 'isMigrationToken=', isMigrationToken);
+
+  const allowedByJwt = payload && (payload.role === 'admin' || payload.role === 'operator');
+
+  if (!isMigrationToken && !allowedByJwt) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
   let raw: Record<string, any>;
-  
+
   // Safely parse JSON body with diagnostics
   try {
     if (typeof req.body === 'string') {
@@ -120,7 +148,7 @@ router.post('/import/all', (req: Request, res: Response) => {
     console.error(`[migration/import/all] JSON PARSE ERROR: ${err.message}`);
     console.error(`  raw-body-length: ${rawBodyLength}`);
     console.error(`  content-length: ${contentLength}`);
-    
+
     return res.status(400).json({
       error: 'invalid_json_received',
       message: err.message,
@@ -131,7 +159,7 @@ router.post('/import/all', (req: Request, res: Response) => {
       preview: reqAny.rawBody?.slice(0, 500) || 'N/A',
     });
   }
-  
+
   console.log('RAW_KEYS', Object.keys(raw));
 
   const isExportFormat = raw.tables && typeof raw.tables === 'object';
