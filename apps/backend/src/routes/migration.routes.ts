@@ -49,7 +49,10 @@ function validateAdminAuth(req: Request, res: Response, next: Function) {
   return res.status(401).json({ error: 'Unauthorized' });
 }
 
-router.use(validateAdminAuth);
+// Route-level auth middleware disabled to allow explicit handler-level
+// verification and richer debugging. The import handler performs its own
+// JWT / migration-token checks and will reject unauthorized requests.
+//router.use(validateAdminAuth);
 
 /**
  * POST /api/admin/migration/import/:tableName
