@@ -140,14 +140,9 @@ router.post('/import/all', (req: Request, res: Response) => {
     allowedByJwt,
   });
 
-  // TEMP: return debug info so caller can inspect JWT payload and token matching
-  return res.json({
-    debug: true,
-    payload: payload ?? null,
-    migrationTokenMatch: isMigrationToken,
-    role: payload?.role ?? null,
-    allowed: Boolean(isMigrationToken || allowedByJwt),
-  });
+  if (!isMigrationToken && !allowedByJwt) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
 
   let raw: Record<string, any>;
 
