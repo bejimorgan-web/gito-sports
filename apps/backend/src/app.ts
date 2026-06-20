@@ -67,6 +67,14 @@ export function createApp() {
   );
   app.use("/upload", uploadsRouter);
 
+  app.get("/__debug/migration-auth", (req, res) => {
+    res.json({
+      env_token: process.env.MIGRATION_IMPORT_TOKEN ?? null,
+      auth_header: req.headers.authorization ?? null,
+      node_env: process.env.NODE_ENV,
+    });
+  });
+
   app.use("/auth", authRouter);
   app.use("/health", healthRouter);
   app.use("/system", systemRouter);
