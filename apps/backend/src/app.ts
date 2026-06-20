@@ -48,7 +48,17 @@ export function createApp() {
       }
     })
   );
-  app.use(express.json({ limit: "50mb" }));
+  
+  // JSON middleware with raw body capture for diagnostics
+  app.use(express.json({
+    limit: "50mb",
+    strict: false,
+    verify: (req: any, res: any, buf: Buffer) => {
+      req.rawBody = buf.toString("utf8");
+      req.rawBodyLength = buf.length;
+      req.rawBodyHash = require('crypto').createHash('sha256').update(buf).digest('hex').slice(0, 16);
+    }
+  }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   app.use(
     "/uploads",

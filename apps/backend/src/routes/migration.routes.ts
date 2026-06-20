@@ -85,7 +85,50 @@ function quoteIdent(value: string) {
 }
 
 router.post('/import/all', (req: Request, res: Response) => {
-  const raw = (req.body as Record<string, any>).data ?? req.body;
+  // Log raw request details before processing
+  const reqAny = req as any;
+  const contentLength = req.headers['content-length'];
+  const rawBodyLength = reqAny.rawBodyLength;
+  const rawBodyHash = reqAny.rawBodyHash;
+  
+  console.log(`[migration/import/all] RECEIVED:`);
+  console.log(`  content-length: ${contentLength}`);
+  console.log(`  raw-body-length: ${rawBodyLength}`);
+  console.log(`  raw-body-hash: ${rawBodyHash}`);
+  
+  if (reqAny.rawBody) {
+    const preview = reqAny.rawBody.slice(0, 200);
+    const suffix = reqAny.rawBody.slice(-200);
+    console.log(`  first-200-chars: ${preview}`);
+    console.log(`  last-200-chars: ${suffix}`);
+  }
+  
+  let raw: Record<string, any>;
+  
+  // Safely parse JSON body with diagnostics
+  try {
+    if (typeof req.body === 'string') {
+      raw = JSON.parse(req.body);
+    } else {
+      raw = req.body as Record<string, any>;
+    }
+  } catch (parseErr) {
+    const err = parseErr instanceof Error ? parseErr : new Error(String(parseErr));
+    console.error(`[migration/import/all] JSON PARSE ERROR: ${err.message}`);
+    console.error(`  raw-body-length: ${rawBodyLength}`);
+    console.error(`  content-length: ${contentLength}`);
+    
+    return res.status(400).json({
+      error: 'invalid_json_received',
+      message: err.message,
+      position: (err as any).position || null,
+      length: rawBodyLength,
+      contentLength: contentLength,
+      hash: rawBodyHash,
+      preview: reqAny.rawBody?.slice(0, 500) || 'N/A',
+    });
+  }
+  
   console.log('RAW_KEYS', Object.keys(raw));
 
   const isExportFormat = raw.tables && typeof raw.tables === 'object';
