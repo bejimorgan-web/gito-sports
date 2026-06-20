@@ -11,7 +11,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 function resolveDatabasePath() {
-  const workspaceRoot = path.resolve(__dirname, "..", "..", "..", "..");
+  // scripts/bootstrap-admin.js is located at apps/backend/scripts
+  // climb to the repository root (apps/backend/scripts -> apps/backend -> apps -> <repo-root>)
+  const workspaceRoot = path.resolve(__dirname, "..", "..", "..");
   const canonical = path.join(workspaceRoot, "data", "gito.sqlite");
 
   if (process.env.DATABASE_PATH) {
@@ -43,6 +45,10 @@ function ensureInitialSchema(db) {
   console.log('[bootstrap] Applied initial database schema.');
 }
 function main() {
+  // Resolve and print the database path first so we always know which file is used
+  const dbPath = resolveDatabasePath();
+  console.log('[bootstrap] Using database:', dbPath);
+
   const email = process.env.ADMIN_EMAIL;
   const password = process.env.ADMIN_PASSWORD;
 
@@ -50,8 +56,6 @@ function main() {
     console.error("ADMIN_EMAIL and ADMIN_PASSWORD environment variables must be set.");
     process.exit(1);
   }
-
-  const dbPath = resolveDatabasePath();
 
   if (!fs.existsSync(dbPath)) {
   console.log("DB not found — creating new empty database at:", dbPath);
@@ -61,6 +65,37 @@ function main() {
 
   const db = new Database(dbPath);
   ensureInitialSchema(db);
+
+  // Ensure operator_users table has the expected columns for this bootstrap
+  function ensureOperatorUsersColumns(database) {
+    const required = [
+      { name: 'last_login_at', sql: 'TEXT' },
+      { name: 'password_hash', sql: 'TEXT' },
+      { name: 'password_salt', sql: 'TEXT' },
+      { name: 'password_iterations', sql: 'INTEGER' },
+      { name: 'password_algo', sql: 'TEXT' },
+      { name: 'created_at', sql: 'TEXT' },
+      { name: 'updated_at', sql: 'TEXT' }
+    ];
+
+    const existing = database.prepare("PRAGMA table_info('operator_users')").all() || [];
+    const existingNames = new Set(existing.map(r => r.name));
+
+    for (const col of required) {
+      if (!existingNames.has(col.name)) {
+        try {
+          console.log(`[bootstrap] migrating operator_users: adding column ${col.name}`);
+          database.exec(`ALTER TABLE operator_users ADD COLUMN ${col.name} ${col.sql}`);
+        } catch (err) {
+          console.error('[bootstrap] failed to ALTER TABLE operator_users:', err && err.message ? err.message : err);
+        }
+      }
+    }
+  }
+
+  if (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'operator_users'").get()) {
+    ensureOperatorUsersColumns(db);
+  }
 
   try {
     const row = db.prepare("SELECT COUNT(1) AS count FROM operator_users").get();
