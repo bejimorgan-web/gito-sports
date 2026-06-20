@@ -10,6 +10,8 @@ interface AuthenticatedLayoutProps {
   liveMode: boolean;
   onNavigate: (key: NavigationKey) => void;
   activeProvider?: IPTVProvider | undefined;
+  currentEmail?: string | null;
+  onLogout?: () => void;
 }
 
 export function AuthenticatedLayout({
@@ -17,7 +19,9 @@ export function AuthenticatedLayout({
   children,
   liveMode,
   onNavigate,
-  activeProvider
+  activeProvider,
+  currentEmail,
+  onLogout
 }: AuthenticatedLayoutProps) {
   return (
     <main className={liveMode ? "app-shell live-mode-shell" : "app-shell"}>
@@ -44,8 +48,17 @@ export function AuthenticatedLayout({
           </>
         ) : null}
         <div className="operator-card">
-          <span>Signed in</span>
-          <strong>Local Operator</strong>
+          <span>Signed in as</span>
+          <strong>{currentEmail || "Local Operator"}</strong>
+          {onLogout && (
+            <button 
+              onClick={onLogout}
+              className="logout-button"
+              title="Sign out"
+            >
+              Sign Out
+            </button>
+          )}
         </div>
       </aside>
       <section className="workspace">{children}</section>

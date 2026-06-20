@@ -3,6 +3,20 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "outDir": "dist",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@gito/shared": [
+        "../shared/src/index.ts"
+      ],
+      "@gito/shared/*": [
+        "../shared/src/*"
+      ]
+    },
     "types": [
       "node",
       "vite/client"

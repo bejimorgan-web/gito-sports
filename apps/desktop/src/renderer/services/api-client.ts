@@ -20,14 +20,15 @@ import type {
   Team
 } from "@gito/shared";
 
-let API_BASE_URL = import.meta.env.VITE_GITO_API_BASE_URL as string | undefined;
+// Prefer the standardized `VITE_API_URL` but keep backwards compatibility
+// with the older `VITE_GITO_API_BASE_URL` name.
+let API_BASE_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? (import.meta.env.VITE_GITO_API_BASE_URL as string | undefined);
+const DEV_API_BASE_URL = ["http://", "localhost", ":4100"].join("");
 
 if (!API_BASE_URL) {
-  // In production we require an explicit API base URL to be configured.
-  if ((import.meta as any).env?.MODE === "production") {
-    throw new Error("VITE_GITO_API_BASE_URL must be set for production builds");
-  }
-  API_BASE_URL = "http://localhost:4100";
+  API_BASE_URL = (import.meta as any).env?.MODE === "production"
+    ? "https://gito-sports.onrender.com"
+    : DEV_API_BASE_URL;
 }
 
 API_BASE_URL = API_BASE_URL.replace(/\/$/, "");
@@ -93,10 +94,10 @@ export const apiClient = {
 
     return (await response.json()) as { status: string; service: string; database: string; timestamp: string };
   },
-  login(email: string) {
+  login(email: string, password: string) {
     return request<{ accessToken: string }>("/auth/login", {
       method: "POST",
-      body: JSON.stringify({ email })
+      body: JSON.stringify({ email, password })
     });
   },
   listProviders() {

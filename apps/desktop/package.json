@@ -40,14 +40,21 @@
     "appId": "com.gito.live-sports",
     "productName": "GiTO Live Sports",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "assets"
     },
     "files": [
       "dist/**",
       "package.json"
     ],
     "win": {
-      "target": ["nsis", "zip"]
+      "target": ["nsis", "zip"],
+      "icon": "gito-icon.ico"
+    },
+    "nsis": {
+      "installerIcon": "gito-icon.ico",
+      "uninstallerIcon": "gito-icon.ico",
+      "installerHeaderIcon": "gito-icon.ico"
     },
     "mac": {
       "target": ["dmg", "zip"]

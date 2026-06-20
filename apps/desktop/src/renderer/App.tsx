@@ -11,6 +11,7 @@ import { IptvManagementScreen } from "./features/iptv/IptvManagementScreen";
 import { SportsWorkspaceScreen } from "./features/sports/SportsWorkspaceScreen";
 import { StreamPreviewPanel } from "./features/preview/StreamPreviewPanel";
 import { AuthenticatedLayout } from "./layouts/AuthenticatedLayout";
+import { LoginScreen } from "./screens/LoginScreen";
 import { apiClient, API_BASE_URL } from "./services/api-client";
 import type { NavigationKey } from "./types/navigation";
 
@@ -18,6 +19,7 @@ type ProviderList = Awaited<ReturnType<typeof apiClient.listProviders>>;
 type BackendStatus = "online" | "offline" | "reconnecting";
 
 const SESSION_STORAGE_KEY = "gito-live-sports-operator-state";
+const AUTH_STORAGE_KEY = "gito-live-sports-auth";
 
 function isSelectedChannelStillValid(
   selectedChannel: Channel | undefined,
@@ -141,6 +143,11 @@ function renderScreen(
 }
 
 export function App() {
+  // Auth state
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentEmail, setCurrentEmail] = useState<string | null>(null);
+  
+  // Screen state
   const [activeScreen, setActiveScreen] = useState<NavigationKey>("dashboard");
   const [accessToken, setAccessToken] = useState("");
   const [assignment, setAssignment] = useState<MatchAssignmentResult>();
@@ -157,6 +164,54 @@ export function App() {
   const lastHealthReportRef = useRef<{ status: Stream["healthStatus"]; reason?: string; sentAt: number }>();
   const liveModeRef = useRef(liveMode);
   const selectedChannelRef = useRef<Channel>();
+
+  // Restore auth on mount
+  useEffect(() => {
+    try {
+      const storedAuth = window.localStorage.getItem(AUTH_STORAGE_KEY);
+      if (storedAuth) {
+        const auth = JSON.parse(storedAuth) as { email: string; accessToken: string };
+        // Restore session
+        setCurrentEmail(auth.email);
+        setAccessToken(auth.accessToken);
+        setIsAuthenticated(true);
+      }
+    } catch {
+      // Clear invalid auth data
+      window.localStorage.removeItem(AUTH_STORAGE_KEY);
+    }
+  }, []);
+
+  // Handle login
+  const handleLogin = useCallback((email: string, accessToken: string) => {
+    setCurrentEmail(email);
+    setAccessToken(accessToken);
+    setIsAuthenticated(true);
+    // Persist auth session
+    window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ email, accessToken }));
+  }, []);
+
+  // Handle logout
+  const handleLogout = useCallback(() => {
+    setIsAuthenticated(false);
+    setCurrentEmail(null);
+    setAccessToken("");
+    setActiveScreen("dashboard");
+    setAssignment(undefined);
+    setChannels([]);
+    setLiveMatches([]);
+    setProviders([]);
+    setPreviewedChannelId(undefined);
+    setSelectedChannel(undefined);
+    setSelectedMatchId(undefined);
+    window.localStorage.removeItem(AUTH_STORAGE_KEY);
+    window.localStorage.removeItem(SESSION_STORAGE_KEY);
+  }, []);
+
+  // Show login screen if not authenticated
+  if (!isAuthenticated) {
+    return <LoginScreen onLoginSuccess={handleLogin} />;
+  }
 
   const clearPreviewState = useCallback(() => {
     setSelectedChannel(undefined);
@@ -255,15 +310,11 @@ export function App() {
       }
     }
 
-    void apiClient
-      .login("operator@gito.local")
-      .then((session) => setAccessToken(session.accessToken))
-      .then(() => refreshOperations("full"))
-      .catch(() => {
-        setAccessToken("");
-        setBackendStatus("offline");
-      });
-  }, [refreshOperations]);
+    // Only refresh if authenticated with an access token
+    if (accessToken) {
+      void refreshOperations("full");
+    }
+  }, [refreshOperations, accessToken]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -655,6 +706,8 @@ const testProviderById = useCallback(async (providerId: string) => {
       liveMode={liveMode} 
       onNavigate={setActiveScreen}
       activeProvider={selectedChannel ? providers.find((p) => p.id === selectedChannel.providerId) : undefined}
+      currentEmail={currentEmail}
+      onLogout={handleLogout}
     >
       {renderScreen(
         activeScreen,

@@ -28,8 +28,10 @@ function createMainWindow() {
     }
   });
 
-  // Enable DevTools on startup
-  mainWindow.webContents.openDevTools();
+  // Enable DevTools only in development mode
+  if (isDev) {
+    mainWindow.webContents.openDevTools();
+  }
 
   // Capture console messages
   mainWindow.webContents.on("console-message", (level, message, line, sourceId) => {
