@@ -1,6 +1,7 @@
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
+import crypto from "node:crypto";
 
 import { workflowErrorHandler } from "./middleware/workflow-error.js";
 import { authRouter } from "./routes/auth.js";
@@ -57,7 +58,7 @@ export function createApp() {
     verify: (req: any, res: any, buf: Buffer) => {
       req.rawBody = buf.toString("utf8");
       req.rawBodyLength = buf.length;
-      req.rawBodyHash = require('crypto').createHash('sha256').update(buf).digest('hex').slice(0, 16);
+      req.rawBodyHash = crypto.createHash('sha256').update(buf).digest('hex').slice(0, 16);
     }
   }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
