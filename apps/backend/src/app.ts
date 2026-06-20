@@ -22,6 +22,7 @@ import { teamsRouter } from "./routes/teams.js";
 import { streamsRouter } from "./routes/streams.js";
 import { uploadsRouter } from "./routes/uploads.js";
 import { eventsRouter } from "./routes/events.js";
+import { migrationRouter } from "./routes/migration.routes.js";
 import { env } from "./config/env.js";
 
 export function createApp() {
@@ -31,7 +32,22 @@ export function createApp() {
   fs.mkdirSync(uploadDirectory, { recursive: true });
 
   app.use(helmet());
-  app.use(cors());
+  // Configure CORS to allow known frontend origins. The list can be
+  // configured via the CORS_ORIGINS env variable as a comma-separated
+  // list. Defaults include the Render deployment and localhost for dev.
+  const corsOriginsEnv = process.env.CORS_ORIGINS ?? "https://gito-sports.onrender.com,http://localhost:4100,http://127.0.0.1:4100";
+  const allowedOrigins = corsOriginsEnv.split(",").map(s => s.trim()).filter(Boolean);
+
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        // Allow requests with no origin (mobile apps, curl, server-to-server).
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.includes(origin)) return callback(null, true);
+        return callback(new Error(`CORS origin not allowed: ${origin}`));
+      }
+    })
+  );
   app.use(express.json({ limit: "1mb" }));
   app.use(
     "/uploads",
@@ -55,6 +71,7 @@ export function createApp() {
   app.use("/scores", scoresRouter);
   app.use("/iptv", iptvRouter);
   app.use("/streams", streamsRouter);
+  app.use('/api/admin/migration', migrationRouter);
   app.use(workflowErrorHandler);
 
   return app;
