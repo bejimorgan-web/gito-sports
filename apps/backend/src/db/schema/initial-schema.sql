@@ -313,6 +313,11 @@ CREATE TABLE IF NOT EXISTS operator_users (
   role TEXT NOT NULL DEFAULT 'operator',
   status TEXT NOT NULL DEFAULT 'active',
   last_login_at TEXT,
+  -- Password storage (nullable for legacy DBs)
+  password_hash TEXT,
+  password_salt TEXT,
+  password_iterations INTEGER,
+  password_algo TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

@@ -10,6 +10,10 @@ export type {
   Competition,
   Team,
   Match,
+  CompetitionParticipantType,
+  CompetitionScope,
+  CompetitionType,
+  TeamType,
   CreateSportRequest,
   UpdateSportRequest,
   CreateCountryRequest,
@@ -35,6 +39,8 @@ export type {
   IptvProvider,
   Channel,
   ChannelDebug,
+  ChannelListMode,
+  ProviderChannelDiagnostics,
   Stream,
   MatchStream
 } from "./streams.js";

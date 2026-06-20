@@ -429,6 +429,20 @@ function migrateExistingOperationalState(database: DatabaseSync) {
     }
   }
 
+  // Add password columns to operator_users for bootstrapping and password-based auth
+  if (!hasColumn(database, "operator_users", "password_hash")) {
+    database.exec("ALTER TABLE operator_users ADD COLUMN password_hash TEXT;");
+  }
+  if (!hasColumn(database, "operator_users", "password_salt")) {
+    database.exec("ALTER TABLE operator_users ADD COLUMN password_salt TEXT;");
+  }
+  if (!hasColumn(database, "operator_users", "password_iterations")) {
+    database.exec("ALTER TABLE operator_users ADD COLUMN password_iterations INTEGER;");
+  }
+  if (!hasColumn(database, "operator_users", "password_algo")) {
+    database.exec("ALTER TABLE operator_users ADD COLUMN password_algo TEXT;");
+  }
+
   database.exec(`
     CREATE TABLE IF NOT EXISTS sport_countries (
       id TEXT PRIMARY KEY,

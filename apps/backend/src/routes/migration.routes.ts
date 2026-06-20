@@ -52,6 +52,137 @@ router.use(validateAdminAuth);
  * POST /api/admin/migration/import/:tableName
  * Import data into a specific table
  */
+const IMPORT_ORDER = [
+  'sports',
+  'regions',
+  'countries',
+  'sport_countries',
+  'providers',
+  'channels',
+  'competitions',
+  'seasons',
+  'teams',
+  'competition_teams',
+  'matches',
+  'scheduling_matches',
+  'match_streams',
+  'streams',
+  'operator_users',
+  'operator_settings',
+  'auth_sessions',
+  'entity_catalog_mapping',
+  'sport_host_links',
+  'sport_competition_links',
+  'sport_club_links',
+  'sport_national_team_links',
+  'competition_club_links',
+  'competition_national_team_links',
+  'host_competition_links',
+];
+
+function quoteIdent(value: string) {
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+router.post('/import/all', (req: Request, res: Response) => {
+  const raw = (req.body as Record<string, any>).data ?? req.body;
+  console.log('RAW_KEYS', Object.keys(raw));
+
+  const isExportFormat = raw.tables && typeof raw.tables === 'object';
+  const tables = isExportFormat ? raw.tables : raw;
+  const order = Array.isArray(raw.order) ? raw.order : Object.keys(tables);
+
+  console.log('TABLE_KEYS', Object.keys(tables));
+  console.log('ORDER', order);
+
+  if (!tables || typeof tables !== 'object' || Array.isArray(tables)) {
+    return res.status(400).json({
+      error: 'Invalid migration payload',
+      receivedKeys: Object.keys(req.body),
+    });
+  }
+
+  if (!Array.isArray(order)) {
+    return res.status(400).json({
+      error: 'Invalid migration payload',
+      receivedKeys: Object.keys(req.body),
+    });
+  }
+
+  const validTables = new Set(IMPORT_ORDER);
+  const errors: string[] = [];
+  let imported = 0;
+  let totalRows = 0;
+
+  try {
+    const dbPath = process.env.DATABASE_PATH || '/tmp/gito.sqlite';
+    const db = new Database(dbPath);
+    db.pragma('foreign_keys = ON');
+    db.exec('BEGIN');
+
+    try {
+      for (const tableName of order) {
+        if (!validTables.has(tableName)) {
+          errors.push(`Skipped invalid table: ${tableName}`);
+          continue;
+        }
+
+        const rows = tables[tableName] || [];
+        if (!Array.isArray(rows) || rows.length === 0) {
+          continue;
+        }
+
+        totalRows += rows.length;
+        for (const row of rows) {
+          if (!row || typeof row !== 'object' || Array.isArray(row)) {
+            errors.push(`Invalid row data for table ${tableName}`);
+            continue;
+          }
+
+          try {
+            const columns = Object.keys(row);
+            if (columns.length === 0) {
+              continue;
+            }
+
+            const placeholders = columns.map(() => '?').join(',');
+            const quotedColumns = columns.map(quoteIdent).join(',');
+            const values = columns.map(col => row[col]);
+            const quotedTable = quoteIdent(tableName);
+
+            const stmt = db.prepare(`INSERT OR REPLACE INTO ${quotedTable} (${quotedColumns}) VALUES (${placeholders})`);
+            stmt.run(...values);
+            imported++;
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            errors.push(`Table ${tableName}: ${message}`);
+          }
+        }
+      }
+
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+
+    db.close();
+
+    res.json({
+      success: true,
+      imported,
+      totalRows,
+      errors,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({
+      error: 'Import failed',
+      message,
+    });
+  }
+});
+
 router.post('/import/:tableName', (req: Request, res: Response) => {
   const tableName = req.params.tableName ?? "";
   const { rows } = req.body;
@@ -96,19 +227,21 @@ router.post('/import/:tableName', (req: Request, res: Response) => {
   try {
     const dbPath = process.env.DATABASE_PATH || '/tmp/gito.sqlite';
     const db = new Database(dbPath);
+    db.pragma('foreign_keys = ON');
 
     let imported = 0;
     const errors: string[] = [];
 
     for (const row of rows) {
       try {
-        // Build INSERT statement
         const columns = Object.keys(row);
         const placeholders = columns.map(() => '?').join(',');
+        const quotedColumns = columns.map(quoteIdent).join(',');
         const values = columns.map(col => row[col]);
+        const quotedTable = quoteIdent(tableName);
 
         const stmt = db.prepare(
-          `INSERT OR REPLACE INTO ${tableName} (${columns.join(',')}) VALUES (${placeholders})`
+          `INSERT OR REPLACE INTO ${quotedTable} (${quotedColumns}) VALUES (${placeholders})`
         );
 
         stmt.run(...values);
@@ -144,8 +277,13 @@ router.get('/count/:tableName', (req: Request, res: Response) => {
 
   // Validate table name
   const validTables = [
-    'sports', 'providers', 'channels', 'competitions', 'seasons',
-    'teams', 'matches', 'streams', 'operator_users', 'countries',
+    'sports', 'regions', 'countries', 'sport_countries', 'providers',
+    'channels', 'competitions', 'seasons', 'teams', 'competition_teams',
+    'matches', 'scheduling_matches', 'match_streams', 'streams',
+    'operator_users', 'operator_settings', 'auth_sessions',
+    'entity_catalog_mapping', 'sport_host_links', 'sport_competition_links',
+    'sport_club_links', 'sport_national_team_links', 'competition_club_links',
+    'competition_national_team_links', 'host_competition_links',
   ];
 
   if (!validTables.includes(tableName)) {
@@ -156,8 +294,9 @@ router.get('/count/:tableName', (req: Request, res: Response) => {
     const dbPath = process.env.DATABASE_PATH || '/tmp/gito.sqlite';
     const db = new Database(dbPath);
 
+    const quotedTable = quoteIdent(tableName);
     const { count: total } = db
-      .prepare(`SELECT COUNT(*) as count FROM ${tableName}`)
+      .prepare(`SELECT COUNT(*) as count FROM ${quotedTable}`)
       .get() as { count: number };
 
     db.close();
