@@ -1,0 +1,23 @@
+{
+  "tables": {
+    "operator_users": [
+      {
+        "id": "c4bbff0b-908f-4dc3-98d3-e204366465ab",
+        "name": "Administrator",
+        "email": "local-admin@example.test",
+        "role": "admin",
+        "status": "active",
+        "last_login_at": null,
+        "created_at": "2026-06-20T20:27:34.695Z",
+        "updated_at": "2026-06-20T20:27:34.695Z",
+        "password_hash": "3523edceb92f77188afa466761310a95264f0781a7f5b2542028cfe0a8cb5f84",
+        "password_salt": "1ce916a5c5b2b097347feb9a88691613",
+        "password_iterations": 310000,
+        "password_algo": "pbkdf2_sha256"
+      }
+    ]
+  },
+  "order": [
+    "operator_users"
+  ]
+}
