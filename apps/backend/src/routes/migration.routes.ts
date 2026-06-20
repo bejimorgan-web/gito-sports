@@ -129,10 +129,22 @@ router.post('/import/all', (req: Request, res: Response) => {
   console.log('MIGRATION USER (token payload):', payload ?? null, 'isMigrationToken=', isMigrationToken);
 
   const allowedByJwt = payload && (payload.role === 'admin' || payload.role === 'operator');
+  // Debug: dump auth state and decision branches
+  console.log('DEBUG_AUTH_STATE:', {
+    isMigrationToken,
+    payload: payload ?? null,
+    role: payload?.role ?? null,
+    allowedByJwt,
+  });
 
-  if (!isMigrationToken && !allowedByJwt) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  // TEMP: return debug info so caller can inspect JWT payload and token matching
+  return res.json({
+    debug: true,
+    payload: payload ?? null,
+    migrationTokenMatch: isMigrationToken,
+    role: payload?.role ?? null,
+    allowed: Boolean(isMigrationToken || allowedByJwt),
+  });
 
   let raw: Record<string, any>;
 
@@ -144,15 +156,15 @@ router.post('/import/all', (req: Request, res: Response) => {
       raw = req.body as Record<string, any>;
     }
   } catch (parseErr) {
-    const err = parseErr instanceof Error ? parseErr : new Error(String(parseErr));
-    console.error(`[migration/import/all] JSON PARSE ERROR: ${err.message}`);
+    const message = String(parseErr);
+    console.error(`[migration/import/all] JSON PARSE ERROR: ${message}`);
     console.error(`  raw-body-length: ${rawBodyLength}`);
     console.error(`  content-length: ${contentLength}`);
 
     return res.status(400).json({
       error: 'invalid_json_received',
-      message: err.message,
-      position: (err as any).position || null,
+      message,
+      position: (parseErr as any)?.position || null,
       length: rawBodyLength,
       contentLength: contentLength,
       hash: rawBodyHash,
@@ -228,7 +240,7 @@ router.post('/import/all', (req: Request, res: Response) => {
             stmt.run(...values);
             imported++;
           } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
+            const message = String(err);
             errors.push(`Table ${tableName}: ${message}`);
           }
         }
@@ -249,7 +261,7 @@ router.post('/import/all', (req: Request, res: Response) => {
       errors,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = String(err);
     res.status(500).json({
       error: 'Import failed',
       message,
