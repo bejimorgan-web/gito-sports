@@ -18,6 +18,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Middleware: Validate admin authentication (JWT OR migration token)
 function validateAdminAuth(req: Request, res: Response, next: Function) {
+  console.log('MIGRATION AUTH HEADER:', req.headers.authorization);
+  console.log('MIGRATION USER BEFORE AUTH:', (req as any).user);
+
   const authHeader = req.headers.authorization;
   
   if (!authHeader) {

@@ -31,6 +31,7 @@ export function createApp() {
   const uploadDirectory = process.env.UPLOAD_DIR ?? path.join("/tmp", "uploads");
   fs.mkdirSync(uploadDirectory, { recursive: true });
 
+  app.set("trust proxy", true);
   app.use(helmet());
   // Configure CORS to allow known frontend origins. The list can be
   // configured via the CORS_ORIGINS env variable as a comma-separated
