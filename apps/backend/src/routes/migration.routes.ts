@@ -11,23 +11,42 @@ import { Router, Request, Response } from 'express';
 import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { verifyAccessToken } from '../services/jwt.js';
 
 const router = Router();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Middleware: Validate admin token
-function validateAdminToken(req: Request, res: Response, next: Function) {
-  const token = req.headers.authorization?.replace('Bearer ', '');
-  const expectedToken = process.env.MIGRATION_IMPORT_TOKEN;
-
-  if (!token || token !== expectedToken) {
+// Middleware: Validate admin authentication (JWT OR migration token)
+function validateAdminAuth(req: Request, res: Response, next: Function) {
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  next();
+  const token = authHeader.replace('Bearer ', '');
+
+  // Try JWT first
+  const payload = verifyAccessToken(token);
+  if (payload) {
+    // Valid JWT - check if user is admin
+    if (payload.role === 'admin' || payload.role === 'operator') {
+      (req as any).user = { id: payload.sub, role: payload.role };
+      return next();
+    }
+  }
+
+  // Fall back to migration token if JWT failed
+  const expectedToken = process.env.MIGRATION_IMPORT_TOKEN;
+  if (token === expectedToken && expectedToken) {
+    (req as any).user = { id: 'migration-token', role: 'admin' };
+    return next();
+  }
+
+  return res.status(401).json({ error: 'Unauthorized' });
 }
 
-router.use(validateAdminToken);
+router.use(validateAdminAuth);
 
 /**
  * POST /api/admin/migration/import/:tableName
