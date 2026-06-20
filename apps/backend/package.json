@@ -10,7 +10,7 @@
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
-    "build": "tsc -p tsconfig.json && node --input-type=module -e \"import fs from 'node:fs'; import path from 'node:path'; const sourceDir = path.resolve('src', 'db', 'schema'); const targetDir = path.resolve('dist', 'db', 'schema'); fs.mkdirSync(targetDir, { recursive: true }); for (const file of fs.readdirSync(sourceDir)) { if (file.endsWith('.sql')) { fs.copyFileSync(path.join(sourceDir, file), path.join(targetDir, file)); } }\""
+    "build": "tsc -b tsconfig.json && node --input-type=module -e \"import fs from 'node:fs'; import path from 'node:path'; const sourceDir = path.resolve('src', 'db', 'schema'); const targetDir = path.resolve('dist', 'db', 'schema'); fs.mkdirSync(targetDir, { recursive: true }); for (const file of fs.readdirSync(sourceDir)) { if (file.endsWith('.sql')) { fs.copyFileSync(path.join(sourceDir, file), path.join(targetDir, file)); } }\""
   },
   "dependencies": {
     "@gito/shared": "0.1.0",

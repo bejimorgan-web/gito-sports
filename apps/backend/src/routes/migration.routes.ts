@@ -117,7 +117,7 @@ router.post('/import/all', (req: Request, res: Response) => {
   try {
     const dbPath = process.env.DATABASE_PATH || '/tmp/gito.sqlite';
     const db = new Database(dbPath);
-    db.pragma('foreign_keys = ON');
+    (db as any).pragma('foreign_keys = ON');
     db.exec('BEGIN');
 
     try {
@@ -227,7 +227,7 @@ router.post('/import/:tableName', (req: Request, res: Response) => {
   try {
     const dbPath = process.env.DATABASE_PATH || '/tmp/gito.sqlite';
     const db = new Database(dbPath);
-    db.pragma('foreign_keys = ON');
+    (db as any).pragma('foreign_keys = ON');
 
     let imported = 0;
     const errors: string[] = [];
