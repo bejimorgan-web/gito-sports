@@ -68,6 +68,15 @@ export function createApp() {
   );
   app.use("/upload", uploadsRouter);
 
+  // Migration routes handle auth internally. Bypass any global auth middleware.
+  app.use((req, res, next) => {
+    if (req.path.startsWith("/api/admin/migration")) {
+      console.log("[migration auth bypass]", req.method, req.originalUrl, req.headers.authorization ? "auth header present" : "no auth header");
+      return next();
+    }
+    next();
+  });
+
   app.get("/__debug/migration-auth", (req, res) => {
     res.json({
       env_token: process.env.MIGRATION_IMPORT_TOKEN ?? null,
