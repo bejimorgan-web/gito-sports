@@ -51,6 +51,9 @@ export function createApp() {
     })
   );
   
+  app.use(express.json({ limit: "50mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+
   // JSON middleware with raw body capture for diagnostics
   app.use(express.json({
     limit: "50mb",
@@ -68,6 +71,8 @@ export function createApp() {
     express.static(uploadDirectory)
   );
   app.use("/upload", uploadsRouter);
+
+  app.use("/api/admin/migration", express.json({ limit: "50mb" }));
 
   // Migration routes handle auth internally. Bypass any global auth middleware.
   app.use((req, res, next) => {

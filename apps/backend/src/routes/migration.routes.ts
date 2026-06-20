@@ -146,12 +146,16 @@ router.post('/import/all', (req: Request, res: Response) => {
 
   let raw: Record<string, any>;
 
+  const requestPayload = typeof req.body === 'string'
+    ? JSON.parse(req.body)
+    : req.body;
+
   // Safely parse JSON body with diagnostics
   try {
-    if (typeof req.body === 'string') {
-      raw = JSON.parse(req.body);
+    if (typeof requestPayload === 'string') {
+      raw = JSON.parse(requestPayload);
     } else {
-      raw = req.body as Record<string, any>;
+      raw = requestPayload as Record<string, any>;
     }
   } catch (parseErr) {
     const message = String(parseErr);
