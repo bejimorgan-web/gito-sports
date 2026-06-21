@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "build:electron": "tsc -p tsconfig.json && node ./scripts/align-electron-output.js",
     "build": "vite build && npm run build:electron",
-    "electron:serve": "cross-env-shell \"VITE_DEV_SERVER_URL=http://localhost:4200 wait-on http://localhost:4200 && npx electron .\"",
+    "electron:serve": "node ./scripts/electron-serve.cjs",
     "electron:dev": "concurrently \"npm run dev\" \"npm run electron:serve\"",
     "electron:build": "npm run build && electron-builder",
     "start": "npm run build && npx electron ."
@@ -24,7 +24,7 @@
     "react-dom": "^18.2.0",
     "vite": "^5.1.6"
   },
-  "copyright": "Copyright © 2026 GiTO Live Sports",
+  "copyright": "Copyright \u00c2\u00a9 2026 GiTO Live Sports",
   "devDependencies": {
     "@types/node": "^20.11.30",
     "@types/react": "^18.2.67",
@@ -48,7 +48,10 @@
       "package.json"
     ],
     "win": {
-      "target": ["nsis", "zip"],
+      "target": [
+        "nsis",
+        "zip"
+      ],
       "icon": "gito-icon.ico"
     },
     "nsis": {
@@ -57,10 +60,16 @@
       "installerHeaderIcon": "gito-icon.ico"
     },
     "mac": {
-      "target": ["dmg", "zip"]
+      "target": [
+        "dmg",
+        "zip"
+      ]
     },
     "linux": {
-      "target": ["AppImage", "deb"]
+      "target": [
+        "AppImage",
+        "deb"
+      ]
     }
   }
 }
