@@ -146,16 +146,23 @@ router.post('/import/all', (req: Request, res: Response) => {
 
   let raw: Record<string, any>;
 
+  // Prefer parsed body, but fall back to rawBody if Express did not parse JSON.
   const requestPayload = typeof req.body === 'string'
     ? JSON.parse(req.body)
     : req.body;
 
+  const parsedBody = (requestPayload == null || requestPayload === '')
+    ? reqAny.rawBody && typeof reqAny.rawBody === 'string'
+      ? JSON.parse(reqAny.rawBody)
+      : requestPayload
+    : requestPayload;
+
   // Safely parse JSON body with diagnostics
   try {
-    if (typeof requestPayload === 'string') {
-      raw = JSON.parse(requestPayload);
+    if (typeof parsedBody === 'string') {
+      raw = JSON.parse(parsedBody);
     } else {
-      raw = requestPayload as Record<string, any>;
+      raw = parsedBody as Record<string, any>;
     }
   } catch (parseErr) {
     const message = String(parseErr);
