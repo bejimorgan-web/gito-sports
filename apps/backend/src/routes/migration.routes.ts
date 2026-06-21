@@ -64,20 +64,20 @@ function validateAdminAuth(req: Request, res: Response, next: Function) {
  * Import data into a specific table
  */
 const IMPORT_ORDER = [
-  'sports',
-  'regions',
   'countries',
+  'sports',
   'sport_countries',
   'providers',
-  'channels',
   'competitions',
   'seasons',
   'teams',
-  'competition_teams',
   'matches',
+  'streams',
+  'regions',
+  'channels',
+  'competition_teams',
   'scheduling_matches',
   'match_streams',
-  'streams',
   'operator_users',
   'operator_settings',
   'auth_sessions',
@@ -93,6 +93,25 @@ const IMPORT_ORDER = [
 
 function quoteIdent(value: string) {
   return `"${value.replace(/"/g, '""')}"`;
+}
+
+function getTableColumns(db: any, tableName: string): Set<string> {
+  try {
+    const rows = db.prepare(`PRAGMA table_info(${quoteIdent(tableName)})`).all() as Array<{ name: string }>;
+    return new Set(rows.map(row => row.name));
+  } catch (err) {
+    return new Set();
+  }
+}
+
+function describeFkViolations(rows: Array<Record<string, unknown>>): string[] {
+  return rows.map((row) => {
+    const table = String(row.table ?? 'unknown');
+    const rowid = String(row.rowid ?? 'unknown');
+    const parent = String(row.parent ?? 'unknown');
+    const fkid = String(row.fkid ?? 'unknown');
+    return `FK violation in ${table} rowid ${rowid}: parent=${parent} fkid=${fkid}`;
+  });
 }
 
 router.post('/import/all', (req: Request, res: Response) => {
@@ -226,11 +245,13 @@ router.post('/import/all', (req: Request, res: Response) => {
   try {
     const dbPath = process.env.DATABASE_PATH || '/tmp/gito.sqlite';
     const db = new Database(dbPath);
-    (db as any).pragma('foreign_keys = ON');
+    (db as any).pragma('foreign_keys = OFF');
     db.exec('BEGIN');
 
     try {
-      for (const tableName of order) {
+      const importSequence = IMPORT_ORDER.filter(tableName => Object.prototype.hasOwnProperty.call(tables, tableName));
+
+      for (const tableName of importSequence) {
         if (!validTables.has(tableName)) {
           errors.push(`Skipped invalid table: ${tableName}`);
           continue;
@@ -241,6 +262,12 @@ router.post('/import/all', (req: Request, res: Response) => {
           continue;
         }
 
+        const tableColumns = getTableColumns(db, tableName);
+        if (tableColumns.size === 0) {
+          errors.push(`Table ${tableName}: destination table not found or has no columns`);
+          continue;
+        }
+
         totalRows += rows.length;
         for (const row of rows) {
           if (!row || typeof row !== 'object' || Array.isArray(row)) {
@@ -248,15 +275,17 @@ router.post('/import/all', (req: Request, res: Response) => {
             continue;
           }
 
-          try {
-            const columns = Object.keys(row);
-            if (columns.length === 0) {
-              continue;
-            }
+          const rowColumns = Object.keys(row);
+          const insertColumns = rowColumns.filter(column => tableColumns.has(column));
+          if (insertColumns.length === 0) {
+            errors.push(`Table ${tableName}: skipped row with no valid columns (${JSON.stringify(rowColumns.slice(0, 5))})`);
+            continue;
+          }
 
-            const placeholders = columns.map(() => '?').join(',');
-            const quotedColumns = columns.map(quoteIdent).join(',');
-            const values = columns.map(col => row[col]);
+          try {
+            const placeholders = insertColumns.map(() => '?').join(',');
+            const quotedColumns = insertColumns.map(quoteIdent).join(',');
+            const values = insertColumns.map(col => row[col]);
             const quotedTable = quoteIdent(tableName);
 
             const stmt = db.prepare(`INSERT OR REPLACE INTO ${quotedTable} (${quotedColumns}) VALUES (${placeholders})`);
@@ -270,6 +299,12 @@ router.post('/import/all', (req: Request, res: Response) => {
       }
 
       db.exec('COMMIT');
+      (db as any).pragma('foreign_keys = ON');
+
+      const foreignKeyViolations = db.prepare('PRAGMA foreign_key_check').all() as Array<Record<string, unknown>>;
+      if (Array.isArray(foreignKeyViolations) && foreignKeyViolations.length > 0) {
+        errors.push(...describeFkViolations(foreignKeyViolations));
+      }
     } catch (err) {
       db.exec('ROLLBACK');
       throw err;
@@ -278,13 +313,13 @@ router.post('/import/all', (req: Request, res: Response) => {
     db.close();
 
     res.json({
-      success: true,
+      success: errors.length === 0,
       imported,
       totalRows,
       errors,
     });
   } catch (err) {
-    const message = String(err);
+    const message = formatError(err);
     res.status(500).json({
       error: 'Import failed',
       message,

@@ -60,14 +60,16 @@ export function createApp() {
     limit: "50mb",
     strict: false,
     type: (req) => {
-      const path = (req as any).path ?? req.url ?? "";
+      const request = req as any;
+      const path = request.path ?? request.url ?? "";
       return !path.toString().startsWith("/api/admin/migration") &&
-        (req.headers["content-type"] ?? "").toString().toLowerCase().includes("application/json");
+        (request.headers["content-type"] ?? "").toString().toLowerCase().includes("application/json");
     },
-    verify: (req: any, res: any, buf: Buffer) => {
-      req.rawBody = buf.toString("utf8");
-      req.rawBodyLength = buf.length;
-      req.rawBodyHash = crypto.createHash('sha256').update(buf).digest('hex').slice(0, 16);
+    verify: (req, res, buf: Buffer) => {
+      const request = req as any;
+      request.rawBody = buf.toString("utf8");
+      request.rawBodyLength = buf.length;
+      request.rawBodyHash = crypto.createHash('sha256').update(buf).digest('hex').slice(0, 16);
     }
   }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));

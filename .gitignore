@@ -27,6 +27,7 @@ logs/
 *.exe
 *.zip
 **/backups/
+migration-export.json.gz
 
 # Editor and OS
 .idea/
