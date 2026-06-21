@@ -36,3 +36,4 @@ migration-export.json.gz
 Thumbs.db
 .DS_Store
 
+migration-export.json
