@@ -131,6 +131,16 @@ export function createApp() {
   app.use("/auth", authRouter);
   app.use("/health", healthRouter);
   app.use("/system", systemRouter);
+  // Expose restore audit read-only router (dynamic import)
+  import("./routes/system_restore_audit.js").then((mod) => {
+    try {
+      app.use("/system/restore/audit", mod.restoreAuditRouter);
+    } catch (e) {
+      console.error('[startup] failed to mount restore audit router', e);
+    }
+  }).catch((e) => {
+    console.error('[startup] failed to import restore audit router', e);
+  });
   app.use("/api/events", eventsRouter);
   app.use("/sports", sportsRouter);
   app.use("/countries", countriesRouter);

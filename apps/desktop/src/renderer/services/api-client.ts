@@ -94,6 +94,20 @@ export const apiClient = {
 
     return (await response.json()) as { status: string; service: string; database: string; timestamp: string };
   },
+  async createBackup() {
+    return request<{ backup: { filename: string; size: number; createdAt: string } }>("/system/backup", {
+      method: "POST"
+    });
+  },
+  async listBackups() {
+    return request<{ backups: Array<{ filename: string; size: number; createdAt: string }> }>("/system/backups");
+  },
+  async restoreApply(filename: string, force = false) {
+    return request<{ success: boolean; applied?: boolean; filename?: string; restartRequired?: boolean }>("/system/restore/apply", {
+      method: "POST",
+      body: JSON.stringify({ filename, force })
+    });
+  },
   login(email: string, password: string) {
     return request<{ accessToken: string }>("/auth/login", {
       method: "POST",

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync, allowSqliteInstantiation } from "./sqlite.js";
 
 import { env, runtimeConfig } from "../config/env.js";
+import { listBackups } from "../services/database-backup-service.js";
 import { readInitialSchema } from "./schema.js";
 import { rehydrateSyncStateOnStartup } from "../system/startup.js";
 import { startBackupService } from "../services/database-backup-service.js";
@@ -89,6 +90,50 @@ export function getDatabase(): DatabaseSync {
   console.log(`[startup] ========== DATABASE PERSISTENCE STARTUP ==========`);
   console.log(`[startup] RESOLVED_DATABASE_PATH=${resolvedDatabasePath}`);
   console.log(`[startup] DB_READONLY_MODE=${runtimeConfig.dbReadOnlyMode}`);
+
+  // Auto-restore: If enabled and the DB file is missing or empty, attempt to
+  // restore the latest valid backup before opening the database. This avoids
+  // creating a fresh empty DB that would discard previous data.
+  try {
+    const autoRestore = (process.env.AUTO_RESTORE_BACKUP ?? "false").toLowerCase() === "true";
+    const dbExists = fs.existsSync(resolvedDatabasePath);
+    const dbStat = dbExists ? fs.statSync(resolvedDatabasePath) : null;
+    const dbEmpty = !dbExists || (dbStat && dbStat.size === 0);
+
+    if (autoRestore && dbEmpty) {
+      console.log('[startup] AUTO_RESTORE_BACKUP enabled and DB missing/empty — searching backups');
+      const backups = listBackups();
+      for (const b of backups) {
+        try {
+          const backupPath = path.join(runtimeConfig.backupDir, b.filename);
+          // Synchronously validate backup via PRAGMA integrity_check
+          try {
+            const checkDb = allowSqliteInstantiation(() => new DatabaseSync(`file:${backupPath}?mode=ro`));
+            try {
+              const row = checkDb.prepare("PRAGMA integrity_check").get() as { integrity_check?: string } | undefined;
+              const integrity = String(row?.integrity_check ?? "unknown");
+              if (integrity === "ok") {
+                // Ensure destination dir exists
+                fs.mkdirSync(path.dirname(resolvedDatabasePath), { recursive: true });
+                fs.copyFileSync(backupPath, resolvedDatabasePath);
+                console.log('[startup] restored backup to', resolvedDatabasePath, 'from', backupPath);
+                try { (checkDb as any).close?.(); } catch {}
+                break;
+              }
+            } finally {
+              try { (checkDb as any).close?.(); } catch {}
+            }
+          } catch (err) {
+            console.warn('[startup] failed to open/validate backup', b.filename, err);
+          }
+        } catch (err) {
+          console.warn('[startup] backup validation failed for', b.filename, err);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[startup] auto-restore failed', err);
+  }
 
   const directory = path.dirname(resolvedDatabasePath);
 

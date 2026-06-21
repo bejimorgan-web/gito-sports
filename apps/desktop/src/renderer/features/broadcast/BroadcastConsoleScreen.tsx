@@ -490,9 +490,39 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
           <p className="eyebrow">Broadcast Control</p>
           <h2>{liveMode ? "LIVE MODE" : "Live Operations Console"}</h2>
         </div>
-        <button className="live-mode-toggle" type="button" onClick={() => onSetLiveMode(!liveMode)}>
-          {liveMode ? "Exit Live Mode" : "LIVE MODE"}
-        </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button className="live-mode-toggle" type="button" onClick={() => onSetLiveMode(!liveMode)}>
+            {liveMode ? "Exit Live Mode" : "LIVE MODE"}
+          </button>
+          <button type="button" onClick={async () => {
+            setStatus('Creating backup...');
+            try {
+              const resp = await apiClient.createBackup();
+              setStatus(`Backup created: ${resp.backup.filename}`);
+            } catch (err: any) {
+              setStatus(`Backup failed: ${err?.message ?? String(err)}`);
+            }
+          }}>
+            Create Backup
+          </button>
+          <button type="button" onClick={async () => {
+            setStatus('Restoring latest backup...');
+            try {
+              const list = await apiClient.listBackups();
+              const latest = list.backups?.[0];
+              if (!latest) {
+                setStatus('No backups available');
+                return;
+              }
+              await apiClient.restoreApply(latest.filename, true);
+              setStatus('Restore applied. Restart required.');
+            } catch (err: any) {
+              setStatus(`Restore failed: ${err?.message ?? String(err)}`);
+            }
+          }}>
+            Restore Latest
+          </button>
+        </div>
         <div className="next-action">
           <span>Next action</span>
           <strong>{nextAction.label}</strong>
