@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "build:electron": "tsc -p tsconfig.json && node ./scripts/align-electron-output.js",
     "build": "vite build && npm run build:electron",
-    "electron:serve": "cross-env VITE_DEV_SERVER_URL=http://localhost:4200 wait-on http://localhost:4200 && npx electron .",
+    "electron:serve": "cross-env-shell \"VITE_DEV_SERVER_URL=http://localhost:4200 wait-on http://localhost:4200 && npx electron .\"",
     "electron:dev": "concurrently \"npm run dev\" \"npm run electron:serve\"",
     "electron:build": "npm run build && electron-builder",
     "start": "npm run build && npx electron ."

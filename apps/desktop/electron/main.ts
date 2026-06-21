@@ -4,8 +4,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
-const devServerUrl = process.env.VITE_DEV_SERVER_URL ?? "http://localhost:4200";
-const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
+// Respect the explicit environment-provided dev server URL. Fallback to
+// http://localhost:4200 when not provided.
+const devServerUrl = process.env.VITE_DEV_SERVER_URL ? String(process.env.VITE_DEV_SERVER_URL) : "http://localhost:4200";
+const isDev = typeof process.env.VITE_DEV_SERVER_URL !== "undefined";
+
+// Diagnostic: log which URL Electron will attempt to load in dev.
+console.log("ELECTRON MODE", process.env.NODE_ENV ?? "(unset)");
+console.log("ELECTRON: using VITE_DEV_SERVER_URL=", process.env.VITE_DEV_SERVER_URL ?? "(unset)");
+console.log("ELECTRON: effective devServerUrl=", devServerUrl);
 const productionIndexFile = fileURLToPath(new URL("../index.html", import.meta.url));
 const errorHtml = `data:text/html,<html><body style="font-family:system-ui, sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; background:#1a1a1a; color:#fff;"><div style="max-width:760px; text-align:center;"><h1>Application Load Error</h1><p>The application could not load the frontend content.</p><p>Please ensure the app was built successfully or start the development server.</p><pre style="text-align:left; margin-top:24px; padding:16px; background:#111; color:#f66; border-radius:8px;">${productionIndexFile.replace(/&/g, "%26").replace(/</g, "%3C").replace(/>/g, "%3E")}</pre></div></body></html>`;
 
