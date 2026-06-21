@@ -72,7 +72,10 @@ export function createApp() {
   );
   app.use("/upload", uploadsRouter);
 
-  app.use("/api/admin/migration", express.json({ limit: "50mb" }));
+  app.use(
+    "/api/admin/migration",
+    express.raw({ limit: "50mb", type: "application/json" })
+  );
 
   // Migration routes handle auth internally. Bypass any global auth middleware.
   app.use((req, res, next) => {
@@ -88,6 +91,37 @@ export function createApp() {
       env_token: process.env.MIGRATION_IMPORT_TOKEN ?? null,
       auth_header: req.headers.authorization ?? null,
       node_env: process.env.NODE_ENV,
+    });
+  });
+
+  // Lightweight version & env endpoint to verify deployed code and env vars
+  app.get("/__debug/version", (req, res) => {
+    let commit: string | null = process.env.RENDER_GIT_COMMIT || process.env.DEPLOY_COMMIT || null;
+    try {
+      if (!commit) {
+        const gitHead = path.resolve(process.cwd(), '.git', 'HEAD');
+        if (fs.existsSync(gitHead)) {
+          const head = fs.readFileSync(gitHead, 'utf8').trim();
+          if (head.startsWith('ref:')) {
+            const ref = head.split(' ').pop();
+            const refPath = path.resolve(process.cwd(), '.git', ref ?? '');
+            if (fs.existsSync(refPath)) commit = fs.readFileSync(refPath, 'utf8').trim();
+          } else {
+            commit = head;
+          }
+        }
+      }
+    } catch (e) {
+      // ignore errors reading git information
+    }
+
+    res.json({
+      commit: commit,
+      env_token: process.env.MIGRATION_IMPORT_TOKEN ?? null,
+      database_path: process.env.DATABASE_PATH ?? null,
+      jwt_secret_present: Boolean(process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 24),
+      node_env: process.env.NODE_ENV ?? null,
+      timestamp: new Date().toISOString(),
     });
   });
 
