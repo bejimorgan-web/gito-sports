@@ -11,6 +11,7 @@ import { Router, Request, Response } from 'express';
 import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { gunzipSync } from 'node:zlib';
 import { verifyAccessToken } from '../services/jwt.js';
 
 const router = Router();
@@ -146,38 +147,48 @@ router.post('/import/all', (req: Request, res: Response) => {
 
   let raw: Record<string, any>;
 
-  // Prefer parsed body, but fall back to rawBody if Express did not parse JSON.
-  const requestPayload = typeof req.body === 'string'
-    ? JSON.parse(req.body)
-    : req.body;
+  // Build a raw Buffer from either the parsed body, rawBody capture, or req.body
+  const rawBuffer = Buffer.isBuffer(reqAny.body)
+    ? reqAny.body
+    : typeof reqAny.rawBody === 'string'
+    ? Buffer.from(reqAny.rawBody, 'utf8')
+    : Buffer.from(JSON.stringify(req.body ?? ''), 'utf8');
 
-  const parsedBody = (requestPayload == null || requestPayload === '')
-    ? reqAny.rawBody && typeof reqAny.rawBody === 'string'
-      ? JSON.parse(reqAny.rawBody)
-      : requestPayload
-    : requestPayload;
+  const contentEncoding = (req.headers['content-encoding'] ?? '').toString().toLowerCase();
+  const isGzip = contentEncoding.includes('gzip');
+
+  let jsonText: string;
+  try {
+    jsonText = isGzip ? gunzipSync(rawBuffer).toString('utf8') : rawBuffer.toString('utf8');
+  } catch (err) {
+    console.error('[migration/import/all] DECOMPRESS ERROR:', err instanceof Error ? err.message : String(err));
+    return res.status(400).json({
+      error: 'invalid_compression',
+      message: err instanceof Error ? err.message : String(err),
+      length: rawBuffer.length,
+      contentLength: contentLength,
+      hash: rawBodyHash,
+      preview: rawBuffer.slice(0, 200).toString('utf8'),
+    });
+  }
 
   // Safely parse JSON body with diagnostics
   try {
-    if (typeof parsedBody === 'string') {
-      raw = JSON.parse(parsedBody);
-    } else {
-      raw = parsedBody as Record<string, any>;
-    }
+    raw = JSON.parse(jsonText) as Record<string, any>;
   } catch (parseErr) {
     const message = String(parseErr);
     console.error(`[migration/import/all] JSON PARSE ERROR: ${message}`);
-    console.error(`  raw-body-length: ${rawBodyLength}`);
+    console.error(`  raw-body-length: ${rawBuffer.length}`);
     console.error(`  content-length: ${contentLength}`);
 
     return res.status(400).json({
       error: 'invalid_json_received',
       message,
       position: (parseErr as any)?.position || null,
-      length: rawBodyLength,
+      length: rawBuffer.length,
       contentLength: contentLength,
       hash: rawBodyHash,
-      preview: reqAny.rawBody?.slice(0, 500) || 'N/A',
+      preview: jsonText.slice(0, 500),
     });
   }
 
