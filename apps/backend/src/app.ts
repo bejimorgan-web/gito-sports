@@ -53,16 +53,17 @@ export function createApp() {
 
   app.use(
     "/api/admin/migration",
-    express.raw({ limit: "50mb", type: "application/json" })
+    express.raw({ limit: "50mb", type: () => true })
   );
-  
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
-  // JSON middleware with raw body capture for diagnostics
   app.use(express.json({
     limit: "50mb",
     strict: false,
+    type: (req) => {
+      const path = (req as any).path ?? req.url ?? "";
+      return !path.toString().startsWith("/api/admin/migration") &&
+        (req.headers["content-type"] ?? "").toString().toLowerCase().includes("application/json");
+    },
     verify: (req: any, res: any, buf: Buffer) => {
       req.rawBody = buf.toString("utf8");
       req.rawBodyLength = buf.length;

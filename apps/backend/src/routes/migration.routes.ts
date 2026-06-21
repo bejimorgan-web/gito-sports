@@ -17,6 +17,10 @@ import { verifyAccessToken } from '../services/jwt.js';
 const router = Router();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 // Middleware: Validate admin authentication (JWT OR migration token)
 function validateAdminAuth(req: Request, res: Response, next: Function) {
   console.log('MIGRATION AUTH HEADER:', req.headers.authorization);
@@ -125,7 +129,7 @@ router.post('/import/all', (req: Request, res: Response) => {
     try {
       payload = verifyAccessToken(token);
     } catch (err) {
-      console.error('[migration] verifyAccessToken error:', err && (err instanceof Error ? err.message : String(err)));
+      console.error('[migration] verifyAccessToken error:', formatError(err));
       payload = null;
     }
   }
@@ -150,6 +154,8 @@ router.post('/import/all', (req: Request, res: Response) => {
   // Build a raw Buffer from either the parsed body, rawBody capture, or req.body
   const rawBuffer = Buffer.isBuffer(reqAny.body)
     ? reqAny.body
+    : typeof reqAny.body === 'string'
+    ? Buffer.from(reqAny.body, 'utf8')
     : typeof reqAny.rawBody === 'string'
     ? Buffer.from(reqAny.rawBody, 'utf8')
     : Buffer.from(JSON.stringify(req.body ?? ''), 'utf8');
@@ -158,25 +164,22 @@ router.post('/import/all', (req: Request, res: Response) => {
   const isGzip = contentEncoding.includes('gzip');
 
   let jsonText: string;
-  try {
-    jsonText = isGzip ? gunzipSync(rawBuffer).toString('utf8') : rawBuffer.toString('utf8');
-  } catch (err) {
-    console.error('[migration/import/all] DECOMPRESS ERROR:', err instanceof Error ? err.message : String(err));
-    return res.status(400).json({
-      error: 'invalid_compression',
-      message: err instanceof Error ? err.message : String(err),
-      length: rawBuffer.length,
-      contentLength: contentLength,
-      hash: rawBodyHash,
-      preview: rawBuffer.slice(0, 200).toString('utf8'),
-    });
+  if (isGzip) {
+    try {
+      jsonText = gunzipSync(rawBuffer).toString('utf8');
+    } catch (err) {
+      console.warn('[migration/import/all] gzip decompression failed, falling back to plain JSON parse:', formatError(err));
+      jsonText = rawBuffer.toString('utf8');
+    }
+  } else {
+    jsonText = rawBuffer.toString('utf8');
   }
 
   // Safely parse JSON body with diagnostics
   try {
     raw = JSON.parse(jsonText) as Record<string, any>;
   } catch (parseErr) {
-    const message = String(parseErr);
+    const message = formatError(parseErr);
     console.error(`[migration/import/all] JSON PARSE ERROR: ${message}`);
     console.error(`  raw-body-length: ${rawBuffer.length}`);
     console.error(`  content-length: ${contentLength}`);
@@ -260,7 +263,7 @@ router.post('/import/all', (req: Request, res: Response) => {
             stmt.run(...values);
             imported++;
           } catch (err) {
-            const message = String(err);
+            const message = formatError(err);
             errors.push(`Table ${tableName}: ${message}`);
           }
         }
@@ -366,7 +369,7 @@ router.post('/import/:tableName', (req: Request, res: Response) => {
       total: rows.length,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = formatError(err);
     res.status(500).json({
       error: 'Import failed',
       message,
