@@ -13,6 +13,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { gunzipSync } from 'node:zlib';
 import { verifyAccessToken } from '../services/jwt.js';
+import { env } from '../config/env.js';
 
 const router = Router();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -243,7 +244,7 @@ router.post('/import/all', (req: Request, res: Response) => {
   let totalRows = 0;
 
   try {
-    const dbPath = process.env.DATABASE_PATH || '/tmp/gito.sqlite';
+    const dbPath = env.databasePath || process.env.DATABASE_PATH || '/tmp/gito.sqlite';
     const db = new Database(dbPath);
     (db as any).pragma('foreign_keys = OFF');
     db.exec('BEGIN');
