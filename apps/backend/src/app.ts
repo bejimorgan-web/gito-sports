@@ -23,6 +23,7 @@ import { teamsRouter } from "./routes/teams.js";
 import { streamsRouter } from "./routes/streams.js";
 import { uploadsRouter } from "./routes/uploads.js";
 import { eventsRouter } from "./routes/events.js";
+import { adminRouter } from "./routes/admin.js";
 import { migrationRouter } from "./routes/migration.routes.js";
 import { env } from "./config/env.js";
 
@@ -136,6 +137,7 @@ export function createApp() {
   });
 
   app.use("/auth", authRouter);
+  app.use("/api/admin", adminRouter);
   app.use("/health", healthRouter);
   app.use("/system", systemRouter);
   // Expose restore audit read-only router (dynamic import)

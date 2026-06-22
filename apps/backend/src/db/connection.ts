@@ -184,6 +184,12 @@ export function getDatabase(): DatabaseSync {
 
   migrateExistingOperationalState(database);
 
+  try {
+    bootstrapAdminUserIfNeeded(database);
+  } catch (err) {
+    console.error("[AUTH BOOTSTRAP] failed", err);
+  }
+
   // Validate startup and ensure DB is healthy. If validation throws, propagate up.
   validateDatabaseStartup(database, resolvedDatabasePath);
 
@@ -224,6 +230,124 @@ function hasTable(database: DatabaseSync, tableName: string): boolean {
     .get(tableName) as { name: string } | undefined;
 
   return Boolean(row);
+}
+
+function createPasswordHash(password: string) {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const iterations = 310000;
+  const hash = crypto.pbkdf2Sync(password, salt, iterations, 32, "sha256").toString("hex");
+
+  return {
+    hash,
+    salt,
+    iterations,
+    algo: "pbkdf2_sha256"
+  } as const;
+}
+
+export function createAdminOperatorUser(
+  database: DatabaseSync,
+  email: string,
+  password: string,
+  name = "Administrator"
+) {
+  const now = new Date().toISOString();
+  const { hash, salt, iterations, algo } = createPasswordHash(password);
+  const id = crypto.randomUUID();
+
+  database
+    .prepare(
+      `INSERT INTO operator_users (
+        id,
+        name,
+        email,
+        role,
+        status,
+        last_login_at,
+        password_hash,
+        password_salt,
+        password_iterations,
+        password_algo,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(id, name, email, "admin", "active", null, hash, salt, iterations, algo, now, now);
+
+  return { id, email, name, role: "admin", createdAt: now, updatedAt: now };
+}
+
+export function ensureAdminOperatorUser(
+  database: DatabaseSync,
+  email: string,
+  password: string
+) {
+  const countRow = database
+    .prepare("SELECT COUNT(1) AS count FROM operator_users")
+    .get() as { count: number } | undefined;
+
+  const operatorsExisting = Number(countRow?.count ?? 0);
+  const existingUser = database
+    .prepare("SELECT id FROM operator_users WHERE email = ?")
+    .get(email) as { id: string } | undefined;
+
+  if (existingUser) {
+    return { created: false, operatorsExisting, adminEmail: email };
+  }
+
+  createAdminOperatorUser(database, email, password);
+
+  return { created: true, operatorsExisting, adminEmail: email };
+}
+
+export function bootstrapAdminUserIfNeeded(database: DatabaseSync) {
+  if (runtimeConfig.dbReadOnlyMode) {
+    console.warn("[AUTH BOOTSTRAP] skipped due read-only mode");
+    return { operatorsExisting: 0, createdAdmin: false };
+  }
+
+  if (!hasTable(database, "operator_users")) {
+    console.warn("[AUTH BOOTSTRAP] operator_users table missing, skipping bootstrap");
+    return { operatorsExisting: 0, createdAdmin: false };
+  }
+
+  const row = database
+    .prepare("SELECT COUNT(1) AS count FROM operator_users")
+    .get() as { count: number } | undefined;
+  const operatorsExisting = Number(row?.count ?? 0);
+  let createdAdmin = false;
+
+  const adminEmail = env.adminEmail;
+  const adminPassword = env.adminPassword;
+
+  if (operatorsExisting === 0) {
+    if (adminEmail && adminPassword) {
+      ensureAdminOperatorUser(database, adminEmail, adminPassword);
+      createdAdmin = true;
+    } else {
+      console.warn(
+        "[AUTH BOOTSTRAP] operators existing: 0, admin creation skipped because ADMIN_EMAIL and ADMIN_PASSWORD are not both set"
+      );
+    }
+  } else if (adminEmail) {
+    const existingUser = database
+      .prepare("SELECT id FROM operator_users WHERE email = ?")
+      .get(adminEmail) as { id: string } | undefined;
+
+    if (!existingUser) {
+      if (adminPassword) {
+        ensureAdminOperatorUser(database, adminEmail, adminPassword);
+        createdAdmin = true;
+      } else {
+        console.warn("[AUTH BOOTSTRAP] ADMIN_EMAIL is set but ADMIN_PASSWORD is missing; cannot create admin user");
+      }
+    }
+  }
+
+  console.log(`[AUTH BOOTSTRAP] operators existing: ${operatorsExisting}`);
+  console.log(`[AUTH BOOTSTRAP] created admin: ${createdAdmin ? "true" : "false"}`);
+
+  return { operatorsExisting, createdAdmin };
 }
 
 function seedShadowCatalogLayer(database: DatabaseSync) {

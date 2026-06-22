@@ -13,8 +13,11 @@ Required runtime:
 Environment variables:
 
 - `PORT`: backend port. Default: `4100`.
-- `DATABASE_PATH`: SQLite database path. Default: `data/gito.sqlite`.
+- `DATABASE_PATH`: SQLite database path. Default: `data/gito.sqlite` in development. In production, if unset, the backend falls back to `/tmp/gito.sqlite`.
 - `JWT_SECRET`: required in production. Must be unique per deployment and at least 24 characters.
+- `ADMIN_EMAIL`: admin email used to bootstrap the default operator user when `operator_users` is empty.
+- `ADMIN_PASSWORD`: admin password used to bootstrap the default operator user when `operator_users` is empty.
+- `ADMIN_BOOTSTRAP_TOKEN`: token protecting the temporary admin bootstrap endpoint `/api/admin/create-admin`.
 - `NODE_ENV`: set to `production` for production startup validation.
 
 Startup:
@@ -22,7 +25,19 @@ Startup:
 ```bash
 npm install
 npm run build --workspaces --if-present
-NODE_ENV=production JWT_SECRET=<secret> DATABASE_PATH=data/gito.sqlite npm run start -w @gito/backend
+NODE_ENV=production JWT_SECRET=<secret> ADMIN_EMAIL=operator@gito.local ADMIN_PASSWORD=change_me ADMIN_BOOTSTRAP_TOKEN=<token> DATABASE_PATH=/tmp/gito.sqlite npm run start -w @gito/backend
+```
+
+Temporary admin bootstrap endpoint:
+
+- `POST /api/admin/create-admin`
+- Protect with `Authorization: Bearer <ADMIN_BOOTSTRAP_TOKEN>` or `x-admin-bootstrap-token: <ADMIN_BOOTSTRAP_TOKEN>`
+- Uses `ADMIN_EMAIL` and `ADMIN_PASSWORD` from env
+
+Verify migration status after startup:
+
+```bash
+curl -X GET https://gito-sports.onrender.com/api/admin/migration/status
 ```
 
 For a real deployment, run the backend with a supervised process manager or OS service. The backend should be restarted automatically on crash and logs should be retained.

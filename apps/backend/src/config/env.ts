@@ -26,6 +26,9 @@ const jwtSecret = process.env.JWT_SECRET ?? defaultDevelopmentJwtSecret;
 const footballDataApiKey = process.env.FOOTBALL_DATA_API_KEY ?? "";
 const footballDataBaseUrl =
   process.env.FOOTBALL_DATA_BASE_URL ?? "https://api.football-data.org/v4";
+const adminEmail = process.env.ADMIN_EMAIL?.trim() ?? null;
+const adminPassword = process.env.ADMIN_PASSWORD ?? null;
+const adminBootstrapToken = process.env.ADMIN_BOOTSTRAP_TOKEN ?? null;
 
 if (process.env.DATABASE_PATH && !path.isAbsolute(process.env.DATABASE_PATH)) {
   throw new Error(
@@ -70,7 +73,10 @@ export const env = {
   absoluteDatabasePath,
   jwtSecret,
   footballDataApiKey,
-  footballDataBaseUrl
+  footballDataBaseUrl,
+  adminEmail,
+  adminPassword,
+  adminBootstrapToken,
 } as const;
 
 export const runtimeConfig = {
