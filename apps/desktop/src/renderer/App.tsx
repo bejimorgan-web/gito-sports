@@ -695,10 +695,13 @@ const testProviderById = useCallback(async (providerId: string) => {
     ]
   );
 
+  // === RENDER CONDITIONAL CONTENT BASED ON AUTH STATE ===
+  // All hooks are initialized above, so this conditional is safe
   if (!isAuthenticated) {
     return <LoginScreen onLoginSuccess={handleLogin} />;
   }
 
+  // User is authenticated - render the full application
   return (
     <AuthenticatedLayout 
       activeKey={activeScreen} 
