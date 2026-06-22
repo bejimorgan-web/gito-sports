@@ -208,11 +208,6 @@ export function App() {
     window.localStorage.removeItem(SESSION_STORAGE_KEY);
   }, []);
 
-  // Show login screen if not authenticated
-  if (!isAuthenticated) {
-    return <LoginScreen onLoginSuccess={handleLogin} />;
-  }
-
   const clearPreviewState = useCallback(() => {
     setSelectedChannel(undefined);
     setPreviewedChannelId(undefined);
@@ -699,6 +694,10 @@ const testProviderById = useCallback(async (providerId: string) => {
       liveMode
     ]
   );
+
+  if (!isAuthenticated) {
+    return <LoginScreen onLoginSuccess={handleLogin} />;
+  }
 
   return (
     <AuthenticatedLayout 
