@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,6 +30,23 @@ const footballDataBaseUrl =
 const adminEmail = process.env.ADMIN_EMAIL?.trim() ?? null;
 const adminPassword = process.env.ADMIN_PASSWORD ?? null;
 const adminBootstrapToken = process.env.ADMIN_BOOTSTRAP_TOKEN ?? null;
+// Determine migration import file path:
+// 1. If explicitly set via env var, use that
+// 2. In production (dist), look for migration-export.json in dist/migration-export.json
+// 3. In development, look for it in workspace root
+const normalizedMigrationImportFile = process.env.MIGRATION_IMPORT_FILE
+  ? path.resolve(process.env.MIGRATION_IMPORT_FILE)
+  : (() => {
+      // Try dist first (for production builds)
+      const distPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "migration-export.json");
+      if (fs.existsSync(distPath)) {
+        return distPath;
+      }
+      // Fall back to workspace root (for development)
+      return path.join(workspaceRoot, "migration-export.json");
+    })();
+const autoImportMigration = (process.env.AUTO_IMPORT_MIGRATION ?? "false").toLowerCase() === "true";
+const migrationImportToken = process.env.MIGRATION_IMPORT_TOKEN ?? null;
 
 if (process.env.DATABASE_PATH && !path.isAbsolute(process.env.DATABASE_PATH)) {
   throw new Error(
@@ -77,6 +95,8 @@ export const env = {
   adminEmail,
   adminPassword,
   adminBootstrapToken,
+  migrationImportFile: normalizedMigrationImportFile,
+  migrationImportToken,
 } as const;
 
 export const runtimeConfig = {
@@ -84,5 +104,6 @@ export const runtimeConfig = {
   maxBackups,
   maxAgeDays,
   backupDir,
-  backupIntervalMs
+  backupIntervalMs,
+  autoImportMigration,
 };

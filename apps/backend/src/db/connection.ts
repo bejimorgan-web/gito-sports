@@ -10,6 +10,7 @@ import { readInitialSchema } from "./schema.js";
 import { rehydrateSyncStateOnStartup } from "../system/startup.js";
 import { startBackupService } from "../services/database-backup-service.js";
 import { scheduleBackgroundJob } from "../background/backgroundJobRunner.js";
+import { importMigrationFile, isDatabaseCatalogEmpty, isMigrationImported } from "./migration-import.js";
 
 let database: DatabaseSync | null = null;
 const EXPECTED_SCHEMA_VERSION = 1;
@@ -188,6 +189,37 @@ export function getDatabase(): DatabaseSync {
     bootstrapAdminUserIfNeeded(database);
   } catch (err) {
     console.error("[AUTH BOOTSTRAP] failed", err);
+  }
+
+  // Optionally import production seed data from a migration export file when the
+  // database is fresh and auto-import is enabled.
+  if (runtimeConfig.autoImportMigration) {
+    try {
+      const importFile = env.migrationImportFile;
+      if (!fs.existsSync(importFile)) {
+        console.warn("[startup] AUTO_IMPORT_MIGRATION is enabled but import file was not found:", importFile);
+      } else if (isMigrationImported(database)) {
+        console.log("[startup] AUTO_IMPORT_MIGRATION skipped because migration has already been imported");
+      } else if (isDatabaseCatalogEmpty(database)) {
+        console.log("[startup] AUTO_IMPORT_MIGRATION enabled; importing migration file:", importFile);
+        const result = importMigrationFile(database, importFile);
+        console.log("[startup] migration import result:", {
+          imported: result.imported,
+          totalRows: result.totalRows,
+          warnings: result.warnings.length,
+          errors: result.errors.length,
+          alreadyImported: result.alreadyImported ?? false,
+        });
+        if (result.errors.length > 0) {
+          throw new Error(`Migration import completed with ${result.errors.length} errors`);
+        }
+      } else {
+        console.log("[startup] AUTO_IMPORT_MIGRATION skipped because database contains existing catalog data");
+      }
+    } catch (err) {
+      console.error("[startup] migration import failed", err);
+      throw err;
+    }
   }
 
   // Validate startup and ensure DB is healthy. If validation throws, propagate up.

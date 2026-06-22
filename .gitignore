@@ -35,5 +35,3 @@ migration-export.json.gz
 *.swp
 Thumbs.db
 .DS_Store
-
-migration-export.json

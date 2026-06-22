@@ -11,6 +11,7 @@
     "build": "npm run build -w packages/shared && npm run build -w apps/backend",
     "build:clean": "node -e \"const {rmSync}=require('node:fs'); const {join}=require('node:path'); ['packages/shared/dist','packages/shared/tsconfig.tsbuildinfo','apps/backend/dist','apps/backend/tsconfig.tsbuildinfo'].forEach(p => rmSync(join(process.cwd(), p), { force: true, recursive: true }));\" && npm run build",
     "start": "npm run start -w apps/backend",
+    "db:bootstrap": "npm --prefix apps/backend run db:bootstrap",
     "typecheck": "npm run typecheck -ws",
     "lint": "npm run lint -ws"
   },

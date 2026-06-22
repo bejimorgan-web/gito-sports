@@ -14,6 +14,8 @@ import { fileURLToPath } from 'url';
 import { gunzipSync } from 'node:zlib';
 import { verifyAccessToken } from '../services/jwt.js';
 import { env } from '../config/env.js';
+import { getDatabase } from '../db/connection.js';
+import { isMigrationImported, getMigrationMetadata } from '../db/migration-import.js';
 
 const router = Router();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -125,7 +127,9 @@ function describeFkViolations(rows: Array<Record<string, unknown>>): string[] {
   });
 }
 
-router.post('/import/all', (req: Request, res: Response) => {
+router.post('/import', handleImportAll);
+
+function handleImportAll(req: Request, res: Response) {
   // Log raw request details before processing
   const reqAny = req as any;
   const contentLength = req.headers['content-length'];
@@ -373,7 +377,9 @@ router.post('/import/all', (req: Request, res: Response) => {
       message,
     });
   }
-});
+}
+
+router.post('/import/all', handleImportAll);
 
 router.post('/import/:tableName', (req: Request, res: Response) => {
   const tableName = req.params.tableName ?? "";
@@ -511,9 +517,7 @@ router.get('/count/:tableName', (req: Request, res: Response) => {
  */
 router.get('/status', (req: Request, res: Response) => {
   try {
-    const dbPath = env.absoluteDatabasePath;
-    console.log('[migration/status] opening database:', dbPath);
-    const db = new Database(dbPath);
+    const db = getDatabase();
 
     const tables = [
       'sports',
@@ -539,8 +543,6 @@ router.get('/status', (req: Request, res: Response) => {
       }
     }
 
-    db.close();
-
     const critical = {
       sports: (counts.sports ?? 0) > 0,
       providers: (counts.providers ?? 0) > 0,
@@ -548,10 +550,15 @@ router.get('/status', (req: Request, res: Response) => {
       matches: (counts.matches ?? 0) > 0,
     };
 
+    const migrationImported = isMigrationImported(db);
+    const migrationMeta = migrationImported ? getMigrationMetadata(db) : null;
+
     res.json({
       ready: Object.values(critical).every(v => v),
       counts,
       critical,
+      migrationImported,
+      migrationMeta,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
