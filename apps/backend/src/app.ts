@@ -37,15 +37,22 @@ export function createApp() {
   // Configure CORS to allow known frontend origins. The list can be
   // configured via the CORS_ORIGINS env variable as a comma-separated
   // list. Defaults include the Render deployment and localhost for dev.
-  const corsOriginsEnv = process.env.CORS_ORIGINS ?? "https://gito-sports.onrender.com,http://localhost:4100,http://127.0.0.1:4100";
+  const corsOriginsEnv = process.env.CORS_ORIGINS ?? "https://gito-sports.onrender.com,http://localhost:4100,http://127.0.0.1:4100,http://localhost:4200,http://127.0.0.1:4200,http://localhost:4201,http://127.0.0.1:4201";
   const allowedOrigins = corsOriginsEnv.split(",").map(s => s.trim()).filter(Boolean);
+  const localOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+
+  console.log('[startup] CORS allowed origins:', allowedOrigins);
+  console.log('[startup] CORS local origin regex:', localOriginPattern.toString());
 
   app.use(
     cors({
       origin: (origin, callback) => {
         // Allow requests with no origin (mobile apps, curl, server-to-server).
         if (!origin) return callback(null, true);
-        if (allowedOrigins.includes(origin)) return callback(null, true);
+        if (allowedOrigins.includes(origin) || localOriginPattern.test(origin)) {
+          return callback(null, true);
+        }
+        console.warn('[cors] blocked origin', origin);
         return callback(new Error(`CORS origin not allowed: ${origin}`));
       }
     })

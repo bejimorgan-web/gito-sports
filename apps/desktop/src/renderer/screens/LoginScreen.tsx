@@ -34,6 +34,7 @@ export function LoginScreen({ onLoginSuccess, onError }: LoginScreenProps) {
       onLoginSuccess(email, session.accessToken);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Login failed";
+      console.error('[LoginScreen] login error', message, err);
       setError(message);
       onError?.(message);
       setIsLoading(false);

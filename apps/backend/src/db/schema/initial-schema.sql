@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS countries (
   iso3_code TEXT NOT NULL UNIQUE,
   region_id TEXT,
   flag_url TEXT,
+  logo_url TEXT,
   status TEXT NOT NULL DEFAULT 'active',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,

@@ -33,6 +33,8 @@ if (!API_BASE_URL) {
 
 API_BASE_URL = API_BASE_URL.replace(/\/$/, "");
 
+console.log('[api-client] API_BASE_URL=', API_BASE_URL);
+
 export { API_BASE_URL };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -44,11 +46,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers["content-type"] = "application/json";
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    cache: "no-store",
-    headers
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      cache: "no-store",
+      headers
+    });
+  } catch (fetchError) {
+    const message = fetchError instanceof Error ? fetchError.message : String(fetchError);
+    throw new Error(`Network request to ${API_BASE_URL}${path} failed: ${message}`);
+  }
 
   if (!response.ok) {
     let message = `Request failed with status ${response.status}`;

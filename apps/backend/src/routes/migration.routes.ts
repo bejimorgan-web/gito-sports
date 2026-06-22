@@ -64,21 +64,31 @@ function validateAdminAuth(req: Request, res: Response, next: Function) {
  * POST /api/admin/migration/import/:tableName
  * Import data into a specific table
  */
+// FIXED: Correct import order respecting FK constraints
+// Parents must be imported before children:
+// - regions (no deps)
+// - sports (no deps)
+// - countries (FK to regions)
+// - providers (no deps)
+// - competitions (FK to sports, countries, regions)
+// - seasons (FK to competitions)
+// - teams (FK to sports, countries)
+// - etc.
 const IMPORT_ORDER = [
-  'countries',
+  'regions',
   'sports',
+  'countries',
   'sport_countries',
   'providers',
   'competitions',
   'seasons',
   'teams',
-  'matches',
-  'streams',
-  'regions',
-  'channels',
   'competition_teams',
+  'matches',
   'scheduling_matches',
   'match_streams',
+  'streams',
+  'channels',
   'operator_users',
   'operator_settings',
   'auth_sessions',
@@ -219,10 +229,11 @@ router.post('/import/all', (req: Request, res: Response) => {
 
   const isExportFormat = raw.tables && typeof raw.tables === 'object';
   const tables = isExportFormat ? raw.tables : raw;
-  const order = Array.isArray(raw.order) ? raw.order : Object.keys(tables);
+  // FIXED: Use IMPORT_ORDER instead of raw.order for consistency
+  const order = isExportFormat ? IMPORT_ORDER : Object.keys(tables);
 
   console.log('TABLE_KEYS', Object.keys(tables));
-  console.log('ORDER', order);
+  console.log('ORDER (using strict IMPORT_ORDER)', order);
 
   if (!tables || typeof tables !== 'object' || Array.isArray(tables)) {
     return res.status(400).json({
@@ -231,22 +242,22 @@ router.post('/import/all', (req: Request, res: Response) => {
     });
   }
 
-  if (!Array.isArray(order)) {
-    return res.status(400).json({
-      error: 'Invalid migration payload',
-      receivedKeys: Object.keys(req.body),
-    });
-  }
-
   const validTables = new Set(IMPORT_ORDER);
   const errors: string[] = [];
+  const warnings: string[] = [];
   let imported = 0;
   let totalRows = 0;
+  const tableStats: Record<string, { expected: number; imported: number; skipped: number; missingColumns: string[] }> = {};
 
   try {
-    const dbPath = env.databasePath || process.env.DATABASE_PATH || '/tmp/gito.sqlite';
+    const dbPath = env.absoluteDatabasePath;
+    console.log('[migration/import/all] opening database:', dbPath);
     const db = new Database(dbPath);
+    
+    // FIXED: Disable FK checks BEFORE transaction
     (db as any).pragma('foreign_keys = OFF');
+    console.log('[migration/import/all] disabled foreign_keys');
+    
     db.exec('BEGIN');
 
     try {
@@ -260,6 +271,7 @@ router.post('/import/all', (req: Request, res: Response) => {
 
         const rows = tables[tableName] || [];
         if (!Array.isArray(rows) || rows.length === 0) {
+          tableStats[tableName] = { expected: 0, imported: 0, skipped: 0, missingColumns: [] };
           continue;
         }
 
@@ -269,17 +281,29 @@ router.post('/import/all', (req: Request, res: Response) => {
           continue;
         }
 
+        const stats = { expected: rows.length, imported: 0, skipped: 0, missingColumns: new Set<string>() };
         totalRows += rows.length;
+        
         for (const row of rows) {
           if (!row || typeof row !== 'object' || Array.isArray(row)) {
             errors.push(`Invalid row data for table ${tableName}`);
+            stats.skipped++;
             continue;
           }
 
           const rowColumns = Object.keys(row);
           const insertColumns = rowColumns.filter(column => tableColumns.has(column));
+          
+          // FIXED: Track missing columns
+          rowColumns.forEach(col => {
+            if (!tableColumns.has(col)) {
+              stats.missingColumns.add(col);
+            }
+          });
+          
           if (insertColumns.length === 0) {
             errors.push(`Table ${tableName}: skipped row with no valid columns (${JSON.stringify(rowColumns.slice(0, 5))})`);
+            stats.skipped++;
             continue;
           }
 
@@ -292,22 +316,43 @@ router.post('/import/all', (req: Request, res: Response) => {
             const stmt = db.prepare(`INSERT OR REPLACE INTO ${quotedTable} (${quotedColumns}) VALUES (${placeholders})`);
             stmt.run(...values);
             imported++;
+            stats.imported++;
           } catch (err) {
             const message = formatError(err);
             errors.push(`Table ${tableName}: ${message}`);
+            stats.skipped++;
           }
         }
+        
+        tableStats[tableName] = {
+          expected: stats.expected,
+          imported: stats.imported,
+          skipped: stats.skipped,
+          missingColumns: Array.from(stats.missingColumns),
+        };
+        
+        if (stats.missingColumns.size > 0) {
+          warnings.push(`Table ${tableName}: export has columns not in schema: ${Array.from(stats.missingColumns).join(', ')}`);
+        }
+        
+        console.log(`[migration/import/all] ${tableName}: expected=${stats.expected} imported=${stats.imported} skipped=${stats.skipped} missing-cols=[${Array.from(stats.missingColumns).join(',')}]`);
       }
 
       db.exec('COMMIT');
+      
+      // FIXED: Re-enable FK checks AFTER transaction
       (db as any).pragma('foreign_keys = ON');
+      console.log('[migration/import/all] re-enabled foreign_keys');
 
       const foreignKeyViolations = db.prepare('PRAGMA foreign_key_check').all() as Array<Record<string, unknown>>;
       if (Array.isArray(foreignKeyViolations) && foreignKeyViolations.length > 0) {
-        errors.push(...describeFkViolations(foreignKeyViolations));
+        const fkErrors = describeFkViolations(foreignKeyViolations);
+        errors.push(...fkErrors);
+        console.error(`[migration/import/all] FK violations: ${fkErrors.length} errors`);
       }
     } catch (err) {
       db.exec('ROLLBACK');
+      (db as any).pragma('foreign_keys = ON');
       throw err;
     }
 
@@ -317,7 +362,9 @@ router.post('/import/all', (req: Request, res: Response) => {
       success: errors.length === 0,
       imported,
       totalRows,
-      errors,
+      warnings,
+      tableStats,
+      errors: errors.slice(0, 50), // Limit error list to first 50
     });
   } catch (err) {
     const message = formatError(err);
@@ -370,7 +417,8 @@ router.post('/import/:tableName', (req: Request, res: Response) => {
   }
 
   try {
-    const dbPath = process.env.DATABASE_PATH || '/tmp/gito.sqlite';
+    const dbPath = env.absoluteDatabasePath;
+    console.log(`[migration/import/:tableName] opening database: ${dbPath}`);
     const db = new Database(dbPath);
     (db as any).pragma('foreign_keys = ON');
 
@@ -436,7 +484,8 @@ router.get('/count/:tableName', (req: Request, res: Response) => {
   }
 
   try {
-    const dbPath = process.env.DATABASE_PATH || '/tmp/gito.sqlite';
+    const dbPath = env.absoluteDatabasePath;
+    console.log(`[migration/count/:tableName] opening database: ${dbPath}`);
     const db = new Database(dbPath);
 
     const quotedTable = quoteIdent(tableName);
@@ -462,7 +511,8 @@ router.get('/count/:tableName', (req: Request, res: Response) => {
  */
 router.get('/status', (req: Request, res: Response) => {
   try {
-    const dbPath = process.env.DATABASE_PATH || '/tmp/gito.sqlite';
+    const dbPath = env.absoluteDatabasePath;
+    console.log('[migration/status] opening database:', dbPath);
     const db = new Database(dbPath);
 
     const tables = [
