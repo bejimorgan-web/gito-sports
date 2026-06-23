@@ -18,7 +18,8 @@ footballRouter.get("/live", async (_request, response) => {
     response.json({
       data: result.matches,
       meta: {
-        source: result.source,
+        source: result.source === "cache" ? "cache" : "api",
+        count: result.matches.length,
         ageMs: result.ageMs,
         cachedAt: result.cachedAt
       }
@@ -34,7 +35,8 @@ footballRouter.get("/today", async (_request, response) => {
     response.json({
       data: result.matches,
       meta: {
-        source: result.source,
+        source: result.source === "cache" ? "cache" : "api",
+        count: result.matches.length,
         ageMs: result.ageMs,
         cachedAt: result.cachedAt
       }
@@ -50,7 +52,7 @@ footballRouter.get("/upcoming", async (_request, response) => {
     response.json({
       data: result.matches,
       meta: {
-        source: "football-data.org",
+        source: result.source === "cache" ? "cache" : "api",
         count: result.matches.length,
         ageMs: result.ageMs,
         cachedAt: result.cachedAt
