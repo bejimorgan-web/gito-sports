@@ -17,7 +17,7 @@ async function initializeFootballService() {
   console.log('[startup] FOOTBALL INIT: lastFetchTime=' + (status.lastFetchTime ?? 'null'));
   console.log('[startup] FOOTBALL INIT: lastResponseCount=' + status.lastResponseCount);
 
-  if (Array.isArray(status.cacheKeys) && status.cacheKeys.length === 0) {
+  if (!status.cacheInitialized || status.cacheKeys === 0) {
     try {
       await (ScoreService as any).refreshAll();
       const updated = (ScoreService as any).getStatus?.() ?? status;

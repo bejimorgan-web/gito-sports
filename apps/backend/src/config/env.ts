@@ -82,7 +82,7 @@ if (jwtSecret.length < 24) {
   throw new Error("JWT_SECRET must be at least 24 characters long.");
 }
 
-console.log(`FOOTBALL_DATA_API_KEY configured = ${Boolean(footballDataApiKey.trim())}`);
+console.log(`FOOTBALL_API_ENABLED = ${Boolean(footballDataApiKey.trim())}`);
 console.log(`FOOTBALL_DATA_BASE_URL configured = ${Boolean(footballDataBaseUrl.trim())}`);
 
 export const env = {

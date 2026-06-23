@@ -12,17 +12,25 @@ function handleFootballError(error: unknown, response: Response) {
   });
 }
 
+function normalizeResponseSource(source: string) {
+  return ["cache", "stale_cache"].includes(source) ? "cache" : "api";
+}
+
+function buildMeta(source: string, count: number, ageMs?: number, cachedAt?: string) {
+  return {
+    source: normalizeResponseSource(source),
+    count,
+    ageMs: ageMs ?? 0,
+    cachedAt: cachedAt ?? new Date().toISOString()
+  };
+}
+
 footballRouter.get("/live", async (_request, response) => {
   try {
     const result = await ScoreService.listLiveScores();
     response.json({
       data: result.matches,
-      meta: {
-        source: result.source === "cache" ? "cache" : "api",
-        count: result.matches.length,
-        ageMs: result.ageMs,
-        cachedAt: result.cachedAt
-      }
+      meta: buildMeta(result.source, result.matches.length, result.ageMs, result.cachedAt)
     });
   } catch (error) {
     handleFootballError(error, response);
@@ -34,12 +42,7 @@ footballRouter.get("/today", async (_request, response) => {
     const result = await ScoreService.listTodayMatches();
     response.json({
       data: result.matches,
-      meta: {
-        source: result.source === "cache" ? "cache" : "api",
-        count: result.matches.length,
-        ageMs: result.ageMs,
-        cachedAt: result.cachedAt
-      }
+      meta: buildMeta(result.source, result.matches.length, result.ageMs, result.cachedAt)
     });
   } catch (error) {
     handleFootballError(error, response);
@@ -51,12 +54,7 @@ footballRouter.get("/upcoming", async (_request, response) => {
     const result = await ScoreService.listUpcomingMatches();
     response.json({
       data: result.matches,
-      meta: {
-        source: result.source === "cache" ? "cache" : "api",
-        count: result.matches.length,
-        ageMs: result.ageMs,
-        cachedAt: result.cachedAt
-      }
+      meta: buildMeta(result.source, result.matches.length, result.ageMs, result.cachedAt)
     });
   } catch (error) {
     handleFootballError(error, response);

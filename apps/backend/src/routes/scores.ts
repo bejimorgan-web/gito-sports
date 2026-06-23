@@ -12,17 +12,21 @@ function handleScoreError(error: unknown, response: Response) {
   });
 }
 
+function buildScoreMeta(source: string, count: number, ageMs?: number, cachedAt?: string) {
+  return {
+    source: ["cache", "stale_cache"].includes(source) ? "cache" : "api",
+    count,
+    ageMs: ageMs ?? 0,
+    cachedAt: cachedAt ?? new Date().toISOString()
+  };
+}
+
 scoresRouter.get("/live", async (_request, response) => {
   try {
     const result = await ScoreService.listLiveScores();
     response.json({
       data: result.matches,
-      meta: {
-        source: result.source === "cache" ? "cache" : "api",
-        count: result.matches.length,
-        ageMs: result.ageMs,
-        cachedAt: result.cachedAt
-      }
+      meta: buildScoreMeta(result.source, result.matches.length, result.ageMs, result.cachedAt)
     });
   } catch (error) {
     handleScoreError(error, response);
