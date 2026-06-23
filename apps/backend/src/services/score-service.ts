@@ -1,5 +1,6 @@
 import { env } from "../config/env.js";
 import { EventBus } from "../events/event-bus.js";
+import { ApiFootballService } from "./api-football-service.js";
 
 type CacheEntry<T> = {
   expiresAt: number;
@@ -7,11 +8,8 @@ type CacheEntry<T> = {
   value: T;
 };
 
- 
-
-type FootballDataMatch = Record<string, unknown>;
-type FootballDataCompetition = Record<string, unknown>;
-type FootballDataTeam = Record<string, unknown>;
+type ApiFootballFixture = Record<string, unknown>;
+type ApiFootballLeague = Record<string, unknown>;
 
 export type ScoreSource = "live" | "cache" | "stale_cache" | "scheduled";
 
@@ -92,14 +90,6 @@ function formatDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-function buildDateRangePath(dateFrom: string, dateTo: string) {
-  return `/matches?status=SCHEDULED&dateFrom=${encodeURIComponent(dateFrom)}&dateTo=${encodeURIComponent(dateTo)}`;
-}
-
-function buildMatchListPath(dateFrom: string, dateTo: string) {
-  return `/matches?dateFrom=${encodeURIComponent(dateFrom)}&dateTo=${encodeURIComponent(dateTo)}`;
-}
-
 function validateDateString(value: string, name: string) {
   if (!value || typeof value !== "string") {
     throw new Error(`${name} is required and must be a YYYY-MM-DD string.`);
@@ -122,7 +112,18 @@ function validateDateRange(dateFrom: string, dateTo: string) {
 }
 
 function isLiveStatus(status: string | null): boolean {
-  return status !== null && ["LIVE", "IN_PLAY", "PAUSED", "SUSPENDED"].includes(status);
+  return status !== null && [
+    "1H",
+    "2H",
+    "HT",
+    "ET",
+    "BT",
+    "P",
+    "LIVE",
+    "IN_PLAY",
+    "PAUSED",
+    "SUSPENDED"
+  ].includes(status);
 }
 
 function isUtcDateOnDay(utcDate: string | null, date: string): boolean {
@@ -147,7 +148,7 @@ function buildUpcomingCacheKey(dateFrom: string, dateTo: string) {
 }
 
 type FetchMatchesResult = {
-  matches: FootballDataMatch[];
+  matches: ApiFootballFixture[];
   success: boolean;
 };
 
@@ -163,33 +164,23 @@ async function fetchMatchesForRange(dateFrom: string, dateTo: string): Promise<F
     return { matches: [], success: false };
   }
 
-  const path = buildMatchListPath(dateFrom, dateTo);
-  const baseUrl = env.footballDataBaseUrl.replace(/\/$/, "");
-  const url = `${baseUrl}${path}`;
-
-  console.log("FOOTBALL FETCH START");
-  console.log("FOOTBALL REQUEST URL:", url);
-  console.log("FOOTBALL DATE RANGE:", dateFrom, "->", dateTo);
   serviceStatus.lastApiRequestAt = new Date().toISOString();
   serviceStatus.lastApiResponseStatus = null;
   serviceStatus.lastErrorMessage = null;
   serviceStatus.lastCompetitionQueried = null;
 
   try {
-    const payload = await footballDataGet<{ matches?: FootballDataMatch[] }>(path);
-    const rawMatches = payload.matches ?? [];
+    const rawMatches = await ApiFootballService.getFixturesByRange(dateFrom, dateTo);
+    serviceStatus.lastApiResponseStatus = 200;
+    serviceStatus.lastMatchesReceived = rawMatches.length;
+    serviceStatus.lastCompetitionQueried = asString(asRecord(rawMatches[0]?.league).name) ?? null;
     console.log("MATCH COUNT RAW:", rawMatches.length);
-    if (rawMatches.length === 0) {
-      console.log("MATCH COUNT RAW: 0, sample:", JSON.stringify(rawMatches.slice(0, 3)));
-    }
     return { matches: rawMatches, success: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error('[football] fetchMatchesForRange failed:', message);
     serviceStatus.lastErrorMessage = message;
-    if (serviceStatus.lastApiResponseStatus === null) {
-      serviceStatus.lastApiResponseStatus = 502;
-    }
+    serviceStatus.lastApiResponseStatus = (error as any).statusCode ?? 502;
     return { matches: [], success: false };
   }
 }
@@ -422,7 +413,7 @@ const serviceStatus: {
   lastMatchesReceived: number;
   cacheKeys: string[];
 } = {
-  footballApiEnabled: Boolean(env.footballDataApiKey && env.footballDataApiKey.trim()),
+  footballApiEnabled: Boolean(env.apiFootballKey && env.apiFootballKey.trim()),
   cacheInitialized: false,
   lastFetchTime: null,
   lastResponseCount: 0,
@@ -491,25 +482,16 @@ async function refreshAllScores(): Promise<{ liveCount: number; todayCount: numb
 
 async function refreshLiveScores(cacheKey: string, attempt = 1): Promise<void> {
   try {
-    const now = new Date();
-    const fromDate = formatDate(now);
-    const toDate = formatDate(new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000));
-    const fetchResult = await fetchMatchesForRange(fromDate, toDate);
-    if (!fetchResult.success) {
-      console.error('[football] live refresh aborted because fetch failed.');
-      emitScoreEvent("scores:failed", { cacheKey, attempt, error: serviceStatus.lastErrorMessage });
-      return;
-    }
-    const liveMatches = fetchResult.matches
-      .filter((match) => isLiveStatus(asString(match.status) ?? null))
-      .map(normalizeMatch);
+    const rawMatches = await ApiFootballService.getLiveFixtures();
+    serviceStatus.lastApiResponseStatus = 200;
+    serviceStatus.lastMatchesReceived = rawMatches.length;
+    serviceStatus.lastCompetitionQueried = asString(asRecord(rawMatches[0]?.league).name) ?? null;
+    const liveMatches = rawMatches.map(normalizeMatch);
     console.log("MATCH COUNT AFTER FILTER:", liveMatches.length);
     console.log("LIVE COUNT:", liveMatches.length);
     setCached(cacheKey, liveMatches, liveScoresTtlMs);
     serviceStatus.lastFetchTime = new Date().toISOString();
     serviceStatus.lastResponseCount = liveMatches.length;
-    serviceStatus.lastMatchesReceived = fetchResult.matches.length;
-    serviceStatus.lastCompetitionQueried = liveMatches[0]?.competition?.name ?? null;
     serviceStatus.cacheKeys = Array.from(cache.keys());
     emitScoreEvent("scores:updated", { cacheKey, source: "live", count: liveMatches.length, attempt });
     emitScoreEvent("scores:cache:refreshed", { cacheKey, count: liveMatches.length, attempt });
@@ -543,11 +525,11 @@ function normalizeLogoUrl(value: unknown) {
   return raw && /^https?:\/\//.test(raw) ? raw : raw;
 }
 
-function extractTeam(team: FootballDataTeam) {
+function extractTeam(team: Record<string, unknown>) {
   return {
     id: asNumber(team.id)?.toString() ?? asString(team.id),
-    name: asString(team.name) ?? asString(team.shortName) ?? "Team",
-    logoUrl: normalizeLogoUrl(team.crest)
+    name: asString(team.name) ?? "Team",
+    logoUrl: normalizeLogoUrl(team.logo)
   };
 }
 
@@ -561,142 +543,92 @@ function notificationDescriptors(): ScoreEventDescriptor[] {
   ];
 }
 
-function inferMinute(match: FootballDataMatch): number | null {
-  const directMinute = asNumber(match.minute);
-  if (directMinute !== null) {
-    return directMinute;
+function inferMinute(match: ApiFootballFixture): number | null {
+  const fixture = asRecord(match.fixture);
+  const status = asRecord(fixture.status);
+  const elapsed = asNumber(status.elapsed);
+  if (elapsed !== null) {
+    return elapsed;
   }
 
-  const status = asString(match.status);
-  const utcDate = asString(match.utcDate);
+  const utcDate = asString(fixture.date);
+  const statusShort = asString(status.short);
 
-  if (!utcDate || status !== "IN_PLAY" && status !== "PAUSED") {
+  if (!utcDate || statusShort !== "1H" && statusShort !== "2H" && statusShort !== "HT" && statusShort !== "ET" && statusShort !== "BT" && statusShort !== "P") {
     return null;
   }
 
-  const elapsed = Math.floor((Date.now() - Date.parse(utcDate)) / 60_000);
-  if (!Number.isFinite(elapsed) || elapsed < 0) {
+  const minutes = Math.floor((Date.now() - Date.parse(utcDate)) / 60_000);
+  if (!Number.isFinite(minutes) || minutes < 0) {
     return null;
   }
 
-  return Math.min(elapsed, status === "PAUSED" ? 45 : 120);
+  return Math.min(minutes, 120);
 }
 
-function normalizeMatch(match: FootballDataMatch): ScoreMatchSummary {
-  const competition = asRecord(match.competition);
-  const homeTeam = asRecord(match.homeTeam);
-  const awayTeam = asRecord(match.awayTeam);
+function normalizeMatch(match: ApiFootballFixture): ScoreMatchSummary {
+  const fixture = asRecord(match.fixture);
+  const competition = asRecord(match.league);
+  const teams = asRecord(match.teams);
+  const homeTeam = asRecord(teams.home);
+  const awayTeam = asRecord(teams.away);
   const score = asRecord(match.score);
-  const fullTime = asRecord(score.fullTime);
-  const regularTime = asRecord(score.regularTime);
+  const fullTime = asRecord(score.fulltime);
+  const status = asRecord(fixture.status);
+
+  const winner = homeTeam.winner === true ? "home" : awayTeam.winner === true ? "away" : null;
+
+  const goals = asRecord(score.goals);
 
   return {
     id: (asNumber(match.id)?.toString() ?? asString(match.id) ?? "match"),
-    utcDate: asString(match.utcDate),
-    status: asString(match.status) ?? "UNKNOWN",
+    utcDate: asString(fixture.date),
+    status: asString(status.short) ?? asString(status.long) ?? "UNKNOWN",
     minute: inferMinute(match),
     competition: {
       id: asNumber(competition.id)?.toString() ?? asString(competition.id),
       name: asString(competition.name) ?? "Competition",
-      logoUrl: normalizeLogoUrl(competition.emblem)
+      logoUrl: normalizeLogoUrl(competition.logo)
     },
-    homeTeam: extractTeam(homeTeam),
-    awayTeam: extractTeam(awayTeam),
+    homeTeam: {
+      id: asNumber(homeTeam.id)?.toString() ?? asString(homeTeam.id),
+      name: asString(homeTeam.name) ?? "Team",
+      logoUrl: normalizeLogoUrl(homeTeam.logo)
+    },
+    awayTeam: {
+      id: asNumber(awayTeam.id)?.toString() ?? asString(awayTeam.id),
+      name: asString(awayTeam.name) ?? "Team",
+      logoUrl: normalizeLogoUrl(awayTeam.logo)
+    },
     score: {
-      home: asNumber(fullTime.home) ?? asNumber(regularTime.home),
-      away: asNumber(fullTime.away) ?? asNumber(regularTime.away),
-      winner: asString(score.winner)
+      home: asNumber(fullTime.home) ?? asNumber(goals.home) ?? null,
+      away: asNumber(fullTime.away) ?? asNumber(goals.away) ?? null,
+      winner
     },
     events: notificationDescriptors()
   };
 }
 
-function normalizeCompetition(competition: FootballDataCompetition): ScoreCompetitionSummary {
-  const currentSeason = asRecord(competition.currentSeason);
+function normalizeCompetition(competition: ApiFootballLeague): ScoreCompetitionSummary {
+  const league = asRecord(competition.league);
+  const seasons = Array.isArray(competition.seasons) ? competition.seasons : [];
+  const currentSeason = seasons.find((season) => asString(asRecord(season).current) === "true") ?? seasons[0];
+  const currentSeasonRecord = asRecord(currentSeason);
+  const seasonYear = asNumber(currentSeasonRecord.year);
+  const currentSeasonStartDate = seasonYear ? `${seasonYear}-01-01` : null;
+  const currentSeasonEndDate = seasonYear ? `${seasonYear}-12-31` : null;
 
   return {
-    id: (asNumber(competition.id)?.toString() ?? asString(competition.id) ?? "competition"),
-    code: asString(competition.code),
-    name: asString(competition.name) ?? "Competition",
-    type: asString(competition.type),
-    logoUrl: normalizeLogoUrl(competition.emblem),
-    currentSeasonStartDate: asString(currentSeason.startDate),
-    currentSeasonEndDate: asString(currentSeason.endDate)
+    id: asNumber(league.id)?.toString() ?? asString(league.id) ?? "competition",
+    code: null,
+    name: asString(league.name) ?? "Competition",
+    type: asString(league.type),
+    logoUrl: normalizeLogoUrl(league.logo),
+    currentSeasonStartDate,
+    currentSeasonEndDate
   };
 }
 
-async function footballDataGet<T>(path: string): Promise<T> {
-  if (!env.footballDataApiKey) {
-    const err = Object.assign(new Error("FOOTBALL_DATA_API_KEY is not configured."), {
-      statusCode: 503,
-      code: "football_data_api_key_missing"
-    });
-    console.error('[football] missing API key');
-    serviceStatus.lastErrorMessage = err.message;
-    throw err;
-  }
-
-  const baseUrl = env.footballDataBaseUrl.replace(/\/$/, "");
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 6000);
-  serviceStatus.lastApiRequestAt = new Date().toISOString();
-  serviceStatus.lastErrorMessage = null;
-
-  try {
-    const response = await fetch(`${baseUrl}${path}`, {
-      headers: {
-        "X-Auth-Token": env.footballDataApiKey,
-        Accept: "application/json"
-      },
-      signal: controller.signal
-    });
-
-    serviceStatus.lastApiResponseStatus = response.status;
-    console.log('FOOTBALL API STATUS CODE:', response.status);
-
-    if (!response.ok) {
-      const bodyText = await response.text();
-      const snippet = bodyText.slice(0, 200);
-      const message = `Football-Data.org request failed with ${response.status}.`;
-      const err = Object.assign(new Error(message), {
-        statusCode: response.status >= 500 ? 502 : response.status,
-        code: response.status === 429 ? "football_data_rate_limited" : "football_data_request_failed"
-      });
-      console.error('[football] HTTP failure', response.status, response.statusText);
-      console.error('FOOTBALL RAW RESPONSE:', snippet);
-      serviceStatus.lastErrorMessage = snippet || message;
-      throw err;
-    }
-
-    try {
-      return response.json() as Promise<T>;
-    } catch (parseError) {
-      console.error('[football] invalid JSON response');
-      const err = Object.assign(new Error('Football-Data.org returned invalid JSON.'), {
-        statusCode: 502,
-        code: 'football_data_invalid_json'
-      });
-      serviceStatus.lastErrorMessage = err.message;
-      throw err;
-    }
-  } catch (error) {
-    const err = error instanceof Error ? error : new Error(String(error));
-    if ((err as any).name === "AbortError") {
-      const timeoutError = Object.assign(new Error("Football-Data.org request timed out."), {
-        statusCode: 504,
-        code: "football_data_request_timeout"
-      });
-      console.error('[football] request timed out');
-      serviceStatus.lastErrorMessage = timeoutError.message;
-      throw timeoutError;
-    }
-
-    serviceStatus.lastErrorMessage = err.message;
-    throw err;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
 
 export const ScoreService = {
   // Track in-flight background refreshes to avoid duplicate work
@@ -814,9 +746,9 @@ export const ScoreService = {
       if (!this._backgroundRefreshes.has(cacheKey)) {
         const p = (async () => {
           try {
-            const payload = await footballDataGet<{ match?: FootballDataMatch }>(`/matches/${encodeURIComponent(matchId)}`);
-            if (payload.match) {
-              const match = normalizeMatch(payload.match);
+            const fixture = await ApiFootballService.getFixtureDetails(matchId);
+            if (fixture) {
+              const match = normalizeMatch(fixture);
               setCached(cacheKey, match, matchDetailsTtlMs);
             }
           } catch (e) {
@@ -841,9 +773,9 @@ export const ScoreService = {
     if (!this._backgroundRefreshes.has(cacheKey)) {
       const p = (async () => {
         try {
-          const payload = await footballDataGet<{ match?: FootballDataMatch }>(`/matches/${encodeURIComponent(matchId)}`);
-          if (payload.match) {
-            const match = normalizeMatch(payload.match);
+          const fixture = await ApiFootballService.getFixtureDetails(matchId);
+          if (fixture) {
+            const match = normalizeMatch(fixture);
             setCached(cacheKey, match, matchDetailsTtlMs);
           }
         } catch (e) {
@@ -885,8 +817,8 @@ export const ScoreService = {
       return cached;
     }
 
-    const payload = await footballDataGet<{ competitions?: FootballDataCompetition[] }>("/competitions");
-    const competitions = (payload.competitions ?? []).map(normalizeCompetition);
+    const payload = await ApiFootballService.getLeagues(new Date().getFullYear());
+    const competitions = payload.map(normalizeCompetition);
     setCached("scores:competitions", competitions, competitionsTtlMs);
     return competitions;
   }

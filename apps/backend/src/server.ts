@@ -12,7 +12,7 @@ const footballStartupConfig = {
 async function initializeFootballService(attempt = 1) {
   if (attempt === 1) {
     console.log('FOOTBALL STARTUP INIT TRIGGERED');
-    console.log('FOOTBALL API KEY PRESENT =', Boolean(env.footballDataApiKey?.trim()));
+    console.log('API_FOOTBALL_KEY PRESENT =', Boolean(env.apiFootballKey?.trim()));
   }
 
   const status = (ScoreService as any).getStatus?.() ?? {

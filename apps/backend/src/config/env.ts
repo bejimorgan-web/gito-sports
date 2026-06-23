@@ -27,6 +27,8 @@ const jwtSecret = process.env.JWT_SECRET ?? defaultDevelopmentJwtSecret;
 const footballDataApiKey = process.env.FOOTBALL_DATA_API_KEY ?? "";
 const footballDataBaseUrl =
   process.env.FOOTBALL_DATA_BASE_URL ?? "https://api.football-data.org/v4";
+const apiFootballKey = process.env.API_FOOTBALL_KEY ?? "";
+const apiFootballBaseUrl = process.env.API_FOOTBALL_BASE_URL ?? "https://v3.football.api-sports.io";
 const adminEmail = process.env.ADMIN_EMAIL?.trim() ?? null;
 const adminPassword = process.env.ADMIN_PASSWORD ?? null;
 const adminBootstrapToken = process.env.ADMIN_BOOTSTRAP_TOKEN ?? null;
@@ -82,8 +84,10 @@ if (jwtSecret.length < 24) {
   throw new Error("JWT_SECRET must be at least 24 characters long.");
 }
 
-console.log(`FOOTBALL_API_ENABLED = ${Boolean(footballDataApiKey.trim())}`);
+console.log(`FOOTBALL_DATA_API_ENABLED = ${Boolean(footballDataApiKey.trim())}`);
+console.log(`API_FOOTBALL_ENABLED = ${Boolean(apiFootballKey.trim())}`);
 console.log(`FOOTBALL_DATA_BASE_URL configured = ${Boolean(footballDataBaseUrl.trim())}`);
+console.log(`API_FOOTBALL_BASE_URL configured = ${Boolean(apiFootballBaseUrl.trim())}`);
 
 export const env = {
   port,
@@ -92,6 +96,8 @@ export const env = {
   jwtSecret,
   footballDataApiKey,
   footballDataBaseUrl,
+  apiFootballKey,
+  apiFootballBaseUrl,
   adminEmail,
   adminPassword,
   adminBootstrapToken,
