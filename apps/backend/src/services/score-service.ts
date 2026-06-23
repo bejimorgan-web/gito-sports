@@ -7,6 +7,8 @@ type CacheEntry<T> = {
   value: T;
 };
 
+ 
+
 type FootballDataMatch = Record<string, unknown>;
 type FootballDataCompetition = Record<string, unknown>;
 type FootballDataTeam = Record<string, unknown>;
@@ -99,6 +101,10 @@ async function refreshScheduledMatches(cacheKey: string, path: string, attempt =
     const payload = await footballDataGet<{ matches?: FootballDataMatch[] }>(path);
     const matches = (payload.matches ?? []).map(normalizeMatch);
     setCached(cacheKey, matches, scheduledMatchesTtlMs);
+    // update status
+    serviceStatus.lastFetchTime = new Date().toISOString();
+    serviceStatus.lastResponseCount = matches.length;
+    serviceStatus.cacheKeys = Array.from(cache.keys());
     emitScoreEvent("scores:updated", { cacheKey, source: "scheduled", count: matches.length, attempt });
     emitScoreEvent("scores:cache:refreshed", { cacheKey, count: matches.length, attempt });
   } catch (error) {
@@ -234,11 +240,62 @@ function emitScoreEvent(event: "scores:updated" | "scores:cache:refreshed" | "sc
   EventBus.emit(event, payload);
 }
 
+const serviceStatus: {
+  footballApiEnabled: boolean;
+  lastFetchTime: string | null;
+  lastResponseCount: number;
+  cacheKeys: string[];
+} = {
+  footballApiEnabled: Boolean(env.footballDataApiKey && env.footballDataApiKey.trim()),
+  lastFetchTime: null,
+  lastResponseCount: 0,
+  cacheKeys: []
+};
+
+function clearCacheKeys(prefix?: string) {
+  for (const key of Array.from(cache.keys())) {
+    if (!prefix || key.startsWith(prefix)) cache.delete(key);
+  }
+  serviceStatus.cacheKeys = Array.from(cache.keys());
+}
+
+async function refreshAllScores(): Promise<{ liveCount: number; todayCount: number; upcomingCount: number }> {
+  const results = { liveCount: 0, todayCount: 0, upcomingCount: 0 } as any;
+  try {
+    await refreshLiveScores("scores:live");
+    const liveEntry = getCacheEntry<ScoreMatchSummary[]>("scores:live");
+    results.liveCount = liveEntry?.value.length ?? 0;
+  } catch (e) {}
+
+  try {
+    const today = getTodayDateRange();
+    const todayPath = buildDateRangePath(today.dateFrom, today.dateTo);
+    await refreshScheduledMatches(buildScheduleCacheKey(today.dateFrom, today.dateTo), todayPath);
+    const todayEntry = getCacheEntry<ScoreMatchSummary[]>(buildScheduleCacheKey(today.dateFrom, today.dateTo));
+    results.todayCount = todayEntry?.value.length ?? 0;
+  } catch (e) {}
+
+  try {
+    const up = getUpcomingDateRange();
+    const upPath = buildDateRangePath(up.dateFrom, up.dateTo);
+    await refreshScheduledMatches(buildScheduleCacheKey(up.dateFrom, up.dateTo), upPath);
+    const upEntry = getCacheEntry<ScoreMatchSummary[]>(buildScheduleCacheKey(up.dateFrom, up.dateTo));
+    results.upcomingCount = upEntry?.value.length ?? 0;
+  } catch (e) {}
+
+  serviceStatus.cacheKeys = Array.from(cache.keys());
+  return results;
+}
+
 async function refreshLiveScores(cacheKey: string, attempt = 1): Promise<void> {
   try {
     const payload = await footballDataGet<{ matches?: FootballDataMatch[] }>("/matches?status=LIVE");
     const matches = (payload.matches ?? []).map(normalizeMatch);
     setCached(cacheKey, matches, liveScoresTtlMs);
+    // update status
+    serviceStatus.lastFetchTime = new Date().toISOString();
+    serviceStatus.lastResponseCount = matches.length;
+    serviceStatus.cacheKeys = Array.from(cache.keys());
     emitScoreEvent("scores:updated", { cacheKey, source: "live", count: matches.length, attempt });
     emitScoreEvent("scores:cache:refreshed", { cacheKey, count: matches.length, attempt });
   } catch (error) {
@@ -453,7 +510,25 @@ export const ScoreService = {
       };
     }
 
-    // No cache at all: return empty list but note source as 'cache' so UI can render quickly.
+    // No live cache at all: attempt an immediate today scheduled fetch fallback.
+    try {
+      const today = getTodayDateRange();
+      const todayCacheKey = buildScheduleCacheKey(today.dateFrom, today.dateTo);
+      const todayPath = buildDateRangePath(today.dateFrom, today.dateTo);
+      await refreshScheduledMatches(todayCacheKey, todayPath);
+      const scheduled = getCacheEntry<ScoreMatchSummary[]>(todayCacheKey);
+      if (scheduled) {
+        return {
+          matches: scheduled.value,
+          source: "scheduled",
+          ageMs: Date.now() - scheduled.createdAt,
+          cachedAt: new Date(scheduled.createdAt).toISOString()
+        };
+      }
+    } catch (e) {
+      // ignore and fallthrough to empty
+    }
+
     return { matches: [], source: "cache" };
   },
 

@@ -50,12 +50,33 @@ footballRouter.get("/upcoming", async (_request, response) => {
     response.json({
       data: result.matches,
       meta: {
-        source: result.source,
+        source: "football-data.org",
+        count: result.matches.length,
         ageMs: result.ageMs,
         cachedAt: result.cachedAt
       }
     });
   } catch (error) {
     handleFootballError(error, response);
+  }
+});
+
+footballRouter.get("/status", async (_req, res) => {
+  try {
+    const status = (ScoreService as any).getStatus();
+    res.json(status);
+  } catch (error) {
+    handleFootballError(error, res);
+  }
+});
+
+footballRouter.post("/refresh", async (_req, res) => {
+  try {
+    (ScoreService as any).clearCache();
+    const result = await (ScoreService as any).refreshAll();
+    const status = (ScoreService as any).getStatus();
+    res.json({ success: true, refreshed: result, status });
+  } catch (error) {
+    handleFootballError(error, res);
   }
 });
