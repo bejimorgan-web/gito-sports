@@ -101,14 +101,17 @@ async function refreshScheduledMatches(cacheKey: string, path: string, attempt =
     const payload = await footballDataGet<{ matches?: FootballDataMatch[] }>(path);
     const matches = (payload.matches ?? []).map(normalizeMatch);
     setCached(cacheKey, matches, scheduledMatchesTtlMs);
-    // update status
     serviceStatus.lastFetchTime = new Date().toISOString();
     serviceStatus.lastResponseCount = matches.length;
+    serviceStatus.lastMatchesReceived = matches.length;
+    serviceStatus.lastCompetitionQueried = matches[0]?.competition?.name ?? null;
     serviceStatus.cacheKeys = Array.from(cache.keys());
     emitScoreEvent("scores:updated", { cacheKey, source: "scheduled", count: matches.length, attempt });
     emitScoreEvent("scores:cache:refreshed", { cacheKey, count: matches.length, attempt });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    console.error('[football] scheduled refresh failed:', message);
+    serviceStatus.lastErrorMessage = message;
     emitScoreEvent("scores:failed", { cacheKey, attempt, error: message });
     if (attempt < 2) {
       emitScoreEvent("scores:retry", { cacheKey, nextAttempt: attempt + 1 });
@@ -245,12 +248,22 @@ const serviceStatus: {
   cacheInitialized: boolean;
   lastFetchTime: string | null;
   lastResponseCount: number;
+  lastApiRequestAt: string | null;
+  lastApiResponseStatus: number | null;
+  lastErrorMessage: string | null;
+  lastCompetitionQueried: string | null;
+  lastMatchesReceived: number;
   cacheKeys: string[];
 } = {
   footballApiEnabled: Boolean(env.footballDataApiKey && env.footballDataApiKey.trim()),
   cacheInitialized: false,
   lastFetchTime: null,
   lastResponseCount: 0,
+  lastApiRequestAt: null,
+  lastApiResponseStatus: null,
+  lastErrorMessage: null,
+  lastCompetitionQueried: null,
+  lastMatchesReceived: 0,
   cacheKeys: []
 };
 
@@ -263,12 +276,18 @@ function clearCacheKeys(prefix?: string) {
 
 async function refreshAllScores(): Promise<{ liveCount: number; todayCount: number; upcomingCount: number }> {
   serviceStatus.cacheInitialized = true;
+  serviceStatus.lastFetchTime = new Date().toISOString();
   const results = { liveCount: 0, todayCount: 0, upcomingCount: 0 } as any;
+  let totalCount = 0;
+
   try {
     await refreshLiveScores("scores:live");
     const liveEntry = getCacheEntry<ScoreMatchSummary[]>("scores:live");
     results.liveCount = liveEntry?.value.length ?? 0;
-  } catch (e) {}
+    totalCount += results.liveCount;
+  } catch (e) {
+    // live refresh may fail, continue with scheduled refreshes
+  }
 
   try {
     const today = getTodayDateRange();
@@ -276,7 +295,10 @@ async function refreshAllScores(): Promise<{ liveCount: number; todayCount: numb
     await refreshScheduledMatches(buildScheduleCacheKey(today.dateFrom, today.dateTo), todayPath);
     const todayEntry = getCacheEntry<ScoreMatchSummary[]>(buildScheduleCacheKey(today.dateFrom, today.dateTo));
     results.todayCount = todayEntry?.value.length ?? 0;
-  } catch (e) {}
+    totalCount += results.todayCount;
+  } catch (e) {
+    // today refresh may fail, continue
+  }
 
   try {
     const up = getUpcomingDateRange();
@@ -284,25 +306,39 @@ async function refreshAllScores(): Promise<{ liveCount: number; todayCount: numb
     await refreshScheduledMatches(buildScheduleCacheKey(up.dateFrom, up.dateTo), upPath);
     const upEntry = getCacheEntry<ScoreMatchSummary[]>(buildScheduleCacheKey(up.dateFrom, up.dateTo));
     results.upcomingCount = upEntry?.value.length ?? 0;
-  } catch (e) {}
+    totalCount += results.upcomingCount;
+  } catch (e) {
+    // upcoming refresh may fail
+  }
 
+  serviceStatus.lastResponseCount = totalCount;
   serviceStatus.cacheKeys = Array.from(cache.keys());
   return results;
 }
 
 async function refreshLiveScores(cacheKey: string, attempt = 1): Promise<void> {
   try {
-    const payload = await footballDataGet<{ matches?: FootballDataMatch[] }>("/matches?status=LIVE");
-    const matches = (payload.matches ?? []).map(normalizeMatch);
+    const now = new Date();
+    const fromDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const toDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    const path = `/matches?dateFrom=${formatDate(fromDate)}&dateTo=${formatDate(toDate)}`;
+    const payload = await footballDataGet<{ matches?: FootballDataMatch[] }>(path);
+    const liveStatuses = new Set(["IN_PLAY", "PAUSED", "LIVE", "SUSPENDED"]);
+    const matches = (payload.matches ?? [])
+      .filter((match) => liveStatuses.has(asString(match.status) ?? ""))
+      .map(normalizeMatch);
     setCached(cacheKey, matches, liveScoresTtlMs);
-    // update status
     serviceStatus.lastFetchTime = new Date().toISOString();
     serviceStatus.lastResponseCount = matches.length;
+    serviceStatus.lastMatchesReceived = matches.length;
+    serviceStatus.lastCompetitionQueried = matches[0]?.competition?.name ?? null;
     serviceStatus.cacheKeys = Array.from(cache.keys());
     emitScoreEvent("scores:updated", { cacheKey, source: "live", count: matches.length, attempt });
     emitScoreEvent("scores:cache:refreshed", { cacheKey, count: matches.length, attempt });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    console.error('[football] live refresh failed:', message);
+    serviceStatus.lastErrorMessage = message;
     emitScoreEvent("scores:failed", { cacheKey, attempt, error: message });
     if (attempt < 2) {
       emitScoreEvent("scores:retry", { cacheKey, nextAttempt: attempt + 1 });
@@ -413,15 +449,20 @@ function normalizeCompetition(competition: FootballDataCompetition): ScoreCompet
 
 async function footballDataGet<T>(path: string): Promise<T> {
   if (!env.footballDataApiKey) {
-    throw Object.assign(new Error("FOOTBALL_DATA_API_KEY is not configured."), {
+    const err = Object.assign(new Error("FOOTBALL_DATA_API_KEY is not configured."), {
       statusCode: 503,
       code: "football_data_api_key_missing"
     });
+    console.error('[football] missing API key');
+    serviceStatus.lastErrorMessage = err.message;
+    throw err;
   }
 
   const baseUrl = env.footballDataBaseUrl.replace(/\/$/, "");
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 6000);
+  serviceStatus.lastApiRequestAt = new Date().toISOString();
+  serviceStatus.lastErrorMessage = null;
 
   try {
     const response = await fetch(`${baseUrl}${path}`, {
@@ -432,23 +473,43 @@ async function footballDataGet<T>(path: string): Promise<T> {
       signal: controller.signal
     });
 
+    serviceStatus.lastApiResponseStatus = response.status;
+
     if (!response.ok) {
-      throw Object.assign(new Error(`Football-Data.org request failed with ${response.status}.`), {
+      const message = `Football-Data.org request failed with ${response.status}.`;
+      const err = Object.assign(new Error(message), {
         statusCode: response.status >= 500 ? 502 : response.status,
-        code: "football_data_request_failed"
+        code: response.status === 429 ? "football_data_rate_limited" : "football_data_request_failed"
       });
+      console.error('[football] HTTP failure', response.status, response.statusText);
+      serviceStatus.lastErrorMessage = err.message;
+      throw err;
     }
 
-    return response.json() as Promise<T>;
+    try {
+      return response.json() as Promise<T>;
+    } catch (parseError) {
+      console.error('[football] invalid JSON response');
+      const err = Object.assign(new Error('Football-Data.org returned invalid JSON.'), {
+        statusCode: 502,
+        code: 'football_data_invalid_json'
+      });
+      serviceStatus.lastErrorMessage = err.message;
+      throw err;
+    }
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error));
     if ((err as any).name === "AbortError") {
-      throw Object.assign(new Error("Football-Data.org request timed out."), {
+      const timeoutError = Object.assign(new Error("Football-Data.org request timed out."), {
         statusCode: 504,
         code: "football_data_request_timeout"
       });
+      console.error('[football] request timed out');
+      serviceStatus.lastErrorMessage = timeoutError.message;
+      throw timeoutError;
     }
 
+    serviceStatus.lastErrorMessage = err.message;
     throw err;
   } finally {
     clearTimeout(timeout);
@@ -469,6 +530,21 @@ export const ScoreService = {
     };
   },
 
+  getDebug() {
+    return {
+      enabled: serviceStatus.footballApiEnabled,
+      cacheInitialized: serviceStatus.cacheInitialized,
+      lastFetchTime: serviceStatus.lastFetchTime,
+      lastResponseCount: serviceStatus.lastResponseCount,
+      lastApiStatus: serviceStatus.lastApiResponseStatus,
+      lastError: serviceStatus.lastErrorMessage,
+      lastApiRequestAt: serviceStatus.lastApiRequestAt,
+      lastCompetitionQueried: serviceStatus.lastCompetitionQueried,
+      lastMatchesReceived: serviceStatus.lastMatchesReceived,
+      cachedKeys: serviceStatus.cacheKeys.length
+    };
+  },
+
   clearCache(prefix?: string) {
     clearCacheKeys(prefix);
   },
@@ -481,9 +557,7 @@ export const ScoreService = {
     const cacheKey = "scores:live";
     const cached = getCacheEntry<ScoreMatchSummary[]>(cacheKey);
 
-    // If we have cached data, return immediately and trigger a background refresh
-    if (cached) {
-      // Trigger background refresh if not already running
+    if (cached && cached.value.length > 0) {
       if (!this._backgroundRefreshes.has(cacheKey)) {
         const p = (async () => {
           try {
@@ -504,6 +578,22 @@ export const ScoreService = {
         ageMs: Date.now() - cached.createdAt,
         cachedAt: new Date(cached.createdAt).toISOString()
       };
+    }
+
+    if (cached && cached.value.length === 0) {
+      if (!this._backgroundRefreshes.has(cacheKey)) {
+        const p = (async () => {
+          try {
+            await refreshLiveScores(cacheKey);
+          } catch (e) {
+            console.debug("[score] background refresh failed", e instanceof Error ? e.message : e);
+          } finally {
+            this._backgroundRefreshes.delete(cacheKey);
+          }
+        })();
+
+        this._backgroundRefreshes.set(cacheKey, p);
+      }
     }
 
     // No cache: kick off a background refresh but don't block the request. Try to return stale cache if available.
@@ -531,7 +621,7 @@ export const ScoreService = {
       };
     }
 
-    // No live cache at all: attempt an immediate today scheduled fetch fallback.
+    // No live cache or no live matches: attempt an immediate today scheduled fetch fallback.
     try {
       const today = getTodayDateRange();
       const todayCacheKey = buildScheduleCacheKey(today.dateFrom, today.dateTo);
@@ -548,6 +638,15 @@ export const ScoreService = {
       }
     } catch (e) {
       // ignore and fallthrough to empty
+    }
+
+    if (cached) {
+      return {
+        matches: cached.value,
+        source: "cache",
+        ageMs: Date.now() - cached.createdAt,
+        cachedAt: new Date(cached.createdAt).toISOString()
+      };
     }
 
     return { matches: [], source: "cache" };

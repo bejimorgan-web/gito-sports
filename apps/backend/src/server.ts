@@ -12,10 +12,10 @@ async function initializeFootballService() {
     cacheKeys: []
   };
 
-  console.log('[startup] FOOTBALL: enabled=' + Boolean(status.footballApiEnabled));
-  console.log('[startup] FOOTBALL: cache initialized=true');
-  console.log('[startup] FOOTBALL: lastFetchTime=' + (status.lastFetchTime ?? 'null'));
-  console.log('[startup] FOOTBALL: lastResponseCount=' + status.lastResponseCount);
+  console.log('[startup] FOOTBALL INIT: enabled=' + Boolean(status.footballApiEnabled));
+  console.log('[startup] FOOTBALL INIT: cacheInitialized=' + Boolean(status.cacheInitialized));
+  console.log('[startup] FOOTBALL INIT: lastFetchTime=' + (status.lastFetchTime ?? 'null'));
+  console.log('[startup] FOOTBALL INIT: lastResponseCount=' + status.lastResponseCount);
 
   if (Array.isArray(status.cacheKeys) && status.cacheKeys.length === 0) {
     try {
@@ -34,11 +34,13 @@ validateUploadsAtStartup();
 (async () => {
   const app = createApp();
   getDatabase();
-  await initializeFootballService();
 
   const port = Number(process.env.PORT ?? 3000);
   app.listen(port, "0.0.0.0", () => {
     console.log(`GiTO backend listening on port ${port}`);
+    initializeFootballService().catch((error) => {
+      console.error('[startup] FOOTBALL: initial refresh failed', error instanceof Error ? error.message : error);
+    });
   });
 })();
 

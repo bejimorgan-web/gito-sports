@@ -85,12 +85,53 @@ footballRouter.get("/status", async (_req, res) => {
   }
 });
 
+footballRouter.get("/debug", async (_req, res) => {
+  try {
+    const debug = typeof (ScoreService as any).getDebug === "function"
+      ? (ScoreService as any).getDebug()
+      : {
+          enabled: false,
+          cacheInitialized: false,
+          lastFetchTime: null,
+          lastResponseCount: 0,
+          lastApiStatus: null,
+          lastError: null,
+          lastApiRequestAt: null,
+          lastCompetitionQueried: null,
+          lastMatchesReceived: 0,
+          cachedKeys: 0
+        };
+
+    res.json(debug);
+  } catch (error) {
+    res.json({
+      enabled: false,
+      cacheInitialized: false,
+      lastFetchTime: null,
+      lastResponseCount: 0,
+      lastApiStatus: null,
+      lastError: null,
+      lastApiRequestAt: null,
+      lastCompetitionQueried: null,
+      lastMatchesReceived: 0,
+      cachedKeys: 0
+    });
+  }
+});
+
 footballRouter.post("/refresh", async (_req, res) => {
   try {
     (ScoreService as any).clearCache();
     const result = await (ScoreService as any).refreshAll();
     const status = (ScoreService as any).getStatus();
-    res.json({ success: true, refreshed: result, status });
+    res.json({
+      success: true,
+      liveCount: result.liveCount ?? 0,
+      todayCount: result.todayCount ?? 0,
+      upcomingCount: result.upcomingCount ?? 0,
+      totalCount: (result.liveCount ?? 0) + (result.todayCount ?? 0) + (result.upcomingCount ?? 0),
+      lastFetchTime: status.lastFetchTime
+    });
   } catch (error) {
     handleFootballError(error, res);
   }
