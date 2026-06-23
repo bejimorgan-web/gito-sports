@@ -25,6 +25,7 @@ import { uploadsRouter } from "./routes/uploads.js";
 import { eventsRouter } from "./routes/events.js";
 import { adminRouter } from "./routes/admin.js";
 import { migrationRouter } from "./routes/migration.routes.js";
+import { footballRouter } from "./routes/football.js";
 import { env } from "./config/env.js";
 
 export function createApp() {
@@ -160,6 +161,7 @@ export function createApp() {
   app.use("/mobile", mobileRouter);
   app.use("/operations", operationsRouter);
   app.use("/scores", scoresRouter);
+  app.use("/api/football", footballRouter);
   app.use("/iptv", iptvRouter);
   app.use("/streams", streamsRouter);
   app.use('/api/admin/migration', migrationRouter);

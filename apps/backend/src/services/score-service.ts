@@ -11,7 +11,7 @@ type FootballDataMatch = Record<string, unknown>;
 type FootballDataCompetition = Record<string, unknown>;
 type FootballDataTeam = Record<string, unknown>;
 
-export type ScoreSource = "live" | "cache" | "stale_cache";
+export type ScoreSource = "live" | "cache" | "stale_cache" | "scheduled";
 
 export type ScoreListResult = {
   matches: ScoreMatchSummary[];
@@ -79,10 +79,105 @@ export type ScoreCompetitionSummary = {
 };
 
 const liveScoresTtlMs = 20_000;
+const scheduledMatchesTtlMs = 120_000;
 const matchDetailsTtlMs = 30_000;
 const competitionsTtlMs = 6 * 60 * 60 * 1000;
+const upcomingMatchesWindowDays = 3;
 
 const cache = new Map<string, CacheEntry<unknown>>();
+
+function formatDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function buildDateRangePath(dateFrom: string, dateTo: string) {
+  return `/matches?status=SCHEDULED&dateFrom=${encodeURIComponent(dateFrom)}&dateTo=${encodeURIComponent(dateTo)}`;
+}
+
+async function refreshScheduledMatches(cacheKey: string, path: string, attempt = 1): Promise<void> {
+  try {
+    const payload = await footballDataGet<{ matches?: FootballDataMatch[] }>(path);
+    const matches = (payload.matches ?? []).map(normalizeMatch);
+    setCached(cacheKey, matches, scheduledMatchesTtlMs);
+    emitScoreEvent("scores:updated", { cacheKey, source: "scheduled", count: matches.length, attempt });
+    emitScoreEvent("scores:cache:refreshed", { cacheKey, count: matches.length, attempt });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    emitScoreEvent("scores:failed", { cacheKey, attempt, error: message });
+    if (attempt < 2) {
+      emitScoreEvent("scores:retry", { cacheKey, nextAttempt: attempt + 1 });
+      await refreshScheduledMatches(cacheKey, path, attempt + 1);
+    }
+    throw error;
+  }
+}
+
+function scheduleBackgroundRefresh(cacheKey: string, refreshFn: () => Promise<void>) {
+  if (ScoreService._backgroundRefreshes.has(cacheKey)) {
+    return;
+  }
+
+  const p = (async () => {
+    try {
+      await refreshFn();
+    } catch (e) {
+      console.debug("[score] background refresh failed", e instanceof Error ? e.message : e);
+    } finally {
+      ScoreService._backgroundRefreshes.delete(cacheKey);
+    }
+  })();
+
+  ScoreService._backgroundRefreshes.set(cacheKey, p);
+}
+
+function buildScheduleCacheKey(dateFrom: string, dateTo: string) {
+  return `scores:scheduled:${dateFrom}:${dateTo}`;
+}
+
+async function listScheduledMatches(dateFrom: string, dateTo: string): Promise<ScoreListResult> {
+  const cacheKey = buildScheduleCacheKey(dateFrom, dateTo);
+  const cached = getCacheEntry<ScoreMatchSummary[]>(cacheKey);
+  const path = buildDateRangePath(dateFrom, dateTo);
+
+  if (cached) {
+    scheduleBackgroundRefresh(cacheKey, () => refreshScheduledMatches(cacheKey, path));
+    return {
+      matches: cached.value,
+      source: "cache",
+      ageMs: Date.now() - cached.createdAt,
+      cachedAt: new Date(cached.createdAt).toISOString()
+    };
+  }
+
+  if (!ScoreService._backgroundRefreshes.has(cacheKey)) {
+    scheduleBackgroundRefresh(cacheKey, () => refreshScheduledMatches(cacheKey, path));
+  }
+
+  const stale = getStaleCacheEntry<ScoreMatchSummary[]>(cacheKey, 120_000);
+  if (stale) {
+    return {
+      matches: stale.value,
+      source: "stale_cache",
+      ageMs: stale.ageMs,
+      cachedAt: stale.cachedAt
+    };
+  }
+
+  return { matches: [], source: "cache" };
+}
+
+function getTodayDateRange(): { dateFrom: string; dateTo: string } {
+  const now = new Date();
+  const today = formatDate(now);
+  return { dateFrom: today, dateTo: today };
+}
+
+function getUpcomingDateRange(): { dateFrom: string; dateTo: string } {
+  const now = new Date();
+  const fromDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  const toDate = new Date(fromDate.getTime() + (upcomingMatchesWindowDays - 1) * 24 * 60 * 60 * 1000);
+  return { dateFrom: formatDate(fromDate), dateTo: formatDate(toDate) };
+}
 
 function getCached<T>(key: string): T | null {
   const entry = cache.get(key);
@@ -423,6 +518,16 @@ export const ScoreService = {
     }
 
     return null;
+  },
+
+  async listTodayMatches(): Promise<ScoreListResult> {
+    const { dateFrom, dateTo } = getTodayDateRange();
+    return listScheduledMatches(dateFrom, dateTo);
+  },
+
+  async listUpcomingMatches(): Promise<ScoreListResult> {
+    const { dateFrom, dateTo } = getUpcomingDateRange();
+    return listScheduledMatches(dateFrom, dateTo);
   },
 
   async listCompetitions(): Promise<ScoreCompetitionSummary[]> {

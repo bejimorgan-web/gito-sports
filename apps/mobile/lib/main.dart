@@ -16,8 +16,8 @@ const appLogoUrl =
 const appLogoAsset = 'assets/app_logo.png';
 
 const apiBaseUrl = String.fromEnvironment(
-  'GITO_API_BASE_URL',
-  defaultValue: 'http://localhost:4100',
+  'API_URL',
+  defaultValue: 'https://gito-sports.onrender.com',
 );
 
 const appInstallUrl =
@@ -355,12 +355,16 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
   bool _initialized = false;
+  Future<void>? _initializeTask;
 
-  Future<void> initialize() async {
+  Future<void> initialize() {
     if (_initialized) {
-      return;
+      return Future.value();
     }
+    return _initializeTask ??= _initializeInternal();
+  }
 
+  Future<void> _initializeInternal() async {
     tz.initializeTimeZones();
 
     const androidSettings =
@@ -385,15 +389,27 @@ class NotificationService {
   Future<void> _requestPermissions() async {
     final androidImplementation = _plugin.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
-    await androidImplementation?.requestPermission();
+    try {
+      await androidImplementation?.requestNotificationsPermission();
+    } on PlatformException catch (e) {
+      if (e.code != 'permissionRequestInProgress') {
+        rethrow;
+      }
+    }
 
     final iosImplementation = _plugin.resolvePlatformSpecificImplementation<
         IOSFlutterLocalNotificationsPlugin>();
-    await iosImplementation?.requestPermissions(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
+    try {
+      await iosImplementation?.requestPermissions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+    } on PlatformException catch (e) {
+      if (e.code != 'permissionRequestInProgress') {
+        rethrow;
+      }
+    }
   }
 
   Future<void> showAssignmentNotification(List<LiveMatch> matches) async {

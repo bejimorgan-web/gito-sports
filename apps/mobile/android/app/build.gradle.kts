@@ -7,19 +7,20 @@ plugins {
 
 android {
     namespace = "com.example.gito_live_sports_mobile"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36  // Updated to satisfy package_info_plus requirement
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
         // Enable core library desugaring for libraries that require Java 8+ APIs
         isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
-        // Use JVM target 1.8 for Kotlin to match Java compatibility expected by some plugins
-        jvmTarget = "1.8"
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
     }
 
     defaultConfig {
@@ -28,7 +29,7 @@ android {
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 36  // Updated to satisfy package_info_plus requirement
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
@@ -43,7 +44,7 @@ android {
 
     // Add desugaring dependency required by some plugins
     dependencies {
-        coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:1.1.5")
+        coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
     }
 }
 
