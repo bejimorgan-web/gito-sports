@@ -168,8 +168,8 @@ async function fetchMatchesForRange(dateFrom: string, dateTo: string): Promise<F
   const url = `${baseUrl}${path}`;
 
   console.log("FOOTBALL FETCH START");
-  console.log("API URL:", url);
-  console.log("REQUEST DATE RANGE:", dateFrom, dateTo);
+  console.log("FOOTBALL REQUEST URL:", url);
+  console.log("FOOTBALL DATE RANGE:", dateFrom, "->", dateTo);
   serviceStatus.lastApiRequestAt = new Date().toISOString();
   serviceStatus.lastApiResponseStatus = null;
   serviceStatus.lastErrorMessage = null;
@@ -646,21 +646,25 @@ async function footballDataGet<T>(path: string): Promise<T> {
     const response = await fetch(`${baseUrl}${path}`, {
       headers: {
         "X-Auth-Token": env.footballDataApiKey,
-        accept: "application/json"
+        Accept: "application/json"
       },
       signal: controller.signal
     });
 
     serviceStatus.lastApiResponseStatus = response.status;
+    console.log('FOOTBALL API STATUS CODE:', response.status);
 
     if (!response.ok) {
+      const bodyText = await response.text();
+      const snippet = bodyText.slice(0, 200);
       const message = `Football-Data.org request failed with ${response.status}.`;
       const err = Object.assign(new Error(message), {
         statusCode: response.status >= 500 ? 502 : response.status,
         code: response.status === 429 ? "football_data_rate_limited" : "football_data_request_failed"
       });
       console.error('[football] HTTP failure', response.status, response.statusText);
-      serviceStatus.lastErrorMessage = err.message;
+      console.error('FOOTBALL RAW RESPONSE:', snippet);
+      serviceStatus.lastErrorMessage = snippet || message;
       throw err;
     }
 
@@ -702,6 +706,7 @@ export const ScoreService = {
     return {
       footballApiEnabled: serviceStatus.footballApiEnabled,
       cacheInitialized: serviceStatus.cacheInitialized,
+      lastApiStatus: serviceStatus.lastApiResponseStatus,
       lastFetchTime: serviceStatus.lastFetchTime,
       lastResponseCount: serviceStatus.lastResponseCount,
       cacheKeys: serviceStatus.cacheKeys.length

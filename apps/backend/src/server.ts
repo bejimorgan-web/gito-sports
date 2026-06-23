@@ -4,27 +4,49 @@ import { getDatabase } from "./db/connection.js";
 import validateUploadsAtStartup from "./startup/validateUploads.js";
 import { ScoreService } from "./services/score-service.js";
 
-async function initializeFootballService() {
+const footballStartupConfig = {
+  maxRetries: 3,
+  retryDelayMs: 5000
+};
+
+async function initializeFootballService(attempt = 1) {
+  if (attempt === 1) {
+    console.log('FOOTBALL STARTUP INIT TRIGGERED');
+    console.log('FOOTBALL API KEY PRESENT =', Boolean(env.footballDataApiKey?.trim()));
+  }
+
   const status = (ScoreService as any).getStatus?.() ?? {
     footballApiEnabled: false,
+    cacheInitialized: false,
     lastFetchTime: null,
     lastResponseCount: 0,
     cacheKeys: []
   };
 
-  console.log('[startup] FOOTBALL INIT: enabled=' + Boolean(status.footballApiEnabled));
-  console.log('[startup] FOOTBALL INIT: cacheInitialized=' + Boolean(status.cacheInitialized));
-  console.log('[startup] FOOTBALL INIT: lastFetchTime=' + (status.lastFetchTime ?? 'null'));
-  console.log('[startup] FOOTBALL INIT: lastResponseCount=' + status.lastResponseCount);
+  console.log('[startup] FOOTBALL INIT ATTEMPT ' + attempt + ': cacheInitialized=' + Boolean(status.cacheInitialized));
 
-  if (!status.cacheInitialized || status.cacheKeys === 0) {
-    try {
-      await (ScoreService as any).refreshAll();
-      const updated = (ScoreService as any).getStatus?.() ?? status;
+  try {
+    await (ScoreService as any).refreshAll();
+    const updated = (ScoreService as any).getStatus?.() ?? status;
+
+    if (updated.cacheInitialized) {
+      console.log('FOOTBALL INITIAL REFRESH STATUS = success');
       console.log('[startup] FOOTBALL: initial refresh completed lastFetchTime=' + (updated.lastFetchTime ?? 'null') + ' lastResponseCount=' + updated.lastResponseCount);
-    } catch (error) {
-      console.error('[startup] FOOTBALL: initial refresh failed', error instanceof Error ? error.message : error);
+      return;
     }
+
+    throw new Error('refreshAll did not initialize cache');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('FOOTBALL INIT FAILED ->', message);
+
+    if (attempt < footballStartupConfig.maxRetries) {
+      console.log('FOOTBALL INIT RETRY', attempt + 1, 'IN', footballStartupConfig.retryDelayMs, 'ms');
+      setTimeout(() => void initializeFootballService(attempt + 1), footballStartupConfig.retryDelayMs);
+      return;
+    }
+
+    console.error('FOOTBALL INITIAL REFRESH STATUS = fail');
   }
 }
 
