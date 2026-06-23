@@ -242,11 +242,13 @@ function emitScoreEvent(event: "scores:updated" | "scores:cache:refreshed" | "sc
 
 const serviceStatus: {
   footballApiEnabled: boolean;
+  cacheInitialized: boolean;
   lastFetchTime: string | null;
   lastResponseCount: number;
   cacheKeys: string[];
 } = {
   footballApiEnabled: Boolean(env.footballDataApiKey && env.footballDataApiKey.trim()),
+  cacheInitialized: false,
   lastFetchTime: null,
   lastResponseCount: 0,
   cacheKeys: []
@@ -260,6 +262,7 @@ function clearCacheKeys(prefix?: string) {
 }
 
 async function refreshAllScores(): Promise<{ liveCount: number; todayCount: number; upcomingCount: number }> {
+  serviceStatus.cacheInitialized = true;
   const results = { liveCount: 0, todayCount: 0, upcomingCount: 0 } as any;
   try {
     await refreshLiveScores("scores:live");
@@ -455,6 +458,24 @@ async function footballDataGet<T>(path: string): Promise<T> {
 export const ScoreService = {
   // Track in-flight background refreshes to avoid duplicate work
   _backgroundRefreshes: new Map<string, Promise<void>>(),
+
+  getStatus() {
+    return {
+      footballApiEnabled: serviceStatus.footballApiEnabled,
+      cacheInitialized: serviceStatus.cacheInitialized,
+      lastFetchTime: serviceStatus.lastFetchTime,
+      lastResponseCount: serviceStatus.lastResponseCount,
+      cacheKeys: serviceStatus.cacheKeys.length
+    };
+  },
+
+  clearCache(prefix?: string) {
+    clearCacheKeys(prefix);
+  },
+
+  refreshAll() {
+    return refreshAllScores();
+  },
 
   async listLiveScores(): Promise<ScoreListResult> {
     const cacheKey = "scores:live";

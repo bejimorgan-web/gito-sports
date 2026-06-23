@@ -63,10 +63,25 @@ footballRouter.get("/upcoming", async (_request, response) => {
 
 footballRouter.get("/status", async (_req, res) => {
   try {
-    const status = (ScoreService as any).getStatus();
+    const status = typeof (ScoreService as any).getStatus === "function"
+      ? (ScoreService as any).getStatus()
+      : {
+          footballApiEnabled: false,
+          cacheInitialized: false,
+          lastFetchTime: null,
+          lastResponseCount: 0,
+          cacheKeys: 0
+        };
+
     res.json(status);
   } catch (error) {
-    handleFootballError(error, res);
+    res.json({
+      footballApiEnabled: false,
+      cacheInitialized: false,
+      lastFetchTime: null,
+      lastResponseCount: 0,
+      cacheKeys: 0
+    });
   }
 });
 
