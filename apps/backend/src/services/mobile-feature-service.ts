@@ -29,6 +29,14 @@ const DEFAULT_FEATURES: ReadonlyArray<{ feature_key: string; id: string }> = [
   { feature_key: "navigation.live", id: "flag_live" }
 ];
 
+const DEFAULT_NAVIGATION_FEATURES: MobileFeaturesResponse = {
+  navigation: {
+    liveScores: { enabled: true, message: null },
+    sports: { enabled: true, message: null },
+    live: { enabled: true, message: null }
+  }
+};
+
 let cachedFeatures: MobileFeaturesResponse | null = null;
 let cacheUpdatedAt: number | null = null;
 const CACHE_TTL_MS = 60 * 1000;
@@ -58,11 +66,7 @@ export class MobileFeatureService {
       .all() as Array<{ feature_key: string; enabled: number; display_message: string | null }>;
 
     const response: MobileFeaturesResponse = {
-      navigation: {
-        liveScores: { enabled: true, message: null },
-        sports: { enabled: true, message: null },
-        live: { enabled: true, message: null }
-      }
+      ...DEFAULT_NAVIGATION_FEATURES
     };
 
     const mapping: Record<string, keyof MobileFeaturesResponse["navigation"]> = {
