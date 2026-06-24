@@ -6,6 +6,8 @@ import {
   getBackupStats
 } from "../services/database-backup-service.js";
 import { startupHealthCheck } from "../system/startup.js";
+import { ScoreService } from "../services/score-service.js";
+import { getDatabase } from "../db/connection.js";
 import fs from "node:fs";
 import path from "node:path";
 import { verifyAccessToken } from "../services/jwt.js";
@@ -70,6 +72,43 @@ systemRouter.get("/health", async (_req, res) => {
           : "warning",
       lastBackup: backupStats.latestBackup?.createdAt ?? null,
       backupCount: backupStats.backupCount
+    }
+  });
+});
+
+function getAnalyticsStatus() {
+  try {
+    const database = getDatabase();
+    const latestAnalytics = database.prepare(`SELECT MAX(created_at) AS last_created_at FROM mobile_analytics_events`).get() as { last_created_at?: string | null };
+    const latestAd = database.prepare(`SELECT MAX(created_at) AS last_created_at FROM mobile_ad_events`).get() as { last_created_at?: string | null };
+    const latest = [latestAnalytics?.last_created_at, latestAd?.last_created_at]
+      .filter((value): value is string => typeof value === "string" && value.trim() !== "")
+      .sort()
+      .pop();
+
+    if (!latest) {
+      return "inactive";
+    }
+
+    const ageMs = Date.now() - new Date(latest).valueOf();
+    return ageMs < 5 * 60 * 1000 ? "receiving" : "idle";
+  } catch {
+    return "unknown";
+  }
+}
+
+systemRouter.get("/status", (_req, res) => {
+  const health = startupHealthCheck();
+  const scoreStatus = typeof ScoreService.getStatus === "function" ? ScoreService.getStatus() : { footballApiEnabled: false };
+
+  res.json({
+    data: {
+      backend: "online",
+      database: health.db === "ok" ? "ready" : "not_ready",
+      footballApi: scoreStatus.footballApiEnabled ? "ok" : "disabled",
+      analytics: getAnalyticsStatus(),
+      uptime: Math.round(process.uptime()),
+      timestamp: new Date().toISOString()
     }
   });
 });

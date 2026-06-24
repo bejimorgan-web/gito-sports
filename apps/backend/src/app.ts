@@ -8,6 +8,7 @@ import { authRouter } from "./routes/auth.js";
 import path from "node:path";
 import fs from "node:fs";
 
+import * as Sentry from "@sentry/node";
 import { healthRouter } from "./routes/health.js";
 import { systemRouter } from "./routes/system.js";
 import { iptvRouter } from "./routes/iptv.js";
@@ -26,7 +27,9 @@ import { eventsRouter } from "./routes/events.js";
 import { adminRouter } from "./routes/admin.js";
 import { migrationRouter } from "./routes/migration.routes.js";
 import { footballRouter } from "./routes/football.js";
-import { env } from "./config/env.js";
+import { analyticsRouter } from "./routes/analytics.js";
+import { configRouter } from "./routes/config.js";
+import { runtimeConfig } from "./config/env.js";
 
 export function createApp() {
   const app = express();
@@ -153,18 +156,26 @@ export function createApp() {
   });
   app.use("/api/events", eventsRouter);
   app.use("/sports", sportsRouter);
+  app.use("/config", configRouter);
   app.use("/countries", countriesRouter);
   app.use("/competitions", competitionsRouter);
   app.use("/teams", teamsRouter);
   app.use("/matches", matchesRouter);
   app.use("/live-matches", liveMatchesRouter);
   app.use("/mobile", mobileRouter);
+  app.use("/analytics", analyticsRouter);
+  app.use("/mobile/analytics", analyticsRouter);
   app.use("/operations", operationsRouter);
   app.use("/scores", scoresRouter);
   app.use("/api/football", footballRouter);
   app.use("/iptv", iptvRouter);
   app.use("/streams", streamsRouter);
   app.use('/api/admin/migration', migrationRouter);
+
+  if (runtimeConfig.errorReportingEnabled && runtimeConfig.sentryDsn) {
+    Sentry.setupExpressErrorHandler(app);
+  }
+
   app.use(workflowErrorHandler);
 
   return app;

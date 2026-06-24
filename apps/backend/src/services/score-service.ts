@@ -1,6 +1,7 @@
 import { env } from "../config/env.js";
 import { EventBus } from "../events/event-bus.js";
 import { ApiFootballService } from "./api-football-service.js";
+import { apiUsageGuard } from "./api-usage-guard.js";
 
 type CacheEntry<T> = {
   expiresAt: number;
@@ -170,8 +171,24 @@ async function fetchMatchesForRange(dateFrom: string, dateTo: string): Promise<F
   serviceStatus.lastCompetitionQueried = null;
 
   try {
-    const rawMatches = await ApiFootballService.getFixturesByRange(dateFrom, dateTo);
-    serviceStatus.lastApiResponseStatus = 200;
+    const cacheKey = `fixtures_range_${dateFrom}_${dateTo}`;
+    const guardResult = await apiUsageGuard.checkAndExecute(
+      'fixtures',
+      cacheKey,
+      () => ApiFootballService.getFixturesByRange(dateFrom, dateTo)
+    );
+
+    const rawMatches = guardResult.data ?? [];
+    if (guardResult.allowed) {
+      serviceStatus.lastApiResponseStatus = 200;
+    } else if (guardResult.cached) {
+      serviceStatus.lastApiResponseStatus = 200; // Returning cached data
+    } else {
+      serviceStatus.lastApiResponseStatus = 429; // Rate limited without cache
+      serviceStatus.lastErrorMessage = guardResult.reason;
+      return { matches: [], success: false };
+    }
+
     serviceStatus.lastMatchesReceived = rawMatches.length;
     serviceStatus.lastCompetitionQueried = asString(asRecord(rawMatches[0]?.league).name) ?? null;
     console.log("MATCH COUNT RAW:", rawMatches.length);
@@ -482,7 +499,21 @@ async function refreshAllScores(): Promise<{ liveCount: number; todayCount: numb
 
 async function refreshLiveScores(cacheKey: string, attempt = 1): Promise<void> {
   try {
-    const rawMatches = await ApiFootballService.getLiveFixtures();
+    const guardResult = await apiUsageGuard.checkAndExecute(
+      'live_fixtures',
+      'live_fixtures_default',
+      () => ApiFootballService.getLiveFixtures()
+    );
+
+    const rawMatches = guardResult.data ?? [];
+    if (!guardResult.allowed && !guardResult.cached) {
+      // Rate limited without cached data
+      console.error('[football] live refresh blocked by rate limit:', guardResult.reason);
+      serviceStatus.lastErrorMessage = guardResult.reason;
+      serviceStatus.lastApiResponseStatus = 429;
+      throw new Error(guardResult.reason);
+    }
+
     serviceStatus.lastApiResponseStatus = 200;
     serviceStatus.lastMatchesReceived = rawMatches.length;
     serviceStatus.lastCompetitionQueried = asString(asRecord(rawMatches[0]?.league).name) ?? null;
@@ -817,9 +848,24 @@ export const ScoreService = {
       return cached;
     }
 
-    const payload = await ApiFootballService.getLeagues(new Date().getFullYear());
+    const guardResult = await apiUsageGuard.checkAndExecute(
+      'leagues',
+      'leagues_current_year',
+      () => ApiFootballService.getLeagues(new Date().getFullYear())
+    );
+
+    const payload = guardResult.data ?? [];
+    if (!guardResult.allowed && !guardResult.cached) {
+      // Rate limited without cached data
+      console.error('[football] leagues fetch blocked by rate limit:', guardResult.reason);
+      throw new Error(guardResult.reason);
+    }
+
     const competitions = payload.map(normalizeCompetition);
-    setCached("scores:competitions", competitions, competitionsTtlMs);
+    if (guardResult.allowed) {
+      // Only cache fresh data from successful API calls
+      setCached("scores:competitions", competitions, competitionsTtlMs);
+    }
     return competitions;
   }
 };

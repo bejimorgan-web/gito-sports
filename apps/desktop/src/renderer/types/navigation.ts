@@ -1,11 +1,17 @@
 export type NavigationKey =
   | "dashboard"
+  | "analyticsOverview"
+  | "analyticsStreaming"
+  | "analyticsUsers"
+  | "analyticsMatches"
+  | "analyticsAds"
   | "iptv"
   | "preview"
   | "matchAssignment"
   | "sports"
   | "approvals"
-  | "matches";
+  | "matches"
+  | "mobileFeatures";
 
 export interface NavigationItem {
   key: NavigationKey;
@@ -18,6 +24,31 @@ export const navigationItems: NavigationItem[] = [
     key: "dashboard",
     label: "Dashboard",
     description: "Live operations overview"
+  },
+  {
+    key: "analyticsOverview",
+    label: "Analytics Overview",
+    description: "View real-time platform metrics"
+  },
+  {
+    key: "analyticsStreaming",
+    label: "Streaming Analytics",
+    description: "Stream performance and watch time"
+  },
+  {
+    key: "analyticsUsers",
+    label: "Users Analytics",
+    description: "Audience and session metrics"
+  },
+  {
+    key: "analyticsMatches",
+    label: "Matches Analytics",
+    description: "Match viewing and watch time"
+  },
+  {
+    key: "analyticsAds",
+    label: "Ads Analytics",
+    description: "Ad delivery and reward metrics"
   },
   {
     key: "iptv",
@@ -48,5 +79,10 @@ export const navigationItems: NavigationItem[] = [
     key: "matches",
     label: "Matches",
     description: "Schedule and manage matches"
+  },
+  {
+    key: "mobileFeatures",
+    label: "Mobile Navigation",
+    description: "Control viewer navigation tabs remotely"
   }
 ];

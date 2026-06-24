@@ -12,8 +12,13 @@ dependencies:
   flutter_local_notifications: ^17.2.4
   share_plus: 13.1.0
   timezone: ^0.9.4
+  url_launcher: ^6.1.10
   video_player: ^2.7.1
   wakelock_plus: ^1.6.1
+  google_mobile_ads: ^9.0.0
+  firebase_core: ^2.24.0
+  firebase_crashlytics: ^3.3.4
+  shared_preferences: ^2.2.0
 
 dev_dependencies:
   flutter_test:

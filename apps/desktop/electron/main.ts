@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/electron";
 import { app, BrowserWindow, ipcMain } from "electron";
 import fs from "node:fs";
 import path from "node:path";
@@ -8,6 +9,19 @@ const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 // http://localhost:4200 when not provided.
 const devServerUrl = process.env.VITE_DEV_SERVER_URL ? String(process.env.VITE_DEV_SERVER_URL) : "http://localhost:4200";
 const isDev = typeof process.env.VITE_DEV_SERVER_URL !== "undefined";
+
+const desktopErrorReportingEnabled = (process.env.ERROR_REPORTING_ENABLED ?? "true").toLowerCase() === "true";
+const desktopSentryDsn = process.env.SENTRY_DSN ?? "";
+
+if (desktopErrorReportingEnabled && desktopSentryDsn) {
+  Sentry.init({
+    dsn: desktopSentryDsn,
+    environment: process.env.NODE_ENV ?? "development",
+    tracesSampleRate: process.env.NODE_ENV === "production" ? 0.05 : 0.0,
+    enableNative: true,
+    enableJavaScript: true,
+  });
+}
 
 // Diagnostic: log which URL Electron will attempt to load in dev.
 console.log("ELECTRON MODE", process.env.NODE_ENV ?? "(unset)");
@@ -47,7 +61,11 @@ function createMainWindow() {
 
   // Capture render process gone (crash/termination)
   mainWindow.webContents.on("render-process-gone", (_event, details) => {
-    console.error(`[RENDERER CRASH] ${details.reason}`);
+    const message = `[RENDERER CRASH] ${details.reason}`;
+    console.error(message);
+    if (desktopErrorReportingEnabled && desktopSentryDsn) {
+      Sentry.captureMessage(message);
+    }
   });
 
   // Log when content finishes loading
@@ -103,9 +121,15 @@ app.whenReady().then(createMainWindow);
 // Receive forwarded renderer errors
 ipcMain.on('renderer-error', (_event, data) => {
   console.error('[RENDERER IPC ERROR]', data);
+  if (desktopErrorReportingEnabled && desktopSentryDsn) {
+    Sentry.captureException(new Error(`[Renderer Error] ${JSON.stringify(data)}`));
+  }
 });
 ipcMain.on('renderer-console-error', (_event, args) => {
   console.error('[RENDERER IPC CONSOLE ERROR]', args);
+  if (desktopErrorReportingEnabled && desktopSentryDsn) {
+    Sentry.captureMessage(`[Renderer Console] ${JSON.stringify(args)}`);
+  }
 });
 
 app.on("window-all-closed", () => {

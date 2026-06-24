@@ -341,3 +341,83 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
   created_at TEXT NOT NULL,
   FOREIGN KEY (operator_user_id) REFERENCES operator_users(id)
 );
+
+CREATE TABLE IF NOT EXISTS mobile_analytics_events (
+  id TEXT PRIMARY KEY,
+  event_type TEXT NOT NULL,
+  session_id TEXT,
+  match_id TEXT,
+  payload TEXT,
+  user_agent TEXT,
+  ip_address TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS mobile_ad_events (
+  id TEXT PRIMARY KEY,
+  promotion_id TEXT,
+  event_type TEXT NOT NULL,
+  session_id TEXT,
+  match_id TEXT,
+  metadata TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS mobile_ad_promotions (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT,
+  action_url TEXT,
+  image_url TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- API usage tracking for rate limiting
+CREATE TABLE IF NOT EXISTS api_usage_log (
+  id TEXT PRIMARY KEY,
+  request_type TEXT NOT NULL UNIQUE CHECK (request_type IN ('live_fixtures', 'fixtures', 'logos', 'leagues')),
+  last_request_timestamp INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_usage_log_request_type ON api_usage_log(request_type);
+CREATE INDEX IF NOT EXISTS idx_api_usage_log_updated_at ON api_usage_log(updated_at);
+
+-- Legacy mobile feature flags for remote control (preserved for compatibility)
+CREATE TABLE IF NOT EXISTS mobile_features (
+  id TEXT PRIMARY KEY,
+  feature_name TEXT NOT NULL UNIQUE,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_mobile_features_feature_name ON mobile_features(feature_name);
+
+-- Mobile feature flags storage with display messages
+CREATE TABLE IF NOT EXISTS mobile_feature_flags (
+  id TEXT PRIMARY KEY,
+  feature_key TEXT NOT NULL UNIQUE,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  display_message TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_mobile_feature_flags_feature_key ON mobile_feature_flags(feature_key);
+
+-- Insert default navigation features
+INSERT OR IGNORE INTO mobile_features (id, feature_name, enabled, created_at, updated_at)
+VALUES
+  ('nav_live_scores', 'navigation.liveScores', 1, datetime('now'), datetime('now')),
+  ('nav_sports', 'navigation.sports', 1, datetime('now'), datetime('now')),
+  ('nav_live', 'navigation.live', 1, datetime('now'), datetime('now'));
+
+INSERT OR IGNORE INTO mobile_feature_flags (id, feature_key, enabled, display_message, created_at, updated_at)
+VALUES
+  ('flag_live_scores', 'navigation.liveScores', 1, NULL, datetime('now'), datetime('now')),
+  ('flag_sports', 'navigation.sports', 1, NULL, datetime('now'), datetime('now')),
+  ('flag_live', 'navigation.live', 1, NULL, datetime('now'), datetime('now'));

@@ -10,6 +10,12 @@ import { MatchSchedulerScreen } from "./features/matches/MatchSchedulerScreen";
 import { IptvManagementScreen } from "./features/iptv/IptvManagementScreen";
 import { SportsWorkspaceScreen } from "./features/sports/SportsWorkspaceScreen";
 import { StreamPreviewPanel } from "./features/preview/StreamPreviewPanel";
+import { AnalyticsOverviewScreen } from "./features/analytics/AnalyticsOverviewScreen";
+import { StreamingAnalyticsScreen } from "./features/analytics/StreamingAnalyticsScreen";
+import { UsersAnalyticsScreen } from "./features/analytics/UsersAnalyticsScreen";
+import { MatchesAnalyticsScreen } from "./features/analytics/MatchesAnalyticsScreen";
+import { AdsAnalyticsScreen } from "./features/analytics/AdsAnalyticsScreen";
+import { MobileFeatureControlScreen } from "./features/mobile/MobileFeatureControlScreen";
 import { AuthenticatedLayout } from "./layouts/AuthenticatedLayout";
 import { LoginScreen } from "./screens/LoginScreen";
 import { apiClient, API_BASE_URL } from "./services/api-client";
@@ -116,6 +122,18 @@ function renderScreen(
           onOpenMatch={actions.openMatch}
         />
       );
+    case "analyticsOverview":
+      return <AnalyticsOverviewScreen />;
+    case "analyticsStreaming":
+      return <StreamingAnalyticsScreen />;
+    case "analyticsUsers":
+      return <UsersAnalyticsScreen />;
+    case "analyticsMatches":
+      return <MatchesAnalyticsScreen />;
+    case "analyticsAds":
+      return <AdsAnalyticsScreen />;
+    case "mobileFeatures":
+      return <MobileFeatureControlScreen accessToken={state.accessToken} />;
     case "dashboard":
     default:
       return (

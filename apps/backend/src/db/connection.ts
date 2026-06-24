@@ -538,6 +538,44 @@ function migrateExistingOperationalState(database: DatabaseSync) {
     database.exec("ALTER TABLE countries ADD COLUMN updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP;");
   }
 
+  if (!hasTable(database, "mobile_analytics_events")) {
+    database.exec(`CREATE TABLE IF NOT EXISTS mobile_analytics_events (
+      id TEXT PRIMARY KEY,
+      event_type TEXT NOT NULL,
+      session_id TEXT,
+      match_id TEXT,
+      payload TEXT,
+      user_agent TEXT,
+      ip_address TEXT,
+      created_at TEXT NOT NULL
+    );`);
+  }
+
+  if (!hasTable(database, "mobile_ad_events")) {
+    database.exec(`CREATE TABLE IF NOT EXISTS mobile_ad_events (
+      id TEXT PRIMARY KEY,
+      promotion_id TEXT,
+      event_type TEXT NOT NULL,
+      session_id TEXT,
+      match_id TEXT,
+      metadata TEXT,
+      created_at TEXT NOT NULL
+    );`);
+  }
+
+  if (!hasTable(database, "mobile_ad_promotions")) {
+    database.exec(`CREATE TABLE IF NOT EXISTS mobile_ad_promotions (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT,
+      action_url TEXT,
+      image_url TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );`);
+  }
+
   if (!hasColumn(database, "competitions", "country_id")) {
     database.exec("ALTER TABLE competitions ADD COLUMN country_id TEXT;");
   }

@@ -204,6 +204,15 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
   const [selectedGroup, setSelectedGroup] = useState("");
   const [groupSearchQuery, setGroupSearchQuery] = useState("");
   const [channelSearchQuery, setChannelSearchQuery] = useState("");
+  const [systemStatus, setSystemStatus] = useState<{
+    backend: string;
+    database: string;
+    footballApi: string;
+    analytics: string;
+    uptime: number;
+    timestamp: string;
+  } | null>(null);
+  const [systemStatusError, setSystemStatusError] = useState<string | null>(null);
 
   const previewConfirmed = Boolean(selectedChannel) && previewedChannelId === selectedChannel?.id;
   const selectedCompetition = useMemo(
@@ -400,12 +409,21 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
         detail: selectedChannel?.name ?? "Select an IPTV channel"
       },
       {
+        label: "System status",
+        value: systemStatus?.backend === "online" ? "Online" : systemStatus?.backend ?? "Loading",
+        detail: systemStatus
+          ? `DB ${systemStatus.database} · Football API ${systemStatus.footballApi} · Analytics ${systemStatus.analytics}`
+          : systemStatusError
+          ? `Error: ${systemStatusError}`
+          : "Refreshing system status..."
+      },
+      {
         label: "Backend status",
         value: backendStatus === "online" ? "Online" : backendStatus === "reconnecting" ? "Reconnecting" : "Offline",
         detail: backendStatus === "online" ? "Operations active" : "Service unavailable"
       }
     ],
-    [liveMatches.length, actionableAlerts, selectedChannel, backendStatus]
+    [liveMatches.length, actionableAlerts, selectedChannel, backendStatus, systemStatus, systemStatusError]
   );
 
   useEffect(() => {
@@ -433,6 +451,34 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
 
     return () => {
       active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    const refreshSystemStatus = async () => {
+      try {
+        const status = await apiClient.systemStatus();
+        if (!active) {
+          return;
+        }
+        setSystemStatus(status);
+        setSystemStatusError(null);
+      } catch (error: unknown) {
+        if (!active) {
+          return;
+        }
+        setSystemStatus(null);
+        setSystemStatusError(error instanceof Error ? error.message : String(error));
+      }
+    };
+
+    refreshSystemStatus();
+    const interval = window.setInterval(refreshSystemStatus, 30000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
     };
   }, []);
 

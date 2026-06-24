@@ -67,6 +67,8 @@ const maxBackups = Number(process.env.MAX_BACKUPS ?? 20);
 const maxAgeDays = Number(process.env.MAX_AGE_DAYS ?? 7);
 const backupDir = process.env.BACKUP_DIR ?? "/tmp/backups";
 const backupIntervalMs = Number(process.env.BACKUP_INTERVAL_MS ?? 15 * 60 * 1000);
+const errorReportingEnabled = (process.env.ERROR_REPORTING_ENABLED ?? "true").toLowerCase() === "true";
+const sentryDsn = process.env.SENTRY_DSN ?? "";
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error("PORT must be an integer between 1 and 65535.");
@@ -112,4 +114,6 @@ export const runtimeConfig = {
   backupDir,
   backupIntervalMs,
   autoImportMigration,
+  errorReportingEnabled,
+  sentryDsn,
 };

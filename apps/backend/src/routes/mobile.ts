@@ -2,6 +2,7 @@ import type { Request } from "express";
 import { Router } from "express";
 
 import { MatchService } from "../services/match-service.js";
+import { MobileFeatureService } from "../services/mobile-feature-service.js";
 
 function normalizeUploadsUrl(request: Request, url: string | undefined | null) {
   if (!url) {
@@ -41,4 +42,22 @@ mobileRouter.get("/matches/live", (request, response) => {
   response.json({
     data: matches
   });
+});
+
+mobileRouter.get("/features", (_request, response) => {
+  try {
+    const features = MobileFeatureService.getNavigationFeatures();
+    response.json({
+      data: {
+        navigation: features.navigation,
+        timestamp: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    console.error("[mobile/features] GET failed:", error);
+    response.status(500).json({
+      error: "mobile_features_fetch_failed",
+      message: "Failed to fetch mobile feature flags"
+    });
+  }
 });

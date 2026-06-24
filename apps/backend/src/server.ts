@@ -1,8 +1,9 @@
 import { createApp } from "./app.js";
-import { env } from "./config/env.js";
+import { env, runtimeConfig } from "./config/env.js";
 import { getDatabase } from "./db/connection.js";
 import validateUploadsAtStartup from "./startup/validateUploads.js";
 import { ScoreService } from "./services/score-service.js";
+import * as Sentry from "@sentry/node";
 
 const footballStartupConfig = {
   maxRetries: 3,
@@ -52,6 +53,15 @@ async function initializeFootballService(attempt = 1) {
 
 // run lightweight uploads validation before starting the server
 validateUploadsAtStartup();
+
+if (runtimeConfig.errorReportingEnabled && runtimeConfig.sentryDsn) {
+  Sentry.init({
+    dsn: runtimeConfig.sentryDsn,
+    environment: process.env.NODE_ENV ?? "development",
+    tracesSampleRate: process.env.NODE_ENV === "production" ? 0.1 : 1.0,
+    attachStacktrace: true,
+  });
+}
 
 (async () => {
   const app = createApp();

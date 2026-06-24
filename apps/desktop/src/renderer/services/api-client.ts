@@ -102,6 +102,16 @@ export const apiClient = {
 
     return (await response.json()) as { status: string; service: string; database: string; timestamp: string };
   },
+  async systemStatus() {
+    return request<{
+      backend: string;
+      database: string;
+      footballApi: string;
+      analytics: string;
+      uptime: number;
+      timestamp: string;
+    }>("/system/status");
+  },
   async createBackup() {
     return request<{ backup: { filename: string; size: number; createdAt: string } }>("/system/backup", {
       method: "POST"
@@ -416,5 +426,27 @@ export const apiClient = {
   },
   listLiveMatches() {
     return request<PublishedLiveMatch[]>("/live-matches/current");
+  },
+  getMobileFeatures() {
+    return request<{
+      navigation: {
+        liveScores: { enabled: boolean; message: string | null };
+        sports: { enabled: boolean; message: string | null };
+        live: { enabled: boolean; message: string | null };
+      };
+      timestamp: string;
+    }>("/mobile/features");
+  },
+  updateMobileFeature(featureKey: string, enabled: boolean, message: string | null, accessToken: string) {
+    return request<{ featureKey: string; enabled: boolean; message: string | null }>(
+      "/api/admin/mobile/features",
+      {
+        method: "PUT",
+        headers: {
+          authorization: `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({ featureKey, enabled, message })
+      }
+    );
   }
 };

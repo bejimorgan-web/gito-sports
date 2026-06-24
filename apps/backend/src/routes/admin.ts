@@ -2,6 +2,9 @@ import { Router } from "express";
 import crypto from "node:crypto";
 import { getDatabase } from "../db/connection.js";
 import { env } from "../config/env.js";
+import { protectedRoute } from "../middleware/protected.js";
+import { MobileConfigRepository } from "../repositories/mobile-config-repository.js";
+import { MobileFeatureService } from "../services/mobile-feature-service.js";
 
 export const adminRouter = Router();
 
@@ -103,3 +106,94 @@ function insertAdminUserIfAllowed(database: any, email: string, password: string
 
   return { createdAdmin: true, adminEmail: email };
 }
+
+/**
+ * PUT /admin/config/mobile
+ * Update mobile navigation feature configuration.
+ * 
+ * Request body:
+ * {
+ *   "navigation": {
+ *     "liveScores": boolean,
+ *     "sports": boolean,
+ *     "live": boolean
+ *   }
+ * }
+ */
+adminRouter.put("/config/mobile", (request, response) => {
+  try {
+    const body = request.body as any;
+    const navigationUpdate = body?.navigation;
+
+    if (!navigationUpdate || typeof navigationUpdate !== "object") {
+      response.status(400).json({
+        error: "invalid_request",
+        message: "Request body must contain 'navigation' object"
+      });
+      return;
+    }
+
+    const updated = MobileConfigRepository.updateNavigationConfig(navigationUpdate);
+    console.log("[admin] mobile config updated:", updated);
+
+    response.json({
+      navigation: updated,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error("[admin/config/mobile] PUT failed:", error);
+    response.status(500).json({
+      error: "config_update_failed",
+      message: "Failed to update mobile configuration"
+    });
+  }
+});
+
+adminRouter.put("/mobile/features", protectedRoute, (request, response) => {
+  try {
+    const body = request.body as any;
+    const featureKey = body?.featureKey?.toString();
+    const enabled = body?.enabled;
+    const displayMessage = body?.message?.toString() ?? null;
+
+    if (!featureKey || typeof enabled !== "boolean") {
+      response.status(400).json({
+        error: "invalid_request",
+        message: "Request body must contain featureKey and enabled boolean"
+      });
+      return;
+    }
+
+    const allowedKeys = [
+      "navigation.liveScores",
+      "navigation.sports",
+      "navigation.live"
+    ];
+
+    if (!allowedKeys.includes(featureKey)) {
+      response.status(400).json({
+        error: "invalid_feature_key",
+        message: "Unsupported mobile feature key"
+      });
+      return;
+    }
+
+    const updated = MobileFeatureService.updateNavigationFeature(featureKey, enabled, displayMessage);
+    console.log("[admin/mobile/features] updated feature", { featureKey, enabled, displayMessage });
+
+    response.json({
+      data: {
+        featureKey,
+        enabled: updated.enabled,
+        message: updated.message
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error("[admin/mobile/features] PUT failed:", error);
+    response.status(500).json({
+      error: "mobile_feature_update_failed",
+      message: "Failed to update mobile feature flag"
+    });
+  }
+});

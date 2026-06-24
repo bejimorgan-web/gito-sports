@@ -2,29 +2,74 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:ui';
+
+import 'app_config.dart';
+import 'services/analytics_service.dart';
+import 'services/remote_config_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
+import 'services/ad_manager.dart';
+
 const appLogoUrl =
     'https://cdn.iconscout.com/icon/free/png-256/free-sports-4457831-3693644.png';
 const appLogoAsset = 'assets/app_logo.png';
 
-const apiBaseUrl = String.fromEnvironment(
-  'API_URL',
-  defaultValue: 'https://gito-sports.onrender.com',
-);
-
 const appInstallUrl =
     'https://gito.live/install'; // Update with your real Play Store or App Store link
 
-void main() {
-  runApp(const GitoLiveSportsApp());
+const _errorReportingEnabled = bool.fromEnvironment(
+  'ERROR_REPORTING_ENABLED',
+  defaultValue: true,
+);
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  tz.initializeTimeZones();
+  AdManager.initialize();
+
+  if (_errorReportingEnabled) {
+    await _initializeCrashlytics();
+  }
+
+  runZonedGuarded(() {
+    runApp(const GitoLiveSportsApp());
+  }, (error, stackTrace) {
+    if (_errorReportingEnabled) {
+      FirebaseCrashlytics.instance.recordError(error, stackTrace, fatal: true);
+    }
+    print('[GiTO] Uncaught zone error: $error');
+  });
+}
+
+Future<void> _initializeCrashlytics() async {
+  try {
+    await Firebase.initializeApp();
+    await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(true);
+
+    FlutterError.onError = (FlutterErrorDetails details) {
+      FlutterError.presentError(details);
+      FirebaseCrashlytics.instance.recordFlutterError(details);
+    };
+
+    PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+      return true;
+    };
+  } catch (error) {
+    print('[GiTO] Crashlytics initialization failed: $error');
+  }
 }
 
 class GitoLiveSportsApp extends StatelessWidget {
@@ -486,7 +531,7 @@ class NotificationService {
       body,
       tz.TZDateTime.from(scheduledDate, tz.local),
       _notificationDetails(),
-      androidAllowWhileIdle: true,
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
       matchDateTimeComponents: DateTimeComponents.dateAndTime,
@@ -699,20 +744,71 @@ class LiveHomeScreen extends StatefulWidget {
 
 class _LiveHomeScreenState extends State<LiveHomeScreen> {
   final _feedService = const MobileFeedService();
+  final _analyticsService = const MobileAnalyticsService();
   final _matches = <LiveMatch>[];
   final _knownMatchIds = <String>{};
   FeedConnectionState _connectionState = FeedConnectionState.reconnecting;
   Timer? _refreshTimer;
   int _activeTab = 0;
   bool _firstLoad = true;
+  
+  // Remote config for navigation
+  MobileNavigationConfig? _navConfig;
+  bool _configLoaded = false;
 
   @override
   void initState() {
     super.initState();
+    unawaited(AdManager.initialize());
     unawaited(NotificationService.instance.initialize());
+    unawaited(_analyticsService.trackEvent(eventType: 'app_open'));
+    unawaited(_loadRemoteConfig());
     unawaited(_refreshFeed());
     _refreshTimer =
         Timer.periodic(const Duration(seconds: 5), (_) => _refreshFeed());
+  }
+  
+  Future<void> _loadRemoteConfig() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final configService = RemoteConfigService(
+        apiBaseUrl: apiBaseUrl,
+        prefs: prefs,
+      );
+
+      final config = await configService.getNavigationConfig();
+
+      setState(() {
+        _navConfig = config;
+        _configLoaded = true;
+      });
+
+      final featureEvents = {
+        'Live Scores': config.liveScores,
+        'Sports': config.sports,
+        'Live': config.live,
+      };
+
+      for (final entry in featureEvents.entries) {
+        unawaited(_analyticsService.trackEvent(
+          eventType: entry.value ? 'feature_enabled' : 'feature_disabled',
+          payload: {'feature': entry.key},
+        ));
+      }
+
+      print('[Mobile] Remote config loaded: $_navConfig');
+    } catch (e) {
+      print('[Mobile] Failed to load remote config: $e');
+
+      setState(() {
+        _navConfig = MobileNavigationConfig(
+          liveScores: true,
+          sports: true,
+          live: true,
+        );
+        _configLoaded = true;
+      });
+    }
   }
 
   @override
@@ -733,6 +829,11 @@ class _LiveHomeScreenState extends State<LiveHomeScreen> {
       final newlyAssignedToday = nextMatches.where((match) {
         return !_knownMatchIds.contains(match.id) && _isToday(match.startsAt);
       }).toList();
+
+      unawaited(_analyticsService.trackEvent(
+        eventType: 'feed_refresh',
+        payload: {'matchCount': nextMatches.length},
+      ));
 
       setState(() {
         _matches
@@ -776,30 +877,125 @@ class _LiveHomeScreenState extends State<LiveHomeScreen> {
   }
 
   void _shareApp() {
-    Share.share(
-      'GiTO Live Sports is installed on my phone — watch live games, get kickoff reminders, and join the match feed. '
-      'Install it here: $appInstallUrl',
-      subject: 'Install GiTO Live Sports',
+    unawaited(_analyticsService.trackEvent(eventType: 'share_initiated'));
+    SharePlus.instance.share(
+      ShareParams(
+        text:
+            'GiTO Live Sports is installed on my phone — watch live games, get kickoff reminders, and join the match feed. '
+            'Install it here: $appInstallUrl',
+        subject: 'Install GiTO Live Sports',
+      ),
+    );
+  }
+
+  void _showPromotions() {
+    unawaited(_analyticsService.trackEvent(eventType: 'promotions_open'));
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const PromotionsScreen(),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final screens = [
-      const LiveScoresScreen(),
-      SportsScreen(matches: List.unmodifiable(_matches)),
-      LiveTab(
-        connectionState: _connectionState,
-        firstLoad: _firstLoad,
-        matches: List.unmodifiable(_matches),
-        onRefresh: _refreshFeed,
-      ),
-    ];
+    // Get the navigation config (default to all enabled if not loaded)
+    final config = _navConfig ?? MobileNavigationConfig(
+      liveScores: true,
+      sports: true,
+      live: true,
+    );
+    
+    // Build available screens based on config
+    final availableScreens = <Widget>[];
+    final availableDestinations = <NavigationDestination>[];
+    final screenLabels = <String>[];
+    
+    // Live Scores tab
+    if (config.liveScores) {
+      availableScreens.add(const LiveScoresScreen());
+      availableDestinations.add(
+        const NavigationDestination(
+          icon: Icon(Icons.scoreboard_rounded),
+          label: 'Live Scores',
+        ),
+      );
+      screenLabels.add('Live Scores');
+    }
+    
+    // Sports tab
+    if (config.sports) {
+      availableScreens.add(SportsScreen(matches: List.unmodifiable(_matches)));
+      availableDestinations.add(
+        const NavigationDestination(
+          icon: Icon(Icons.sports_soccer_rounded),
+          label: 'Sports',
+        ),
+      );
+      screenLabels.add('Sports');
+    }
+    
+    // Live tab
+    if (config.live) {
+      availableScreens.add(
+        LiveTab(
+          connectionState: _connectionState,
+          firstLoad: _firstLoad,
+          matches: List.unmodifiable(_matches),
+          onRefresh: _refreshFeed,
+        ),
+      );
+      availableDestinations.add(
+        const NavigationDestination(
+          icon: Icon(Icons.live_tv_rounded),
+          label: 'Live',
+        ),
+      );
+      screenLabels.add('Live');
+    }
+    
+    final bool maintenanceMode = availableScreens.isEmpty;
+    if (maintenanceMode) {
+      availableScreens.add(
+        Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text(
+                  'This experience is temporarily unavailable.',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'The operator has disabled all navigation tabs for maintenance. Please try again shortly.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Clamp active tab to valid range
+    if (_activeTab >= availableScreens.length) {
+      _activeTab = 0;
+    }
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('GiTO Live Sports'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.campaign_rounded),
+            tooltip: 'Promotions',
+            onPressed: _showPromotions,
+          ),
           IconButton(
             icon: const Icon(Icons.share_rounded),
             tooltip: 'Share app',
@@ -809,27 +1005,21 @@ class _LiveHomeScreenState extends State<LiveHomeScreen> {
       ),
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 180),
-        child: screens[_activeTab],
+        child: availableScreens[_activeTab],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _activeTab,
         backgroundColor: const Color(0xFF101418),
         indicatorColor: const Color(0x2E20D37B),
-        onDestinationSelected: (index) => setState(() => _activeTab = index),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.scoreboard_rounded),
-            label: 'Live Scores',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.sports_soccer_rounded),
-            label: 'Sports',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.live_tv_rounded),
-            label: 'Live',
-          ),
-        ],
+        onDestinationSelected: (index) {
+          setState(() => _activeTab = index);
+          // Track navigation event
+          unawaited(_analyticsService.trackEvent(
+            eventType: 'navigation_enabled',
+            payload: {'tab': screenLabels[index]},
+          ));
+        },
+        destinations: availableDestinations,
       ),
     );
   }
@@ -1754,6 +1944,12 @@ class LiveTab extends StatelessWidget {
                   connectionState: connectionState,
                   hasCachedMatches: matches.isNotEmpty,
                 ),
+                const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(18, 10, 18, 10),
+                    child: AdManagerBanner(),
+                  ),
+                ),
                 if (liveMatches.isEmpty)
                   const SliverFillRemaining(
                     hasScrollBody: false,
@@ -1975,6 +2171,10 @@ class LiveMatchCard extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(20),
         onTap: () {
+          unawaited(const MobileAnalyticsService().trackEvent(
+            eventType: 'match_view',
+            matchId: match.id,
+          ));
           Navigator.of(context).push(
             MaterialPageRoute<void>(
               builder: (_) => MatchDetailsScreen(match: match, state: state),
@@ -2293,6 +2493,8 @@ class MatchDetailsScreen extends StatelessWidget {
               const SizedBox(height: 24),
               MatchupPreview(match: match, large: true),
               const SizedBox(height: 24),
+              const AdManagerBanner(),
+              const SizedBox(height: 24),
               if (match.sportName?.isNotEmpty == true)
                 LogoDetailRow(
                   logoUrl: match.sportLogoUrl,
@@ -2323,7 +2525,15 @@ class MatchDetailsScreen extends StatelessWidget {
                 icon: const Icon(Icons.play_arrow_rounded),
                 label: const Text('WATCH LIVE'),
                 onPressed: canWatch
-                    ? () {
+                    ? () async {
+                        unawaited(const MobileAnalyticsService().trackEvent(
+                          eventType: 'playback_requested',
+                          matchId: match.id,
+                        ));
+                        await AdManager.showRewarded(matchId: match.id);
+                        if (!context.mounted) {
+                          return;
+                        }
                         Navigator.of(context).push(
                           MaterialPageRoute<void>(
                             builder: (_) => PlaybackScreen(match: match),
@@ -2351,6 +2561,7 @@ class PlaybackScreen extends StatefulWidget {
 
 class _PlaybackScreenState extends State<PlaybackScreen>
     with WidgetsBindingObserver {
+  final _analyticsService = const MobileAnalyticsService();
   PlaybackState _state = PlaybackState.loading;
   VideoPlayerController? _videoController;
   Future<void>? _initializeVideoPlayerFuture;
@@ -2360,6 +2571,11 @@ class _PlaybackScreenState extends State<PlaybackScreen>
   bool _ownsController = false;
   bool _isFullscreenActive = false;
   PlaybackScaleMode _scaleMode = PlaybackScaleMode.fit;
+  bool _hasStartedPlayback = false;
+  bool _hasLoggedStreamError = false;
+  bool _isBuffering = false;
+  DateTime? _bufferStartedAt;
+  Size? _lastVideoSize;
 
   @override
   void initState() {
@@ -2387,7 +2603,20 @@ class _PlaybackScreenState extends State<PlaybackScreen>
       _videoController!
         ..setLooping(true)
         ..play();
+      _videoController!.addListener(_onVideoControllerValueChanged);
       WakelockPlus.enable();
+      _hasStartedPlayback = true;
+      _isBuffering = false;
+      _bufferStartedAt = null;
+      _hasLoggedStreamError = false;
+      _lastVideoSize = null;
+      unawaited(_analyticsService.trackEvent(
+        eventType: 'playback_start',
+        matchId: widget.match.id,
+        payload: {
+          'playbackUrl': widget.match.playbackUrl,
+        },
+      ));
       _scheduleHideControls();
       setState(() => _state = PlaybackState.playing);
     }).catchError((error) {
@@ -2405,6 +2634,103 @@ class _PlaybackScreenState extends State<PlaybackScreen>
       if (!mounted) return;
       setState(() => _controlsVisible = false);
     });
+  }
+
+  void _logBufferStart() {
+    if (!_isBuffering) {
+      _isBuffering = true;
+      _bufferStartedAt = DateTime.now();
+      unawaited(_analyticsService.trackEvent(
+        eventType: 'buffer_start',
+        matchId: widget.match.id,
+        payload: {
+          'playbackUrl': widget.match.playbackUrl,
+          'timestamp': DateTime.now().toIso8601String(),
+        },
+      ));
+    }
+  }
+
+  void _logBufferEnd() {
+    if (_isBuffering) {
+      final startedAt = _bufferStartedAt;
+      final duration = startedAt == null
+          ? 0
+          : DateTime.now().difference(startedAt).inSeconds;
+      _isBuffering = false;
+      _bufferStartedAt = null;
+      unawaited(_analyticsService.trackEvent(
+        eventType: 'buffer_end',
+        matchId: widget.match.id,
+        payload: {
+          'playbackUrl': widget.match.playbackUrl,
+          'bufferDurationSeconds': duration,
+          'timestamp': DateTime.now().toIso8601String(),
+        },
+      ));
+    }
+  }
+
+  void _logStreamError(Object error) {
+    unawaited(_analyticsService.trackEvent(
+      eventType: 'stream_error',
+      matchId: widget.match.id,
+      payload: {
+        'playbackUrl': widget.match.playbackUrl,
+        'error': error.toString(),
+        'timestamp': DateTime.now().toIso8601String(),
+      },
+    ));
+  }
+
+  void _onVideoControllerValueChanged() {
+    if (_videoController == null || !_videoController!.value.isInitialized) {
+      return;
+    }
+
+    final value = _videoController!.value;
+
+    if (value.hasError && !_hasLoggedStreamError) {
+      _hasLoggedStreamError = true;
+      final errorDescription = value.errorDescription?.toString() ?? 'Unknown playback error';
+      _logStreamError(errorDescription);
+      if (mounted) {
+        setState(() {
+          _videoError = errorDescription;
+          _state = PlaybackState.failure;
+        });
+      }
+      return;
+    }
+
+    if (value.isBuffering) {
+      _logBufferStart();
+    } else {
+      _logBufferEnd();
+    }
+
+    final size = value.size;
+    if (size.width > 0 && size.height > 0) {
+      final qualityLabel = '${size.width.toInt()}x${size.height.toInt()}';
+      if (_lastVideoSize == null) {
+        _lastVideoSize = size;
+      } else if (_lastVideoSize!.width != size.width || _lastVideoSize!.height != size.height) {
+        _lastVideoSize = size;
+        _logQualityChange(qualityLabel);
+      }
+    }
+  }
+
+  void _logQualityChange(String qualityLabel) {
+    unawaited(_analyticsService.trackEvent(
+      eventType: 'quality_change',
+      matchId: widget.match.id,
+      payload: {
+        'playbackUrl': widget.match.playbackUrl,
+        'quality': qualityLabel,
+        'timestamp': DateTime.now().toIso8601String(),
+      },
+    ));
   }
 
   void _showControls() {
@@ -2506,9 +2832,11 @@ class _PlaybackScreenState extends State<PlaybackScreen>
     if (_videoController!.value.isPlaying) {
       _videoController!.pause();
       setState(() => _state = PlaybackState.buffering);
+      _logBufferStart();
     } else {
       _videoController!.play();
       setState(() => _state = PlaybackState.playing);
+      _logBufferEnd();
     }
     _scheduleHideControls();
   }
@@ -2588,6 +2916,13 @@ class _PlaybackScreenState extends State<PlaybackScreen>
       SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     }
     if (_ownsController) {
+      if (_hasStartedPlayback) {
+        unawaited(_analyticsService.trackEvent(
+          eventType: 'stream_end',
+          matchId: widget.match.id,
+        ));
+      }
+      _videoController?.removeListener(_onVideoControllerValueChanged);
       _videoController?.dispose();
       WakelockPlus.disable();
     }
@@ -2809,6 +3144,170 @@ class _PlaybackScreenState extends State<PlaybackScreen>
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class PromotionsScreen extends StatefulWidget {
+  const PromotionsScreen({super.key});
+
+  @override
+  State<PromotionsScreen> createState() => _PromotionsScreenState();
+}
+
+class _PromotionsScreenState extends State<PromotionsScreen> {
+  final _analyticsService = const MobileAnalyticsService();
+  late final Future<List<MobilePromotion>> _promotionsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _promotionsFuture = _analyticsService.fetchPromotions();
+    unawaited(_analyticsService.trackEvent(eventType: 'promotions_view'));
+  }
+
+  Future<void> _openPromotion(MobilePromotion promotion) async {
+    if (promotion.actionUrl?.isEmpty != false) {
+      return;
+    }
+
+    unawaited(_analyticsService.trackAdEvent(
+      eventType: 'promotion_click',
+      promotionId: promotion.id,
+      metadata: {
+        'url': promotion.actionUrl,
+      },
+    ));
+
+    final uri = Uri.tryParse(promotion.actionUrl!);
+    if (uri != null && await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Promotions')),
+      body: FutureBuilder<List<MobilePromotion>>(
+        future: _promotionsFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          if (snapshot.hasError) {
+            return const Center(
+              child: EmptyPanel(
+                text: 'Unable to load promotions. Pull to retry.',
+              ),
+            );
+          }
+
+          final promotions = snapshot.data ?? [];
+
+          if (promotions.isEmpty) {
+            return const Center(
+              child: EmptyPanel(
+                text: 'No promotions are available right now.',
+              ),
+            );
+          }
+
+          return RefreshIndicator(
+            onRefresh: () async {
+              setState(() {
+                _promotionsFuture = _analyticsService.fetchPromotions();
+              });
+              await _promotionsFuture;
+            },
+            child: ListView.separated(
+              padding: const EdgeInsets.all(18),
+              itemCount: promotions.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (context, index) {
+                final promotion = promotions[index];
+                return PromotionTile(
+                  promotion: promotion,
+                  onTap: () => _openPromotion(promotion),
+                );
+              },
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class PromotionTile extends StatelessWidget {
+  const PromotionTile({
+    required this.promotion,
+    required this.onTap,
+    super.key,
+  });
+
+  final MobilePromotion promotion;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Ink(
+          decoration: BoxDecoration(
+            color: const Color(0xFF101418),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: const Color(0xFF20262B)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  promotion.title,
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleLarge
+                      ?.copyWith(fontWeight: FontWeight.w900),
+                ),
+                if (promotion.description?.isNotEmpty == true) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    promotion.description!,
+                    style: const TextStyle(color: Color(0xFFAAB4AE)),
+                  ),
+                ],
+                if (promotion.actionUrl?.isNotEmpty == true) ...[
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          promotion.actionUrl!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Color(0xFF20D37B),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      const Icon(Icons.open_in_new_rounded,
+                          color: Color(0xFF20D37B)),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
