@@ -5,15 +5,22 @@ import validateUploadsAtStartup from "./startup/validateUploads.js";
 import { ScoreService } from "./services/score-service.js";
 import * as Sentry from "@sentry/node";
 
-const footballStartupConfig = {
-  maxRetries: 3,
-  retryDelayMs: 5000
-};
+let footballServiceInitialized = false;
 
-async function initializeFootballService(attempt = 1) {
-  if (attempt === 1) {
-    console.log('FOOTBALL STARTUP INIT TRIGGERED');
-    console.log('API_FOOTBALL_KEY PRESENT =', Boolean(env.apiFootballKey?.trim()));
+async function initializeFootballService() {
+  if (footballServiceInitialized) {
+    console.log('[startup] FOOTBALL initialization already started, skipping duplicate startup call.');
+    return;
+  }
+
+  footballServiceInitialized = true;
+
+  console.log('FOOTBALL STARTUP INIT TRIGGERED');
+  console.log('API_FOOTBALL_KEY PRESENT =', Boolean(env.apiFootballKey?.trim()));
+
+  if (!env.apiFootballKey?.trim()) {
+    console.warn('[startup] FOOTBALL disabled because API_FOOTBALL_KEY is missing or empty.');
+    return;
   }
 
   const status = (ScoreService as any).getStatus?.() ?? {
@@ -24,7 +31,7 @@ async function initializeFootballService(attempt = 1) {
     cacheKeys: []
   };
 
-  console.log('[startup] FOOTBALL INIT ATTEMPT ' + attempt + ': cacheInitialized=' + Boolean(status.cacheInitialized));
+  console.log('[startup] FOOTBALL INIT: cacheInitialized=' + Boolean(status.cacheInitialized));
 
   try {
     await (ScoreService as any).refreshAll();
@@ -40,13 +47,6 @@ async function initializeFootballService(attempt = 1) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error('FOOTBALL INIT FAILED ->', message);
-
-    if (attempt < footballStartupConfig.maxRetries) {
-      console.log('FOOTBALL INIT RETRY', attempt + 1, 'IN', footballStartupConfig.retryDelayMs, 'ms');
-      setTimeout(() => void initializeFootballService(attempt + 1), footballStartupConfig.retryDelayMs);
-      return;
-    }
-
     console.error('FOOTBALL INITIAL REFRESH STATUS = fail');
   }
 }

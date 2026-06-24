@@ -168,6 +168,24 @@ export function AnalyticsBarChart({
   );
 }
 
+function smoothPoints(points: AnalyticsTimeSeriesPoint[], windowSize = 3) {
+  if (points.length < windowSize) {
+    return points;
+  }
+
+  return points.map((point, index) => {
+    const half = Math.floor(windowSize / 2);
+    const windowStart = Math.max(0, index - half);
+    const windowEnd = Math.min(points.length, index + half + 1);
+    const windowPoints = points.slice(windowStart, windowEnd);
+    const average = windowPoints.reduce((sum, item) => sum + item.value, 0) / windowPoints.length;
+    return {
+      label: point.label,
+      value: Math.round(average),
+    };
+  });
+}
+
 export function AnalyticsLineChart({
   title,
   points
@@ -175,7 +193,11 @@ export function AnalyticsLineChart({
   title: string;
   points: AnalyticsTimeSeriesPoint[];
 }) {
-  const maxValue = useMemo(() => Math.max(...points.map((point) => point.value), 1), [points]);
+  const smoothedPoints = useMemo(() => smoothPoints(points, 3), [points]);
+  const maxValue = useMemo(
+    () => Math.max(...smoothedPoints.map((point) => point.value), 1),
+    [smoothedPoints]
+  );
 
   return (
     <section className="console-panel analytics-line-chart">
@@ -185,11 +207,11 @@ export function AnalyticsLineChart({
         </div>
       </div>
       <div className="analytics-line-chart__axis">
-        {points.length === 0 ? (
+        {smoothedPoints.length === 0 ? (
           <div className="analytics-empty-state">No data to display</div>
         ) : (
           <div className="analytics-line-chart__points">
-            {points.map((point, index) => {
+            {smoothedPoints.map((point, index) => {
               const width = `${Math.round((point.value / maxValue) * 100)}%`;
               return (
                 <div className="analytics-line-chart__point" key={`${point.label}-${index}`}>

@@ -24,37 +24,12 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
-// Ensure consistent Java/Kotlin JVM targets across all subprojects/plugins
+// Ensure consistent Kotlin JVM targets across all subprojects/plugins
 subprojects {
-    plugins.withId("com.android.library") {
-        extensions.configure<BaseExtension> {
-            compileOptions {
-                sourceCompatibility = JavaVersion.VERSION_17
-                targetCompatibility = JavaVersion.VERSION_17
-                isCoreLibraryDesugaringEnabled = true
-            }
-        }
-    }
-
-    plugins.withId("com.android.application") {
-        extensions.configure<BaseExtension> {
-            compileOptions {
-                sourceCompatibility = JavaVersion.VERSION_17
-                targetCompatibility = JavaVersion.VERSION_17
-                isCoreLibraryDesugaringEnabled = true
-            }
-        }
-    }
-
     tasks.withType<KotlinCompile>().configureEach {
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_17)
         }
-    }
-
-    tasks.withType<JavaCompile>().configureEach {
-        sourceCompatibility = "17"
-        targetCompatibility = "17"
     }
 }
 

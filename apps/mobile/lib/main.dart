@@ -193,7 +193,7 @@ class AppBrandHero extends StatelessWidget {
                             logoAsset!,
                             width: 36,
                             height: 36,
-                            fit: BoxFit.cover,
+                            fit: BoxFit.contain,
                             errorBuilder: (_, __, ___) => const Icon(
                               Icons.sports_soccer_rounded,
                               color: Color(0xFF20D37B),
@@ -204,7 +204,7 @@ class AppBrandHero extends StatelessWidget {
                                 logoUrl!,
                                 width: 36,
                                 height: 36,
-                                fit: BoxFit.cover,
+                                fit: BoxFit.contain,
                                 errorBuilder: (_, __, ___) => const Icon(
                                   Icons.sports_soccer_rounded,
                                   color: Color(0xFF20D37B),

@@ -17,7 +17,7 @@ const DEFAULT_RATE_LIMIT_CONFIGS: Record<ApiUsageType, RateLimitConfig> = {
   live_fixtures: { intervalMs: 30_000, cacheTtlMs: 20_000 }, // 30 sec min interval, 20 sec cache
   fixtures: { intervalMs: 6 * 60 * 60 * 1000, cacheTtlMs: 6 * 60 * 60 * 1000 }, // 6 hours
   logos: { intervalMs: 7 * 24 * 60 * 60 * 1000, cacheTtlMs: 7 * 24 * 60 * 60 * 1000 }, // 7 days
-  leagues: { intervalMs: 6 * 60 * 60 * 1000, cacheTtlMs: 6 * 60 * 60 * 1000 } // 6 hours (same as fixtures)
+  leagues: { intervalMs: 24 * 60 * 60 * 1000, cacheTtlMs: 24 * 60 * 60 * 1000 } // 24 hours
 };
 
 class ApiUsageCache {
@@ -60,6 +60,8 @@ class ApiUsageCache {
 export class ApiUsageGuard {
   private cache = new ApiUsageCache();
   private customConfigs: Map<ApiUsageType, RateLimitConfig> = new Map();
+  private inFlight = new Map<string, Promise<ApiGuardResult<unknown>>>();
+  private currentApiCall: Promise<void> | null = null;
 
   /**
    * Set custom rate limit config for a request type.
@@ -103,76 +105,102 @@ export class ApiUsageGuard {
     cacheKey: string,
     fn: () => Promise<T>
   ): Promise<ApiGuardResult<T>> {
-    const config = this.getConfig(requestType);
-    const now = Date.now();
-
-    // Check in-memory cache first
-    const cachedData = this.cache.get<T>(cacheKey);
-    if (cachedData !== null) {
-      console.log(`[API CACHE HIT] ${requestType} (${cacheKey})`);
-      return {
-        allowed: false,
-        cached: true,
-        data: cachedData,
-        reason: "In-memory cache hit"
-      };
+    const inFlightKey = `${requestType}:${cacheKey}`;
+    if (this.inFlight.has(inFlightKey)) {
+      return this.inFlight.get(inFlightKey)! as Promise<ApiGuardResult<T>>;
     }
 
-    // Check database for last request timestamp
-    const lastRequestTimestamp = ApiUsageRepository.getLastRequestTimestamp(requestType);
-    const timeSinceLastRequest = lastRequestTimestamp ? now - lastRequestTimestamp : null;
-    const isAllowed =
-      lastRequestTimestamp === null || timeSinceLastRequest === null || timeSinceLastRequest >= config.intervalMs;
+    const requestPromise = (async (): Promise<ApiGuardResult<T>> => {
+      const config = this.getConfig(requestType);
+      const now = Date.now();
 
-    if (!isAllowed && timeSinceLastRequest !== null) {
-      const blockedUntil = lastRequestTimestamp! + config.intervalMs;
-      console.log(
-        `[API REQUEST BLOCKED] ${requestType} (${cacheKey}) - Next request allowed at ${new Date(blockedUntil).toISOString()}`
-      );
-
-      // Try to return cached data
+      // Check in-memory cache first
       const cachedData = this.cache.get<T>(cacheKey);
       if (cachedData !== null) {
+        console.log(`[API CACHE HIT] ${requestType} (${cacheKey})`);
         return {
           allowed: false,
           cached: true,
           data: cachedData,
-          blockedUntil,
-          reason: `Rate limit exceeded. Next request allowed in ${Math.ceil((blockedUntil - now) / 1000)}s`
+          reason: "In-memory cache hit"
         };
       }
 
-      // No cached data available
-      return {
-        allowed: false,
-        cached: false,
-        blockedUntil,
-        reason: `Rate limit exceeded. No cached data available.`
-      };
-    }
+      // Check database for last request timestamp
+      const lastRequestTimestamp = ApiUsageRepository.getLastRequestTimestamp(requestType);
+      const timeSinceLastRequest = lastRequestTimestamp ? now - lastRequestTimestamp : null;
+      const isAllowed =
+        lastRequestTimestamp === null || timeSinceLastRequest === null || timeSinceLastRequest >= config.intervalMs;
 
-    // Request is allowed, execute the function
-    console.log(`[API REQUEST SENT] ${requestType} (${cacheKey})`);
-    
+      if (!isAllowed && timeSinceLastRequest !== null) {
+        const blockedUntil = lastRequestTimestamp! + config.intervalMs;
+        console.log(
+          `[API REQUEST BLOCKED] ${requestType} (${cacheKey}) - Next request allowed at ${new Date(blockedUntil).toISOString()}`
+        );
+
+        // Try to return cached data
+        const cachedData = this.cache.get<T>(cacheKey);
+        if (cachedData !== null) {
+          return {
+            allowed: false,
+            cached: true,
+            data: cachedData,
+            blockedUntil,
+            reason: `Rate limit exceeded. Next request allowed in ${Math.ceil((blockedUntil - now) / 1000)}s`
+          };
+        }
+
+        // No cached data available
+        return {
+          allowed: false,
+          cached: false,
+          blockedUntil,
+          reason: `Rate limit exceeded. No cached data available.`
+        };
+      }
+
+      // Request is allowed, execute the function
+      console.log(`[API REQUEST SENT] ${requestType} (${cacheKey})`);
+      let externalApiCall: Promise<T> | null = null;
+      let pendingApiCall: Promise<void> | null = null;
+
+      try {
+        if (this.currentApiCall) {
+          await this.currentApiCall.catch(() => {
+            // Ignore errors from other in-flight requests when serializing.
+          });
+        }
+
+        externalApiCall = fn();
+        pendingApiCall = externalApiCall.then(() => {}).catch(() => {});
+        this.currentApiCall = pendingApiCall;
+
+        const data = await externalApiCall;
+        const cacheTtl = config.cacheTtlMs ?? config.intervalMs;
+        this.cache.set(cacheKey, data, cacheTtl);
+        ApiUsageRepository.updateLastRequestTimestamp(requestType, now);
+
+        return {
+          allowed: true,
+          cached: false,
+          data,
+          reason: "Request sent successfully"
+        };
+      } catch (error) {
+        console.error(`[API REQUEST ERROR] ${requestType} (${cacheKey}):`, error);
+        throw error;
+      } finally {
+        if (pendingApiCall && this.currentApiCall === pendingApiCall) {
+          this.currentApiCall = null;
+        }
+      }
+    })();
+
+    this.inFlight.set(inFlightKey, requestPromise as Promise<ApiGuardResult<unknown>>);
     try {
-      const data = await fn();
-
-      // Cache the result
-      const cacheTtl = config.cacheTtlMs ?? config.intervalMs;
-      this.cache.set(cacheKey, data, cacheTtl);
-
-      // Update database timestamp
-      ApiUsageRepository.updateLastRequestTimestamp(requestType, now);
-
-      return {
-        allowed: true,
-        cached: false,
-        data,
-        reason: "Request sent successfully"
-      };
-    } catch (error) {
-      console.error(`[API REQUEST ERROR] ${requestType} (${cacheKey}):`, error);
-      throw error;
+      return await requestPromise;
+    } finally {
+      this.inFlight.delete(inFlightKey);
     }
   }
 
