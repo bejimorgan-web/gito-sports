@@ -427,15 +427,46 @@ export const apiClient = {
   listLiveMatches() {
     return request<PublishedLiveMatch[]>("/live-matches/current");
   },
-  getMobileFeatures() {
-    return request<{
-      navigation: {
-        liveScores: { enabled: boolean; message: string | null };
-        sports: { enabled: boolean; message: string | null };
-        live: { enabled: boolean; message: string | null };
+  async getMobileFeatures() {
+    let response: Response;
+
+    try {
+      response = await fetch(`${API_BASE_URL}/mobile/features`, {
+        cache: "no-store",
+        headers: {
+          "content-type": "application/json"
+        }
+      });
+    } catch (fetchError) {
+      const message = fetchError instanceof Error ? fetchError.message : String(fetchError);
+      throw new Error(`Network request to ${API_BASE_URL}/mobile/features failed: ${message}`);
+    }
+
+    if (!response.ok) {
+      let message = `Request failed with status ${response.status}`;
+
+      try {
+        const errorBody = (await response.json()) as { message?: string; error?: string };
+        message = errorBody.message ?? errorBody.error ?? message;
+      } catch {
+        // Keep the status message when the backend cannot return JSON.
+      }
+
+      throw new Error(message);
+    }
+
+    const body = (await response.json()) as {
+      data: {
+        navigation: {
+          liveScores: { enabled: boolean; message: string | null };
+          sports: { enabled: boolean; message: string | null };
+          live: { enabled: boolean; message: string | null };
+        };
       };
       timestamp: string;
-    }>("/mobile/features");
+    };
+
+    return body.data;
   },
   updateMobileFeature(featureKey: string, enabled: boolean, message: string | null, accessToken: string) {
     return request<{ featureKey: string; enabled: boolean; message: string | null }>(

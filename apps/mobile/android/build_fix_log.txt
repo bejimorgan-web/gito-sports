@@ -1,0 +1,607 @@
+NOTE: Picked up JDK_JAVA_OPTIONS:  
+Picked up JAVA_TOOL_OPTIONS:  
+Picked up _JAVA_OPTIONS:  
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.14/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+> Configure project :gradle
+WARNING: Unsupported Kotlin plugin version.
+The `embedded-kotlin` and `kotlin-dsl` plugins rely on features of Kotlin `2.0.21` that might work differently than in the requested version `2.2.20`.
+
+> Task :gradle:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :gradle:compileKotlin UP-TO-DATE
+> Task :gradle:compileJava NO-SOURCE
+> Task :gradle:compileGroovy NO-SOURCE
+> Task :gradle:pluginDescriptors UP-TO-DATE
+> Task :gradle:processResources
+> Task :gradle:classes
+> Task :gradle:jar
+WARNING: Your Android app project: app located at: C:\Users\morga\Desktop\Apps\Stream\GiTO Live Sports\apps\mobile\android\app\build.gradle.kts
+applies the Kotlin Gradle Plugin, which will cause build failures in future versions of Flutter. 
+Please migrate your app to Built-in Kotlin using this guide: https://docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin/for-app-developers
+
+WARNING: Your app uses the following plugins that apply Kotlin Gradle Plugin (KGP): package_info_plus, share_plus, wakelock_plus
+Future versions of Flutter will fail to build if your app uses plugins that apply KGP.
+
+Please check the changelogs of these plugins and upgrade to a version that supports Built-in Kotlin.
+If no such version exists, report the issue to the plugin. If necessary, here is a guide on filing 
+an issue against a plugin: https://docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin/for-app-developers#report-incompatible-kotlin-gradle-plugin-usage-to-plugin-authors
+
+If you are a plugin author, please migrate your plugin to Built-in Kotlin using this guide: https://docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin/for-plugin-authors
+> Task :clean
+> Task :app:externalNativeBuildCleanDebug
+> Task :app:externalNativeBuildCleanProfile
+> Task :app:externalNativeBuildCleanRelease
+> Task :app:clean UP-TO-DATE
+> Task :firebase_core:clean UP-TO-DATE
+> Task :firebase_crashlytics:clean UP-TO-DATE
+> Task :flutter_local_notifications:clean UP-TO-DATE
+> Task :google_mobile_ads:clean UP-TO-DATE
+
+> Task :jni:externalNativeBuildCleanDebug
+Clean jni-armeabi-v7a
+Clean jni-arm64-v8a
+Clean jni-x86
+Clean jni-x86_64
+
+> Task :jni:externalNativeBuildCleanProfile
+Clean jni-armeabi-v7a
+Clean jni-arm64-v8a
+Clean jni-x86
+Clean jni-x86_64
+
+> Task :jni:externalNativeBuildCleanRelease
+Clean jni-armeabi-v7a
+Clean jni-arm64-v8a
+Clean jni-x86
+Clean jni-x86_64
+
+> Task :jni:clean
+> Task :jni_flutter:clean UP-TO-DATE
+> Task :package_info_plus:clean UP-TO-DATE
+> Task :share_plus:clean UP-TO-DATE
+> Task :shared_preferences_android:clean UP-TO-DATE
+> Task :url_launcher_android:clean UP-TO-DATE
+> Task :video_player_android:clean UP-TO-DATE
+> Task :wakelock_plus:clean UP-TO-DATE
+> Task :webview_flutter_android:clean UP-TO-DATE
+> Task :app:DebugMinSdkCheck
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :firebase_core:preBuild UP-TO-DATE
+> Task :firebase_core:preDebugBuild UP-TO-DATE
+> Task :firebase_crashlytics:preBuild UP-TO-DATE
+> Task :firebase_crashlytics:preDebugBuild UP-TO-DATE
+> Task :flutter_local_notifications:preBuild UP-TO-DATE
+> Task :flutter_local_notifications:preDebugBuild UP-TO-DATE
+> Task :firebase_core:writeDebugAarMetadata
+> Task :firebase_crashlytics:writeDebugAarMetadata
+> Task :google_mobile_ads:preBuild UP-TO-DATE
+> Task :google_mobile_ads:preDebugBuild UP-TO-DATE
+> Task :jni:preBuild UP-TO-DATE
+> Task :jni:preDebugBuild UP-TO-DATE
+> Task :flutter_local_notifications:writeDebugAarMetadata
+> Task :google_mobile_ads:writeDebugAarMetadata
+> Task :jni_flutter:preBuild UP-TO-DATE
+> Task :jni_flutter:preDebugBuild UP-TO-DATE
+> Task :jni:writeDebugAarMetadata
+> Task :package_info_plus:preBuild UP-TO-DATE
+> Task :package_info_plus:preDebugBuild UP-TO-DATE
+> Task :jni_flutter:writeDebugAarMetadata
+> Task :share_plus:preBuild UP-TO-DATE
+> Task :share_plus:preDebugBuild UP-TO-DATE
+> Task :package_info_plus:writeDebugAarMetadata
+> Task :shared_preferences_android:preBuild UP-TO-DATE
+> Task :shared_preferences_android:preDebugBuild UP-TO-DATE
+> Task :share_plus:writeDebugAarMetadata
+> Task :url_launcher_android:preBuild UP-TO-DATE
+> Task :url_launcher_android:preDebugBuild UP-TO-DATE
+> Task :shared_preferences_android:writeDebugAarMetadata
+> Task :video_player_android:preBuild UP-TO-DATE
+> Task :video_player_android:preDebugBuild UP-TO-DATE
+> Task :wakelock_plus:preBuild UP-TO-DATE
+> Task :wakelock_plus:preDebugBuild UP-TO-DATE
+> Task :webview_flutter_android:preBuild UP-TO-DATE
+> Task :webview_flutter_android:preDebugBuild UP-TO-DATE
+> Task :app:cleanMergeDebugAssets UP-TO-DATE
+> Task :url_launcher_android:writeDebugAarMetadata
+> Task :video_player_android:writeDebugAarMetadata
+> Task :webview_flutter_android:writeDebugAarMetadata
+> Task :wakelock_plus:writeDebugAarMetadata
+> Task :app:checkDebugAarMetadata
+> Task :app:compileFlutterBuildDebug
+> Task :app:mergeDebugShaders
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :firebase_core:mergeDebugShaders
+> Task :firebase_core:compileDebugShaders NO-SOURCE
+> Task :firebase_core:generateDebugAssets UP-TO-DATE
+> Task :firebase_core:mergeDebugAssets
+> Task :firebase_crashlytics:mergeDebugShaders
+> Task :firebase_crashlytics:compileDebugShaders NO-SOURCE
+> Task :firebase_crashlytics:generateDebugAssets UP-TO-DATE
+> Task :firebase_crashlytics:mergeDebugAssets
+> Task :flutter_local_notifications:mergeDebugShaders
+> Task :flutter_local_notifications:compileDebugShaders NO-SOURCE
+> Task :flutter_local_notifications:generateDebugAssets UP-TO-DATE
+> Task :flutter_local_notifications:mergeDebugAssets
+> Task :google_mobile_ads:mergeDebugShaders
+> Task :google_mobile_ads:compileDebugShaders NO-SOURCE
+> Task :google_mobile_ads:generateDebugAssets UP-TO-DATE
+> Task :google_mobile_ads:mergeDebugAssets
+> Task :jni:mergeDebugShaders
+> Task :jni:compileDebugShaders NO-SOURCE
+> Task :jni:generateDebugAssets UP-TO-DATE
+> Task :jni:mergeDebugAssets
+> Task :jni_flutter:mergeDebugShaders
+> Task :jni_flutter:compileDebugShaders NO-SOURCE
+> Task :jni_flutter:generateDebugAssets UP-TO-DATE
+> Task :jni_flutter:mergeDebugAssets
+> Task :package_info_plus:mergeDebugShaders
+> Task :package_info_plus:compileDebugShaders NO-SOURCE
+> Task :package_info_plus:generateDebugAssets UP-TO-DATE
+> Task :package_info_plus:mergeDebugAssets
+> Task :share_plus:mergeDebugShaders
+> Task :share_plus:compileDebugShaders NO-SOURCE
+> Task :share_plus:generateDebugAssets UP-TO-DATE
+> Task :share_plus:mergeDebugAssets
+> Task :shared_preferences_android:mergeDebugShaders
+> Task :shared_preferences_android:compileDebugShaders NO-SOURCE
+> Task :shared_preferences_android:generateDebugAssets UP-TO-DATE
+> Task :shared_preferences_android:mergeDebugAssets
+> Task :url_launcher_android:mergeDebugShaders
+> Task :url_launcher_android:compileDebugShaders NO-SOURCE
+> Task :url_launcher_android:generateDebugAssets UP-TO-DATE
+> Task :url_launcher_android:mergeDebugAssets
+> Task :video_player_android:mergeDebugShaders
+> Task :video_player_android:compileDebugShaders NO-SOURCE
+> Task :video_player_android:generateDebugAssets UP-TO-DATE
+> Task :video_player_android:mergeDebugAssets
+> Task :wakelock_plus:mergeDebugShaders
+> Task :wakelock_plus:compileDebugShaders NO-SOURCE
+> Task :wakelock_plus:generateDebugAssets UP-TO-DATE
+> Task :wakelock_plus:mergeDebugAssets
+> Task :webview_flutter_android:mergeDebugShaders
+> Task :webview_flutter_android:compileDebugShaders NO-SOURCE
+> Task :webview_flutter_android:generateDebugAssets UP-TO-DATE
+> Task :webview_flutter_android:mergeDebugAssets
+> Task :app:mergeDebugAssets
+> Task :app:copyFlutterAssetsDebug
+> Task :app:generateDebugResValues
+> Task :firebase_core:generateDebugResValues
+> Task :firebase_core:generateDebugResources
+> Task :firebase_core:packageDebugResources
+> Task :firebase_crashlytics:generateDebugResValues
+> Task :firebase_crashlytics:generateDebugResources
+> Task :firebase_crashlytics:packageDebugResources
+> Task :flutter_local_notifications:generateDebugResValues
+> Task :flutter_local_notifications:generateDebugResources
+> Task :flutter_local_notifications:packageDebugResources
+> Task :google_mobile_ads:generateDebugResValues
+> Task :google_mobile_ads:generateDebugResources
+> Task :google_mobile_ads:packageDebugResources
+> Task :jni:generateDebugResValues
+> Task :jni:generateDebugResources
+> Task :jni:packageDebugResources
+> Task :jni_flutter:generateDebugResValues
+> Task :jni_flutter:generateDebugResources
+> Task :jni_flutter:packageDebugResources
+> Task :package_info_plus:generateDebugResValues
+> Task :package_info_plus:generateDebugResources
+> Task :package_info_plus:packageDebugResources
+> Task :share_plus:generateDebugResValues
+> Task :share_plus:generateDebugResources
+> Task :share_plus:packageDebugResources
+> Task :shared_preferences_android:generateDebugResValues
+> Task :shared_preferences_android:generateDebugResources
+> Task :shared_preferences_android:packageDebugResources
+> Task :url_launcher_android:generateDebugResValues
+> Task :url_launcher_android:generateDebugResources
+> Task :url_launcher_android:packageDebugResources
+> Task :video_player_android:generateDebugResValues
+> Task :video_player_android:generateDebugResources
+> Task :video_player_android:packageDebugResources
+> Task :wakelock_plus:generateDebugResValues
+> Task :wakelock_plus:generateDebugResources
+> Task :wakelock_plus:packageDebugResources
+> Task :webview_flutter_android:generateDebugResValues
+> Task :webview_flutter_android:generateDebugResources
+> Task :webview_flutter_android:packageDebugResources
+> Task :app:mapDebugSourceSetPaths
+> Task :app:generateDebugResources
+> Task :app:mergeDebugResources
+> Task :app:packageDebugResources
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug
+> Task :firebase_core:extractDeepLinksDebug
+> Task :firebase_crashlytics:extractDeepLinksDebug
+> Task :flutter_local_notifications:extractDeepLinksDebug
+> Task :google_mobile_ads:extractDeepLinksDebug
+
+> Task :firebase_core:processDebugManifest
+package="io.flutter.plugins.firebase.core" found in source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\firebase_core-2.32.0\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="io.flutter.plugins.firebase.core" from the source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\firebase_core-2.32.0\android\src\main\AndroidManifest.xml.
+
+> Task :firebase_crashlytics:processDebugManifest
+package="io.flutter.plugins.firebase.crashlytics" found in source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\firebase_crashlytics-3.5.7\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="io.flutter.plugins.firebase.crashlytics" from the source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\firebase_crashlytics-3.5.7\android\src\main\AndroidManifest.xml.
+
+> Task :jni:extractDeepLinksDebug
+
+> Task :flutter_local_notifications:processDebugManifest
+package="com.dexterous.flutterlocalnotifications" found in source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\flutter_local_notifications-17.2.4\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="com.dexterous.flutterlocalnotifications" from the source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\flutter_local_notifications-17.2.4\android\src\main\AndroidManifest.xml.
+
+> Task :app:parseDebugLocalResources
+
+> Task :google_mobile_ads:processDebugManifest
+package="io.flutter.plugins.googlemobileads" found in source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\google_mobile_ads-9.0.0\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="io.flutter.plugins.googlemobileads" from the source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\google_mobile_ads-9.0.0\android\src\main\AndroidManifest.xml.
+
+> Task :jni_flutter:extractDeepLinksDebug
+> Task :package_info_plus:extractDeepLinksDebug
+
+> Task :jni:processDebugManifest
+package="com.github.dart_lang.jni" found in source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\jni-1.0.0\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="com.github.dart_lang.jni" from the source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\jni-1.0.0\android\src\main\AndroidManifest.xml.
+
+> Task :jni_flutter:processDebugManifest
+package="com.github.dart_lang.jni_flutter" found in source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\jni_flutter-1.0.1\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="com.github.dart_lang.jni_flutter" from the source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\jni_flutter-1.0.1\android\src\main\AndroidManifest.xml.
+
+> Task :share_plus:extractDeepLinksDebug
+
+> Task :package_info_plus:processDebugManifest
+package="dev.fluttercommunity.plus.packageinfo" found in source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\package_info_plus-10.1.0\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="dev.fluttercommunity.plus.packageinfo" from the source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\package_info_plus-10.1.0\android\src\main\AndroidManifest.xml.
+
+> Task :shared_preferences_android:extractDeepLinksDebug
+> Task :url_launcher_android:extractDeepLinksDebug
+
+> Task :shared_preferences_android:processDebugManifest
+package="io.flutter.plugins.sharedpreferences" found in source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\shared_preferences_android-2.4.26\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="io.flutter.plugins.sharedpreferences" from the source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\shared_preferences_android-2.4.26\android\src\main\AndroidManifest.xml.
+
+> Task :share_plus:processDebugManifest
+package="dev.fluttercommunity.plus.share" found in source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\share_plus-13.1.0\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="dev.fluttercommunity.plus.share" from the source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\share_plus-13.1.0\android\src\main\AndroidManifest.xml.
+
+> Task :video_player_android:extractDeepLinksDebug
+
+> Task :url_launcher_android:processDebugManifest
+package="io.flutter.plugins.urllauncher" found in source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher_android-6.3.32\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="io.flutter.plugins.urllauncher" from the source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\url_launcher_android-6.3.32\android\src\main\AndroidManifest.xml.
+
+> Task :wakelock_plus:extractDeepLinksDebug
+
+> Task :video_player_android:processDebugManifest
+package="io.flutter.plugins.videoplayer" found in source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\video_player_android-2.9.6\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="io.flutter.plugins.videoplayer" from the source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\video_player_android-2.9.6\android\src\main\AndroidManifest.xml.
+
+> Task :webview_flutter_android:extractDeepLinksDebug
+
+> Task :wakelock_plus:processDebugManifest
+package="dev.fluttercommunity.plus.wakelock" found in source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\wakelock_plus-1.6.1\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="dev.fluttercommunity.plus.wakelock" from the source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\wakelock_plus-1.6.1\android\src\main\AndroidManifest.xml.
+
+> Task :webview_flutter_android:processDebugManifest
+package="io.flutter.plugins.webviewflutter" found in source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\webview_flutter_android-4.13.0\android\src\main\AndroidManifest.xml.
+Setting the namespace via the package attribute in the source AndroidManifest.xml is no longer supported, and the value is ignored.
+Recommendation: remove package="io.flutter.plugins.webviewflutter" from the source AndroidManifest.xml: C:\Users\morga\AppData\Local\Pub\Cache\hosted\pub.dev\webview_flutter_android-4.13.0\android\src\main\AndroidManifest.xml.
+
+> Task :firebase_core:compileDebugLibraryResources
+> Task :app:processDebugMainManifest
+> Task :app:outputDebugAppLinkSettings
+> Task :app:processDebugManifest
+> Task :firebase_crashlytics:compileDebugLibraryResources
+> Task :app:processDebugManifestForPackage
+> Task :firebase_core:parseDebugLocalResources
+> Task :firebase_crashlytics:parseDebugLocalResources
+> Task :flutter_local_notifications:compileDebugLibraryResources
+> Task :flutter_local_notifications:parseDebugLocalResources
+> Task :jni:compileDebugLibraryResources
+> Task :google_mobile_ads:parseDebugLocalResources
+> Task :google_mobile_ads:compileDebugLibraryResources
+> Task :jni:parseDebugLocalResources
+> Task :jni_flutter:compileDebugLibraryResources
+> Task :jni_flutter:parseDebugLocalResources
+> Task :flutter_local_notifications:generateDebugRFile
+> Task :jni:generateDebugRFile
+> Task :jni_flutter:generateDebugRFile
+> Task :package_info_plus:compileDebugLibraryResources
+> Task :package_info_plus:parseDebugLocalResources
+> Task :share_plus:compileDebugLibraryResources
+> Task :firebase_crashlytics:generateDebugRFile
+> Task :firebase_core:generateDebugRFile
+> Task :google_mobile_ads:generateDebugRFile
+> Task :share_plus:parseDebugLocalResources
+> Task :package_info_plus:generateDebugRFile
+> Task :shared_preferences_android:compileDebugLibraryResources
+> Task :shared_preferences_android:parseDebugLocalResources
+> Task :url_launcher_android:compileDebugLibraryResources
+> Task :url_launcher_android:parseDebugLocalResources
+> Task :url_launcher_android:generateDebugRFile
+> Task :share_plus:generateDebugRFile
+> Task :shared_preferences_android:generateDebugRFile
+> Task :video_player_android:compileDebugLibraryResources
+> Task :video_player_android:parseDebugLocalResources
+> Task :wakelock_plus:compileDebugLibraryResources
+> Task :video_player_android:generateDebugRFile
+> Task :wakelock_plus:parseDebugLocalResources
+> Task :webview_flutter_android:compileDebugLibraryResources
+> Task :firebase_core:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :webview_flutter_android:parseDebugLocalResources
+> Task :wakelock_plus:generateDebugRFile
+> Task :firebase_core:generateDebugBuildConfig
+> Task :webview_flutter_android:generateDebugRFile
+> Task :firebase_core:compileDebugKotlin NO-SOURCE
+> Task :firebase_crashlytics:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :firebase_crashlytics:generateDebugBuildConfig
+> Task :flutter_local_notifications:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :firebase_core:javaPreCompileDebug
+> Task :firebase_crashlytics:javaPreCompileDebug
+> Task :flutter_local_notifications:compileDebugKotlin NO-SOURCE
+> Task :app:processDebugResources
+> Task :firebase_core:compileDebugJavaWithJavac
+> Task :google_mobile_ads:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :webview_flutter_android:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :flutter_local_notifications:javaPreCompileDebug
+> Task :firebase_core:bundleLibCompileToJarDebug
+> Task :firebase_crashlytics:compileDebugKotlin NO-SOURCE
+> Task :firebase_crashlytics:compileDebugJavaWithJavac
+> Task :firebase_crashlytics:bundleLibCompileToJarDebug
+> Task :webview_flutter_android:compileDebugKotlin
+e: Failed connecting to the daemon in 4 retries
+e: Daemon compilation failed: Could not connect to Kotlin compile daemon
+java.lang.RuntimeException: Could not connect to Kotlin compile daemon
+	at org.jetbrains.kotlin.compilerRunner.GradleKotlinCompilerWork.compileWithDaemon(GradleKotlinCompilerWork.kt:214)
+	at org.jetbrains.kotlin.compilerRunner.GradleKotlinCompilerWork.compileWithDaemonOrFallbackImpl(GradleKotlinCompilerWork.kt:159)
+	at org.jetbrains.kotlin.compilerRunner.GradleKotlinCompilerWork.run(GradleKotlinCompilerWork.kt:111)
+	at org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction.execute(GradleCompilerRunnerWithWorkers.kt:74)
+	at org.gradle.workers.internal.DefaultWorkerServer.execute(DefaultWorkerServer.java:63)
+	at org.gradle.workers.internal.NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:66)
+	at org.gradle.workers.internal.NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:62)
+	at org.gradle.internal.classloader.ClassLoaderUtils.executeInClassloader(ClassLoaderUtils.java:100)
+	at org.gradle.workers.internal.NoIsolationWorkerFactory$1.lambda$execute$0(NoIsolationWorkerFactory.java:62)
+	at org.gradle.workers.internal.AbstractWorker$1.call(AbstractWorker.java:44)
+	at org.gradle.workers.internal.AbstractWorker$1.call(AbstractWorker.java:41)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:210)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:205)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:67)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:60)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:167)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:60)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:54)
+	at org.gradle.workers.internal.AbstractWorker.executeWrappedInBuildOperation(AbstractWorker.java:41)
+	at org.gradle.workers.internal.NoIsolationWorkerFactory$1.execute(NoIsolationWorkerFactory.java:59)
+	at org.gradle.workers.internal.DefaultWorkerExecutor.lambda$submitWork$0(DefaultWorkerExecutor.java:174)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:264)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.runExecution(DefaultConditionalExecutionQueue.java:194)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.access$700(DefaultConditionalExecutionQueue.java:127)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner$1.run(DefaultConditionalExecutionQueue.java:169)
+	at org.gradle.internal.Factories$1.create(Factories.java:31)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.withLocks(DefaultWorkerLeaseService.java:263)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:127)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:132)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.runBatch(DefaultConditionalExecutionQueue.java:164)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.run(DefaultConditionalExecutionQueue.java:133)
+	at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:539)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:264)
+	at org.gradle.internal.concurrent.ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)
+	at org.gradle.internal.concurrent.AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:48)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1136)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:635)
+	at java.base/java.lang.Thread.run(Thread.java:840)
+
+Failed to compile with Kotlin daemon: java.lang.RuntimeException: Could not connect to Kotlin compile daemon
+	at org.jetbrains.kotlin.compilerRunner.GradleKotlinCompilerWork.compileWithDaemon(GradleKotlinCompilerWork.kt:214)
+	at org.jetbrains.kotlin.compilerRunner.GradleKotlinCompilerWork.compileWithDaemonOrFallbackImpl(GradleKotlinCompilerWork.kt:159)
+	at org.jetbrains.kotlin.compilerRunner.GradleKotlinCompilerWork.run(GradleKotlinCompilerWork.kt:111)
+	at org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction.execute(GradleCompilerRunnerWithWorkers.kt:74)
+	at org.gradle.workers.internal.DefaultWorkerServer.execute(DefaultWorkerServer.java:63)
+	at org.gradle.workers.internal.NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:66)
+	at org.gradle.workers.internal.NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:62)
+	at org.gradle.internal.classloader.ClassLoaderUtils.executeInClassloader(ClassLoaderUtils.java:100)
+	at org.gradle.workers.internal.NoIsolationWorkerFactory$1.lambda$execute$0(NoIsolationWorkerFactory.java:62)
+	at org.gradle.workers.internal.AbstractWorker$1.call(AbstractWorker.java:44)
+	at org.gradle.workers.internal.AbstractWorker$1.call(AbstractWorker.java:41)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:210)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:205)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:67)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:60)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:167)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:60)
+	at org.gradle.internal.operations.DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:54)
+	at org.gradle.workers.internal.AbstractWorker.executeWrappedInBuildOperation(AbstractWorker.java:41)
+	at org.gradle.workers.internal.NoIsolationWorkerFactory$1.execute(NoIsolationWorkerFactory.java:59)
+	at org.gradle.workers.internal.DefaultWorkerExecutor.lambda$submitWork$0(DefaultWorkerExecutor.java:174)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:264)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.runExecution(DefaultConditionalExecutionQueue.java:194)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.access$700(DefaultConditionalExecutionQueue.java:127)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner$1.run(DefaultConditionalExecutionQueue.java:169)
+	at org.gradle.internal.Factories$1.create(Factories.java:31)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.withLocks(DefaultWorkerLeaseService.java:263)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:127)
+	at org.gradle.internal.work.DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:132)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.runBatch(DefaultConditionalExecutionQueue.java:164)
+	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.run(DefaultConditionalExecutionQueue.java:133)
+	at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:539)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:264)
+	at org.gradle.internal.concurrent.ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)
+	at org.gradle.internal.concurrent.AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:48)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1136)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:635)
+	at java.base/java.lang.Thread.run(Thread.java:840)
+Using fallback strategy: Compile without Kotlin daemon
+Try ./gradlew --stop if this issue persists
+If it does not look related to your configuration, please file an issue with logs to https://kotl.in/issue
+exception: NOTE: Picked up JDK_JAVA_OPTIONS:  
+exception: picked up JAVA_TOOL_OPTIONS:  
+exception: picked up _JAVA_OPTIONS:  
+
+> Task :flutter_local_notifications:compileDebugJavaWithJavac
+> Task :jni:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :webview_flutter_android:javaPreCompileDebug
+> Task :google_mobile_ads:javaPreCompileDebug
+> Task :jni:compileDebugKotlin NO-SOURCE
+> Task :jni_flutter:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :jni:javaPreCompileDebug
+> Task :jni_flutter:javaPreCompileDebug
+> Task :flutter_local_notifications:bundleLibCompileToJarDebug
+> Task :jni:compileDebugJavaWithJavac
+> Task :package_info_plus:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :jni:bundleLibCompileToJarDebug
+> Task :jni_flutter:compileDebugKotlin NO-SOURCE
+> Task :jni_flutter:compileDebugJavaWithJavac
+> Task :share_plus:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :package_info_plus:javaPreCompileDebug
+> Task :jni_flutter:bundleLibCompileToJarDebug
+> Task :shared_preferences_android:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :share_plus:javaPreCompileDebug
+> Task :package_info_plus:compileDebugKotlin
+> Task :url_launcher_android:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :shared_preferences_android:javaPreCompileDebug
+> Task :url_launcher_android:generateDebugBuildConfig
+> Task :share_plus:compileDebugKotlin
+> Task :shared_preferences_android:compileDebugKotlin
+> Task :url_launcher_android:javaPreCompileDebug
+> Task :video_player_android:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :url_launcher_android:compileDebugKotlin
+> Task :video_player_android:compileDebugKotlin
+> Task :webview_flutter_android:compileDebugJavaWithJavac
+> Task :package_info_plus:compileDebugJavaWithJavac NO-SOURCE
+> Task :webview_flutter_android:bundleLibCompileToJarDebug
+> Task :package_info_plus:bundleLibCompileToJarDebug
+> Task :google_mobile_ads:compileDebugKotlin NO-SOURCE
+> Task :google_mobile_ads:compileDebugJavaWithJavac
+Note: Some input files use or override a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+
+> Task :share_plus:compileDebugJavaWithJavac NO-SOURCE
+> Task :google_mobile_ads:bundleLibCompileToJarDebug
+> Task :share_plus:bundleLibCompileToJarDebug
+> Task :shared_preferences_android:compileDebugJavaWithJavac
+> Task :shared_preferences_android:bundleLibCompileToJarDebug
+> Task :url_launcher_android:compileDebugJavaWithJavac
+> Task :url_launcher_android:bundleLibCompileToJarDebug
+> Task :wakelock_plus:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :video_player_android:javaPreCompileDebug
+> Task :wakelock_plus:compileDebugKotlin
+> Task :video_player_android:compileDebugJavaWithJavac
+> Task :wakelock_plus:javaPreCompileDebug
+> Task :app:javaPreCompileDebug
+> Task :wakelock_plus:compileDebugJavaWithJavac NO-SOURCE
+> Task :video_player_android:bundleLibCompileToJarDebug
+> Task :wakelock_plus:bundleLibCompileToJarDebug
+> Task :firebase_crashlytics:bundleLibRuntimeToJarDebug
+> Task :firebase_core:bundleLibRuntimeToJarDebug
+> Task :flutter_local_notifications:bundleLibRuntimeToJarDebug
+> Task :app:compileDebugKotlin
+> Task :app:compileDebugJavaWithJavac
+> Task :app:compressDebugAssets
+> Task :google_mobile_ads:bundleLibRuntimeToJarDebug
+> Task :jni_flutter:bundleLibRuntimeToJarDebug
+> Task :app:l8DexDesugarLibDebug
+> Task :package_info_plus:bundleLibRuntimeToJarDebug
+> Task :wakelock_plus:bundleLibRuntimeToJarDebug
+> Task :share_plus:bundleLibRuntimeToJarDebug
+> Task :shared_preferences_android:bundleLibRuntimeToJarDebug
+> Task :jni:bundleLibRuntimeToJarDebug
+> Task :url_launcher_android:bundleLibRuntimeToJarDebug
+> Task :video_player_android:bundleLibRuntimeToJarDebug
+> Task :app:desugarDebugFileDependencies
+> Task :webview_flutter_android:bundleLibRuntimeToJarDebug
+> Task :app:dexBuilderDebug
+> Task :app:processDebugJavaRes
+> Task :firebase_core:processDebugJavaRes NO-SOURCE
+> Task :firebase_crashlytics:processDebugJavaRes NO-SOURCE
+> Task :flutter_local_notifications:processDebugJavaRes NO-SOURCE
+> Task :google_mobile_ads:processDebugJavaRes NO-SOURCE
+> Task :jni:processDebugJavaRes NO-SOURCE
+> Task :jni_flutter:processDebugJavaRes NO-SOURCE
+> Task :package_info_plus:processDebugJavaRes
+> Task :share_plus:processDebugJavaRes
+> Task :shared_preferences_android:processDebugJavaRes
+> Task :url_launcher_android:processDebugJavaRes
+> Task :video_player_android:processDebugJavaRes
+> Task :wakelock_plus:processDebugJavaRes
+> Task :webview_flutter_android:processDebugJavaRes
+> Task :app:mergeDebugJavaResource
+> Task :app:mergeDebugGlobalSynthetics
+> Task :firebase_core:bundleLibRuntimeToDirDebug
+> Task :firebase_crashlytics:bundleLibRuntimeToDirDebug
+> Task :jni_flutter:bundleLibRuntimeToDirDebug
+> Task :jni:bundleLibRuntimeToDirDebug
+> Task :flutter_local_notifications:bundleLibRuntimeToDirDebug
+> Task :google_mobile_ads:bundleLibRuntimeToDirDebug
+> Task :wakelock_plus:bundleLibRuntimeToDirDebug
+> Task :package_info_plus:bundleLibRuntimeToDirDebug
+> Task :share_plus:bundleLibRuntimeToDirDebug
+> Task :app:checkDebugDuplicateClasses
+> Task :shared_preferences_android:bundleLibRuntimeToDirDebug
+> Task :app:mergeExtDexDebug
+> Task :url_launcher_android:bundleLibRuntimeToDirDebug
+> Task :video_player_android:bundleLibRuntimeToDirDebug
+> Task :webview_flutter_android:bundleLibRuntimeToDirDebug
+> Task :app:mergeProjectDexDebug
+> Task :app:configureCMakeDebug[arm64-v8a]
+
+Exception in thread "Daemon periodic checks" java.lang.OutOfMemoryError: Java heap space
+Exception in thread "Daemon health stats" java.lang.OutOfMemoryError: Java heap space
+
+> Task :app:configureCMakeDebug[arm64-v8a] FAILED
+
+[Incubating] Problems report is available at: file:///C:/Users/morga/Desktop/Apps/Stream/GiTO%20Live%20Sports/apps/mobile/build/reports/problems/problems-report.html
+277 actionable tasks: 261 executed, 16 up-to-date
+The message received from the daemon indicates that the daemon has disappeared.
+Build request sent: Build{id=072f1d51-74a1-48c8-9808-200e1b201eb6, currentDir=C:\Users\morga\Desktop\Apps\Stream\GiTO Live Sports\apps\mobile\android}
+Attempting to read last messages from the daemon log...
+Daemon pid: 30532
+  log file: C:\Users\morga\.gradle\daemon\8.14\daemon-30532.out.log
+----- Last 20 lines from daemon log file - daemon-30532.out.log -----
+	at java.base/java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:539)
+	at java.base/java.util.concurrent.FutureTask.run(FutureTask.java:264)
+	at org.gradle.internal.concurrent.ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)
+	at org.gradle.internal.concurrent.AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:48)
+	at java.base/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1136)
+	at java.base/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:635)
+	at java.base/java.lang.Thread.run(Thread.java:840)
+Using fallback strategy: Compile without Kotlin daemon
+Try ./gradlew --stop if this issue persists
+If it does not look related to your configuration, please file an issue with logs to https://kotl.in/issue
+exception: NOTE: Picked up JDK_JAVA_OPTIONS:  
+exception: picked up JAVA_TOOL_OPTIONS:  
+exception: picked up _JAVA_OPTIONS:  
+Note: Some input files use or override a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+Exception in thread "Daemon periodic checks" java.lang.OutOfMemoryError: Java heap space
+Exception in thread "Daemon health stats" java.lang.OutOfMemoryError: Java heap space
+
+[Incubating] Problems report is available at: file:///C:/Users/morga/Desktop/Apps/Stream/GiTO%20Live%20Sports/apps/mobile/build/reports/problems/problems-report.html
+277 actionable tasks: 261 executed, 16 up-to-date----- End of the daemon log -----
+
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Gradle build daemon disappeared unexpectedly (it may have been killed or may have crashed)
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.

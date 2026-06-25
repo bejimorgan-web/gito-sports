@@ -2,7 +2,8 @@ import type { Request } from "express";
 import { Router } from "express";
 
 import { MatchService } from "../services/match-service.js";
-import { MobileFeatureService } from "../services/mobile-feature-service.js";
+import { MobileFeatureService, DEFAULT_NAVIGATION_FEATURES } from "../services/mobile-feature-service.js";
+import { getDatabase } from "../db/connection.js";
 
 function normalizeUploadsUrl(request: Request, url: string | undefined | null) {
   if (!url) {
@@ -46,18 +47,91 @@ mobileRouter.get("/matches/live", (request, response) => {
 
 mobileRouter.get("/features", (_request, response) => {
   try {
+    console.debug("[MOBILE_FEATURES_FETCH] fetching mobile navigation feature flags");
     const features = MobileFeatureService.getNavigationFeatures();
+
+    if (!features || !features.navigation) {
+      console.warn("[MOBILE_FEATURES_FALLBACK_USED] invalid navigation payload from service; returning default navigation flags");
+      response.json({
+        data: {
+          navigation: DEFAULT_NAVIGATION_FEATURES.navigation
+        },
+        timestamp: new Date().toISOString()
+      });
+      return;
+    }
+
+    const safeNavigation = {
+      liveScores: {
+        enabled: features.navigation.liveScores?.enabled ?? true,
+        message: features.navigation.liveScores?.message ?? null
+      },
+      sports: {
+        enabled: features.navigation.sports?.enabled ?? true,
+        message: features.navigation.sports?.message ?? null
+      },
+      live: {
+        enabled: features.navigation.live?.enabled ?? true,
+        message: features.navigation.live?.message ?? null
+      }
+    };
+
     response.json({
       data: {
-        navigation: features.navigation,
-        timestamp: new Date().toISOString()
-      }
+        navigation: safeNavigation
+      },
+      timestamp: new Date().toISOString()
     });
   } catch (error) {
     console.error("[mobile/features] GET failed:", error);
     response.status(500).json({
       error: "mobile_features_fetch_failed",
       message: "Failed to fetch mobile feature flags"
+    });
+  }
+});
+
+mobileRouter.get("/features/debug", (_request, response) => {
+  try {
+    console.debug("[MOBILE_FEATURES_FETCH] fetching mobile navigation feature flags debug info");
+    const db = getDatabase();
+    const rows = db
+      .prepare(`SELECT feature_key, enabled FROM mobile_feature_flags WHERE feature_key LIKE 'navigation.%' ORDER BY feature_key`)
+      .all() as Array<{ feature_key: string; enabled: number }>;
+
+    const navigation = {
+      liveScores: { enabled: true },
+      sports: { enabled: true },
+      live: { enabled: true }
+    };
+
+    for (const row of rows) {
+      if (row.feature_key === "navigation.liveScores") {
+        navigation.liveScores.enabled = row.enabled === 1;
+      } else if (row.feature_key === "navigation.sports") {
+        navigation.sports.enabled = row.enabled === 1;
+      } else if (row.feature_key === "navigation.live") {
+        navigation.live.enabled = row.enabled === 1;
+      }
+    }
+
+    response.json({
+      databaseConnected: true,
+      rowsFound: rows.length,
+      navigation,
+      buildTimestamp: process.env.BUILD_TIMESTAMP ?? new Date().toISOString()
+    });
+  } catch (error) {
+    console.error("[mobile/features/debug] GET failed:", error);
+    response.status(500).json({
+      databaseConnected: false,
+      rowsFound: 0,
+      navigation: {
+        liveScores: { enabled: true },
+        sports: { enabled: true },
+        live: { enabled: true }
+      },
+      buildTimestamp: process.env.BUILD_TIMESTAMP ?? new Date().toISOString()
     });
   }
 });

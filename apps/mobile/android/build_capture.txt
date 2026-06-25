@@ -1,0 +1,326 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.14/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+> Configure project :gradle
+WARNING: Unsupported Kotlin plugin version.
+The `embedded-kotlin` and `kotlin-dsl` plugins rely on features of Kotlin `2.0.21` that might work differently than in the requested version `2.2.20`.
+
+> Task :gradle:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :gradle:compileKotlin UP-TO-DATE
+> Task :gradle:compileJava NO-SOURCE
+> Task :gradle:compileGroovy NO-SOURCE
+> Task :gradle:pluginDescriptors UP-TO-DATE
+> Task :gradle:processResources UP-TO-DATE
+> Task :gradle:classes UP-TO-DATE
+> Task :gradle:jar UP-TO-DATE
+WARNING: Your Android app project: app located at: C:\Users\morga\Desktop\Apps\Stream\GiTO Live Sports\apps\mobile\android\app\build.gradle.kts
+applies the Kotlin Gradle Plugin, which will cause build failures in future versions of Flutter. 
+Please migrate your app to Built-in Kotlin using this guide: https://docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin/for-app-developers
+
+WARNING: Your app uses the following plugins that apply Kotlin Gradle Plugin (KGP): package_info_plus, share_plus, wakelock_plus
+Future versions of Flutter will fail to build if your app uses plugins that apply KGP.
+
+Please check the changelogs of these plugins and upgrade to a version that supports Built-in Kotlin.
+If no such version exists, report the issue to the plugin. If necessary, here is a guide on filing 
+an issue against a plugin: https://docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin/for-app-developers#report-incompatible-kotlin-gradle-plugin-usage-to-plugin-authors
+
+If you are a plugin author, please migrate your plugin to Built-in Kotlin using this guide: https://docs.flutter.dev/release/breaking-changes/migrate-to-built-in-kotlin/for-plugin-authors
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :firebase_core:preBuild UP-TO-DATE
+> Task :firebase_core:preDebugBuild UP-TO-DATE
+> Task :firebase_core:writeDebugAarMetadata UP-TO-DATE
+> Task :firebase_crashlytics:preBuild UP-TO-DATE
+> Task :firebase_crashlytics:preDebugBuild UP-TO-DATE
+> Task :firebase_crashlytics:writeDebugAarMetadata UP-TO-DATE
+> Task :flutter_local_notifications:preBuild UP-TO-DATE
+> Task :flutter_local_notifications:preDebugBuild UP-TO-DATE
+> Task :flutter_local_notifications:writeDebugAarMetadata UP-TO-DATE
+> Task :google_mobile_ads:preBuild UP-TO-DATE
+> Task :google_mobile_ads:preDebugBuild UP-TO-DATE
+> Task :google_mobile_ads:writeDebugAarMetadata UP-TO-DATE
+> Task :jni:preBuild UP-TO-DATE
+> Task :jni:preDebugBuild UP-TO-DATE
+> Task :jni:writeDebugAarMetadata UP-TO-DATE
+> Task :jni_flutter:preBuild UP-TO-DATE
+> Task :jni_flutter:preDebugBuild UP-TO-DATE
+> Task :jni_flutter:writeDebugAarMetadata UP-TO-DATE
+> Task :package_info_plus:preBuild UP-TO-DATE
+> Task :package_info_plus:preDebugBuild UP-TO-DATE
+> Task :package_info_plus:writeDebugAarMetadata UP-TO-DATE
+> Task :share_plus:preBuild UP-TO-DATE
+> Task :share_plus:preDebugBuild UP-TO-DATE
+> Task :share_plus:writeDebugAarMetadata UP-TO-DATE
+> Task :shared_preferences_android:preBuild UP-TO-DATE
+> Task :shared_preferences_android:preDebugBuild UP-TO-DATE
+> Task :shared_preferences_android:writeDebugAarMetadata UP-TO-DATE
+> Task :url_launcher_android:preBuild UP-TO-DATE
+> Task :url_launcher_android:preDebugBuild UP-TO-DATE
+> Task :url_launcher_android:writeDebugAarMetadata UP-TO-DATE
+> Task :video_player_android:preBuild UP-TO-DATE
+> Task :video_player_android:preDebugBuild UP-TO-DATE
+> Task :video_player_android:writeDebugAarMetadata UP-TO-DATE
+> Task :wakelock_plus:preBuild UP-TO-DATE
+> Task :wakelock_plus:preDebugBuild UP-TO-DATE
+> Task :wakelock_plus:writeDebugAarMetadata UP-TO-DATE
+> Task :webview_flutter_android:preBuild UP-TO-DATE
+> Task :webview_flutter_android:preDebugBuild UP-TO-DATE
+> Task :webview_flutter_android:writeDebugAarMetadata UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:cleanMergeDebugAssets
+> Task :app:compileFlutterBuildDebug
+> Task :app:mergeDebugShaders UP-TO-DATE
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :firebase_core:mergeDebugShaders UP-TO-DATE
+> Task :firebase_core:compileDebugShaders NO-SOURCE
+> Task :firebase_core:generateDebugAssets UP-TO-DATE
+> Task :firebase_core:mergeDebugAssets UP-TO-DATE
+> Task :firebase_crashlytics:mergeDebugShaders UP-TO-DATE
+> Task :firebase_crashlytics:compileDebugShaders NO-SOURCE
+> Task :firebase_crashlytics:generateDebugAssets UP-TO-DATE
+> Task :firebase_crashlytics:mergeDebugAssets UP-TO-DATE
+> Task :flutter_local_notifications:mergeDebugShaders UP-TO-DATE
+> Task :flutter_local_notifications:compileDebugShaders NO-SOURCE
+> Task :flutter_local_notifications:generateDebugAssets UP-TO-DATE
+> Task :flutter_local_notifications:mergeDebugAssets UP-TO-DATE
+> Task :google_mobile_ads:mergeDebugShaders UP-TO-DATE
+> Task :google_mobile_ads:compileDebugShaders NO-SOURCE
+> Task :google_mobile_ads:generateDebugAssets UP-TO-DATE
+> Task :google_mobile_ads:mergeDebugAssets UP-TO-DATE
+> Task :jni:mergeDebugShaders UP-TO-DATE
+> Task :jni:compileDebugShaders NO-SOURCE
+> Task :jni:generateDebugAssets UP-TO-DATE
+> Task :jni:mergeDebugAssets UP-TO-DATE
+> Task :jni_flutter:mergeDebugShaders UP-TO-DATE
+> Task :jni_flutter:compileDebugShaders NO-SOURCE
+> Task :jni_flutter:generateDebugAssets UP-TO-DATE
+> Task :jni_flutter:mergeDebugAssets UP-TO-DATE
+> Task :package_info_plus:mergeDebugShaders UP-TO-DATE
+> Task :package_info_plus:compileDebugShaders NO-SOURCE
+> Task :package_info_plus:generateDebugAssets UP-TO-DATE
+> Task :package_info_plus:mergeDebugAssets UP-TO-DATE
+> Task :share_plus:mergeDebugShaders UP-TO-DATE
+> Task :share_plus:compileDebugShaders NO-SOURCE
+> Task :share_plus:generateDebugAssets UP-TO-DATE
+> Task :share_plus:mergeDebugAssets UP-TO-DATE
+> Task :shared_preferences_android:mergeDebugShaders UP-TO-DATE
+> Task :shared_preferences_android:compileDebugShaders NO-SOURCE
+> Task :shared_preferences_android:generateDebugAssets UP-TO-DATE
+> Task :shared_preferences_android:mergeDebugAssets UP-TO-DATE
+> Task :url_launcher_android:mergeDebugShaders UP-TO-DATE
+> Task :url_launcher_android:compileDebugShaders NO-SOURCE
+> Task :url_launcher_android:generateDebugAssets UP-TO-DATE
+> Task :url_launcher_android:mergeDebugAssets UP-TO-DATE
+> Task :video_player_android:mergeDebugShaders UP-TO-DATE
+> Task :video_player_android:compileDebugShaders NO-SOURCE
+> Task :video_player_android:generateDebugAssets UP-TO-DATE
+> Task :video_player_android:mergeDebugAssets UP-TO-DATE
+> Task :wakelock_plus:mergeDebugShaders UP-TO-DATE
+> Task :wakelock_plus:compileDebugShaders NO-SOURCE
+> Task :wakelock_plus:generateDebugAssets UP-TO-DATE
+> Task :wakelock_plus:mergeDebugAssets UP-TO-DATE
+> Task :webview_flutter_android:mergeDebugShaders UP-TO-DATE
+> Task :webview_flutter_android:compileDebugShaders NO-SOURCE
+> Task :webview_flutter_android:generateDebugAssets UP-TO-DATE
+> Task :webview_flutter_android:mergeDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets
+> Task :app:copyFlutterAssetsDebug
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :firebase_core:generateDebugResValues UP-TO-DATE
+> Task :firebase_core:generateDebugResources UP-TO-DATE
+> Task :firebase_core:packageDebugResources UP-TO-DATE
+> Task :firebase_crashlytics:generateDebugResValues UP-TO-DATE
+> Task :firebase_crashlytics:generateDebugResources UP-TO-DATE
+> Task :firebase_crashlytics:packageDebugResources UP-TO-DATE
+> Task :flutter_local_notifications:generateDebugResValues UP-TO-DATE
+> Task :flutter_local_notifications:generateDebugResources UP-TO-DATE
+> Task :flutter_local_notifications:packageDebugResources UP-TO-DATE
+> Task :google_mobile_ads:generateDebugResValues UP-TO-DATE
+> Task :google_mobile_ads:generateDebugResources UP-TO-DATE
+> Task :google_mobile_ads:packageDebugResources UP-TO-DATE
+> Task :jni:generateDebugResValues UP-TO-DATE
+> Task :jni:generateDebugResources UP-TO-DATE
+> Task :jni:packageDebugResources UP-TO-DATE
+> Task :jni_flutter:generateDebugResValues UP-TO-DATE
+> Task :jni_flutter:generateDebugResources UP-TO-DATE
+> Task :jni_flutter:packageDebugResources UP-TO-DATE
+> Task :package_info_plus:generateDebugResValues UP-TO-DATE
+> Task :package_info_plus:generateDebugResources UP-TO-DATE
+> Task :package_info_plus:packageDebugResources UP-TO-DATE
+> Task :share_plus:generateDebugResValues UP-TO-DATE
+> Task :share_plus:generateDebugResources UP-TO-DATE
+> Task :share_plus:packageDebugResources UP-TO-DATE
+> Task :shared_preferences_android:generateDebugResValues UP-TO-DATE
+> Task :shared_preferences_android:generateDebugResources UP-TO-DATE
+> Task :shared_preferences_android:packageDebugResources UP-TO-DATE
+> Task :url_launcher_android:generateDebugResValues UP-TO-DATE
+> Task :url_launcher_android:generateDebugResources UP-TO-DATE
+> Task :url_launcher_android:packageDebugResources UP-TO-DATE
+> Task :video_player_android:generateDebugResValues UP-TO-DATE
+> Task :video_player_android:generateDebugResources UP-TO-DATE
+> Task :video_player_android:packageDebugResources UP-TO-DATE
+> Task :wakelock_plus:generateDebugResValues UP-TO-DATE
+> Task :wakelock_plus:generateDebugResources UP-TO-DATE
+> Task :wakelock_plus:packageDebugResources UP-TO-DATE
+> Task :webview_flutter_android:generateDebugResValues UP-TO-DATE
+> Task :webview_flutter_android:generateDebugResources UP-TO-DATE
+> Task :webview_flutter_android:packageDebugResources UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :firebase_core:extractDeepLinksDebug UP-TO-DATE
+> Task :firebase_core:processDebugManifest UP-TO-DATE
+> Task :firebase_crashlytics:extractDeepLinksDebug UP-TO-DATE
+> Task :firebase_crashlytics:processDebugManifest UP-TO-DATE
+> Task :flutter_local_notifications:extractDeepLinksDebug UP-TO-DATE
+> Task :flutter_local_notifications:processDebugManifest UP-TO-DATE
+> Task :google_mobile_ads:extractDeepLinksDebug UP-TO-DATE
+> Task :google_mobile_ads:processDebugManifest UP-TO-DATE
+> Task :jni:extractDeepLinksDebug UP-TO-DATE
+> Task :jni:processDebugManifest UP-TO-DATE
+> Task :jni_flutter:extractDeepLinksDebug UP-TO-DATE
+> Task :jni_flutter:processDebugManifest UP-TO-DATE
+> Task :package_info_plus:extractDeepLinksDebug UP-TO-DATE
+> Task :package_info_plus:processDebugManifest UP-TO-DATE
+> Task :share_plus:extractDeepLinksDebug UP-TO-DATE
+> Task :share_plus:processDebugManifest UP-TO-DATE
+> Task :shared_preferences_android:extractDeepLinksDebug UP-TO-DATE
+> Task :shared_preferences_android:processDebugManifest UP-TO-DATE
+> Task :url_launcher_android:extractDeepLinksDebug UP-TO-DATE
+> Task :url_launcher_android:processDebugManifest UP-TO-DATE
+> Task :video_player_android:extractDeepLinksDebug UP-TO-DATE
+> Task :video_player_android:processDebugManifest UP-TO-DATE
+> Task :wakelock_plus:extractDeepLinksDebug UP-TO-DATE
+> Task :wakelock_plus:processDebugManifest UP-TO-DATE
+> Task :webview_flutter_android:extractDeepLinksDebug UP-TO-DATE
+> Task :webview_flutter_android:processDebugManifest UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:outputDebugAppLinkSettings UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :firebase_core:compileDebugLibraryResources UP-TO-DATE
+> Task :firebase_core:parseDebugLocalResources UP-TO-DATE
+> Task :firebase_core:generateDebugRFile UP-TO-DATE
+> Task :firebase_crashlytics:compileDebugLibraryResources UP-TO-DATE
+> Task :firebase_crashlytics:parseDebugLocalResources UP-TO-DATE
+> Task :firebase_crashlytics:generateDebugRFile UP-TO-DATE
+> Task :flutter_local_notifications:compileDebugLibraryResources UP-TO-DATE
+> Task :flutter_local_notifications:parseDebugLocalResources UP-TO-DATE
+> Task :flutter_local_notifications:generateDebugRFile UP-TO-DATE
+> Task :google_mobile_ads:compileDebugLibraryResources UP-TO-DATE
+> Task :google_mobile_ads:parseDebugLocalResources UP-TO-DATE
+> Task :google_mobile_ads:generateDebugRFile UP-TO-DATE
+> Task :jni:compileDebugLibraryResources UP-TO-DATE
+> Task :jni:parseDebugLocalResources UP-TO-DATE
+> Task :jni:generateDebugRFile UP-TO-DATE
+> Task :jni_flutter:compileDebugLibraryResources UP-TO-DATE
+> Task :jni_flutter:parseDebugLocalResources UP-TO-DATE
+> Task :jni_flutter:generateDebugRFile UP-TO-DATE
+> Task :package_info_plus:compileDebugLibraryResources UP-TO-DATE
+> Task :package_info_plus:parseDebugLocalResources UP-TO-DATE
+> Task :package_info_plus:generateDebugRFile UP-TO-DATE
+> Task :share_plus:compileDebugLibraryResources UP-TO-DATE
+> Task :share_plus:parseDebugLocalResources UP-TO-DATE
+> Task :share_plus:generateDebugRFile UP-TO-DATE
+> Task :shared_preferences_android:compileDebugLibraryResources UP-TO-DATE
+> Task :shared_preferences_android:parseDebugLocalResources UP-TO-DATE
+> Task :shared_preferences_android:generateDebugRFile UP-TO-DATE
+> Task :url_launcher_android:compileDebugLibraryResources UP-TO-DATE
+> Task :url_launcher_android:parseDebugLocalResources UP-TO-DATE
+> Task :url_launcher_android:generateDebugRFile UP-TO-DATE
+> Task :video_player_android:compileDebugLibraryResources UP-TO-DATE
+> Task :video_player_android:parseDebugLocalResources UP-TO-DATE
+> Task :video_player_android:generateDebugRFile UP-TO-DATE
+> Task :wakelock_plus:compileDebugLibraryResources UP-TO-DATE
+> Task :wakelock_plus:parseDebugLocalResources UP-TO-DATE
+> Task :wakelock_plus:generateDebugRFile UP-TO-DATE
+> Task :webview_flutter_android:compileDebugLibraryResources UP-TO-DATE
+> Task :webview_flutter_android:parseDebugLocalResources UP-TO-DATE
+> Task :webview_flutter_android:generateDebugRFile UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :firebase_core:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :firebase_core:generateDebugBuildConfig UP-TO-DATE
+> Task :firebase_core:compileDebugKotlin NO-SOURCE
+> Task :firebase_core:javaPreCompileDebug UP-TO-DATE
+> Task :firebase_core:compileDebugJavaWithJavac UP-TO-DATE
+> Task :firebase_core:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :firebase_crashlytics:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :firebase_crashlytics:generateDebugBuildConfig UP-TO-DATE
+> Task :firebase_crashlytics:compileDebugKotlin NO-SOURCE
+> Task :firebase_crashlytics:javaPreCompileDebug UP-TO-DATE
+> Task :firebase_crashlytics:compileDebugJavaWithJavac UP-TO-DATE
+> Task :firebase_crashlytics:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :flutter_local_notifications:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :flutter_local_notifications:compileDebugKotlin NO-SOURCE
+> Task :flutter_local_notifications:javaPreCompileDebug UP-TO-DATE
+> Task :flutter_local_notifications:compileDebugJavaWithJavac UP-TO-DATE
+> Task :flutter_local_notifications:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :google_mobile_ads:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :webview_flutter_android:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :webview_flutter_android:compileDebugKotlin UP-TO-DATE
+> Task :webview_flutter_android:javaPreCompileDebug UP-TO-DATE
+> Task :webview_flutter_android:compileDebugJavaWithJavac UP-TO-DATE
+> Task :webview_flutter_android:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :google_mobile_ads:compileDebugKotlin NO-SOURCE
+> Task :google_mobile_ads:javaPreCompileDebug UP-TO-DATE
+> Task :google_mobile_ads:compileDebugJavaWithJavac UP-TO-DATE
+> Task :google_mobile_ads:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :jni:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :jni:compileDebugKotlin NO-SOURCE
+> Task :jni:javaPreCompileDebug UP-TO-DATE
+> Task :jni:compileDebugJavaWithJavac UP-TO-DATE
+> Task :jni:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :jni_flutter:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :jni_flutter:compileDebugKotlin NO-SOURCE
+> Task :jni_flutter:javaPreCompileDebug UP-TO-DATE
+> Task :jni_flutter:compileDebugJavaWithJavac UP-TO-DATE
+> Task :jni_flutter:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :package_info_plus:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :package_info_plus:compileDebugKotlin UP-TO-DATE
+> Task :package_info_plus:javaPreCompileDebug UP-TO-DATE
+> Task :package_info_plus:compileDebugJavaWithJavac NO-SOURCE
+> Task :package_info_plus:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :share_plus:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :share_plus:compileDebugKotlin UP-TO-DATE
+> Task :share_plus:javaPreCompileDebug UP-TO-DATE
+> Task :share_plus:compileDebugJavaWithJavac NO-SOURCE
+> Task :share_plus:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :shared_preferences_android:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :shared_preferences_android:compileDebugKotlin UP-TO-DATE
+> Task :shared_preferences_android:javaPreCompileDebug UP-TO-DATE
+> Task :shared_preferences_android:compileDebugJavaWithJavac UP-TO-DATE
+> Task :shared_preferences_android:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :url_launcher_android:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :url_launcher_android:generateDebugBuildConfig UP-TO-DATE
+> Task :url_launcher_android:compileDebugKotlin UP-TO-DATE
+> Task :url_launcher_android:javaPreCompileDebug UP-TO-DATE
+> Task :url_launcher_android:compileDebugJavaWithJavac UP-TO-DATE
+> Task :url_launcher_android:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :video_player_android:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :video_player_android:compileDebugKotlin UP-TO-DATE
+> Task :video_player_android:javaPreCompileDebug UP-TO-DATE
+> Task :video_player_android:compileDebugJavaWithJavac UP-TO-DATE
+> Task :video_player_android:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :wakelock_plus:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :wakelock_plus:compileDebugKotlin UP-TO-DATE
+> Task :wakelock_plus:javaPreCompileDebug UP-TO-DATE
+> Task :wakelock_plus:compileDebugJavaWithJavac NO-SOURCE
+> Task :wakelock_plus:bundleLibCompileToJarDebug UP-TO-DATE
+> Task :app:compileDebugKotlin UP-TO-DATE
+
+[Incubating] Problems report is available at: file:///C:/Users/morga/Desktop/Apps/Stream/GiTO%20Live%20Sports/apps/mobile/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.14/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 6m 46s
+213 actionable tasks: 4 executed, 209 up-to-date

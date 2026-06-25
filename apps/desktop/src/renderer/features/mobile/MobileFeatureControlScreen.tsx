@@ -44,28 +44,47 @@ export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControl
 
     try {
       const response = await apiClient.getMobileFeatures();
+      const navigation = response?.navigation;
+
+      const safeResponse = {
+        navigation: {
+          liveScores: {
+            enabled: navigation?.liveScores?.enabled ?? true,
+            message: navigation?.liveScores?.message ?? null
+          },
+          sports: {
+            enabled: navigation?.sports?.enabled ?? true,
+            message: navigation?.sports?.message ?? null
+          },
+          live: {
+            enabled: navigation?.live?.enabled ?? true,
+            message: navigation?.live?.message ?? null
+          }
+        }
+      };
+
       setFeatures([
         {
           key: "navigation.liveScores",
           label: featureLabels["navigation.liveScores"],
-          enabled: response.navigation.liveScores.enabled,
-          message: response.navigation.liveScores.message,
+          enabled: safeResponse.navigation.liveScores.enabled,
+          message: safeResponse.navigation.liveScores.message,
           isSaving: false,
           error: null
         },
         {
           key: "navigation.sports",
           label: featureLabels["navigation.sports"],
-          enabled: response.navigation.sports.enabled,
-          message: response.navigation.sports.message,
+          enabled: safeResponse.navigation.sports.enabled,
+          message: safeResponse.navigation.sports.message,
           isSaving: false,
           error: null
         },
         {
           key: "navigation.live",
           label: featureLabels["navigation.live"],
-          enabled: response.navigation.live.enabled,
-          message: response.navigation.live.message,
+          enabled: safeResponse.navigation.live.enabled,
+          message: safeResponse.navigation.live.message,
           isSaving: false,
           error: null
         }

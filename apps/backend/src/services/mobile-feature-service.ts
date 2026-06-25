@@ -29,7 +29,7 @@ const DEFAULT_FEATURES: ReadonlyArray<{ feature_key: string; id: string }> = [
   { feature_key: "navigation.live", id: "flag_live" }
 ];
 
-const DEFAULT_NAVIGATION_FEATURES: MobileFeaturesResponse = {
+export const DEFAULT_NAVIGATION_FEATURES: MobileFeaturesResponse = {
   navigation: {
     liveScores: { enabled: true, message: null },
     sports: { enabled: true, message: null },
@@ -65,8 +65,37 @@ export class MobileFeatureService {
       )
       .all() as Array<{ feature_key: string; enabled: number; display_message: string | null }>;
 
+    console.debug("[MOBILE_FEATURES_DB_ROWS] found mobile_feature_flags navigation rows", {
+      rowCount: rows.length,
+      featureKeys: rows.map((row) => row.feature_key)
+    });
+
+    const existingKeys = new Set(rows.map((row) => row.feature_key));
+    const missingFeatures = DEFAULT_FEATURES.filter((item) => !existingKeys.has(item.feature_key));
+
+    if (rows.length === 0) {
+      console.warn("[MOBILE_FEATURES_DB_EMPTY] mobile_feature_flags contains no navigation rows; using default navigation flags");
+    }
+
+    if (missingFeatures.length > 0) {
+      const nowIso = new Date().toISOString();
+      for (const missing of missingFeatures) {
+        db.prepare(
+          `INSERT OR IGNORE INTO mobile_feature_flags (id, feature_key, enabled, display_message, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+        ).run(missing.id, missing.feature_key, 1, null, nowIso, nowIso);
+      }
+      console.warn(
+        "[MOBILE_FEATURES_FALLBACK_USED] mobile feature flags were incomplete; initialized missing default navigation flags",
+        missingFeatures.map((item) => item.feature_key)
+      );
+    }
+
     const response: MobileFeaturesResponse = {
-      ...DEFAULT_NAVIGATION_FEATURES
+      navigation: {
+        liveScores: { ...DEFAULT_NAVIGATION_FEATURES.navigation.liveScores },
+        sports: { ...DEFAULT_NAVIGATION_FEATURES.navigation.sports },
+        live: { ...DEFAULT_NAVIGATION_FEATURES.navigation.live }
+      }
     };
 
     const mapping: Record<string, keyof MobileFeaturesResponse["navigation"]> = {
