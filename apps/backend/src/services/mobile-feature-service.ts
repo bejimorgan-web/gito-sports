@@ -65,24 +65,28 @@ function normalizeEnabledValue(value: number | boolean | string | null | undefin
 }
 
 export function normalizeNavigation(rows: Array<MobileFeatureNavigationRow>) {
-  const rowsByKey = new Map(rows.map((row) => [row.feature_key, row]));
+  const featureMap = new Map(rows.map((r) => [r.feature_key, r]));
+  console.log("[NAV MAP]", Array.from(featureMap.keys()));
+
+  const getEnabled = (key: string) => Boolean(Number(featureMap.get(key)?.enabled));
 
   const navigation = {
     liveScores: {
-      enabled: normalizeEnabledValue(rowsByKey.get("navigation.liveScores")?.enabled),
-      message: null
+      enabled: getEnabled("navigation.liveScores"),
+      message: featureMap.get("navigation.liveScores")?.display_message ?? null
     },
     sports: {
-      enabled: normalizeEnabledValue(rowsByKey.get("navigation.sports")?.enabled),
-      message: null
+      enabled: getEnabled("navigation.sports"),
+      message: featureMap.get("navigation.sports")?.display_message ?? null
     },
     live: {
-      enabled: normalizeEnabledValue(rowsByKey.get("navigation.live")?.enabled),
-      message: null
+      enabled: getEnabled("navigation.live"),
+      message: featureMap.get("navigation.live")?.display_message ?? null
     }
   };
 
   console.log("[MOBILE NORMALIZED]", JSON.stringify(navigation));
+  console.log("[FINAL NAV OUTPUT]", JSON.stringify(navigation, null, 2));
   return navigation;
 }
 

@@ -48,29 +48,12 @@ mobileRouter.get("/matches/live", (request, response) => {
 mobileRouter.get("/features", (_request, response) => {
   try {
     console.debug("[MOBILE_FEATURES_FETCH] fetching mobile navigation feature flags");
-    const features = MobileFeatureService.getNavigationFeatures();
+    const result = MobileFeatureService.getNavigationFeatures();
 
-    const safeNavigation = {
-      liveScores: {
-        enabled: features?.navigation?.liveScores?.enabled ?? DEFAULT_NAVIGATION_FEATURES.navigation.liveScores.enabled,
-        message: features?.navigation?.liveScores?.message ?? DEFAULT_NAVIGATION_FEATURES.navigation.liveScores.message
-      },
-      sports: {
-        enabled: features?.navigation?.sports?.enabled ?? DEFAULT_NAVIGATION_FEATURES.navigation.sports.enabled,
-        message: features?.navigation?.sports?.message ?? DEFAULT_NAVIGATION_FEATURES.navigation.sports.message
-      },
-      live: {
-        enabled: features?.navigation?.live?.enabled ?? DEFAULT_NAVIGATION_FEATURES.navigation.live.enabled,
-        message: features?.navigation?.live?.message ?? DEFAULT_NAVIGATION_FEATURES.navigation.live.message
-      }
-    };
-
-    console.log("[MOBILE FEATURES RESPONSE]", { navigation: safeNavigation });
+    console.log("[MOBILE FEATURES RESPONSE]", { navigation: result.navigation });
 
     response.json({
-      data: {
-        navigation: safeNavigation
-      },
+      data: result,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
@@ -90,14 +73,14 @@ mobileRouter.get("/features/debug", (_request, response) => {
       .prepare(`SELECT feature_key, enabled, display_message FROM mobile_feature_flags WHERE feature_key LIKE 'navigation.%' ORDER BY feature_key`)
       .all() as Array<MobileFeatureNavigationRow>;
 
-    const navigation = normalizeNavigation(rawRows);
+    const result = MobileFeatureService.getNavigationFeatures();
 
     response.json({
       databaseConnected: true,
       rowsFound: rawRows.length,
       rawRows,
-      normalizedNavigation: navigation,
-      navigation,
+      normalizedNavigation: result.navigation,
+      ...result,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
