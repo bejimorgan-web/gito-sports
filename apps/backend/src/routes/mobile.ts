@@ -50,31 +50,22 @@ mobileRouter.get("/features", (_request, response) => {
     console.debug("[MOBILE_FEATURES_FETCH] fetching mobile navigation feature flags");
     const features = MobileFeatureService.getNavigationFeatures();
 
-    if (!features || !features.navigation) {
-      console.warn("[MOBILE_FEATURES_FALLBACK_USED] invalid navigation payload from service; returning default navigation flags");
-      response.json({
-        data: {
-          navigation: DEFAULT_NAVIGATION_FEATURES.navigation
-        },
-        timestamp: new Date().toISOString()
-      });
-      return;
-    }
-
     const safeNavigation = {
       liveScores: {
-        enabled: features.navigation.liveScores?.enabled ?? true,
-        message: features.navigation.liveScores?.message ?? null
+        enabled: features?.navigation?.liveScores?.enabled ?? DEFAULT_NAVIGATION_FEATURES.navigation.liveScores.enabled,
+        message: features?.navigation?.liveScores?.message ?? DEFAULT_NAVIGATION_FEATURES.navigation.liveScores.message
       },
       sports: {
-        enabled: features.navigation.sports?.enabled ?? true,
-        message: features.navigation.sports?.message ?? null
+        enabled: features?.navigation?.sports?.enabled ?? DEFAULT_NAVIGATION_FEATURES.navigation.sports.enabled,
+        message: features?.navigation?.sports?.message ?? DEFAULT_NAVIGATION_FEATURES.navigation.sports.message
       },
       live: {
-        enabled: features.navigation.live?.enabled ?? true,
-        message: features.navigation.live?.message ?? null
+        enabled: features?.navigation?.live?.enabled ?? DEFAULT_NAVIGATION_FEATURES.navigation.live.enabled,
+        message: features?.navigation?.live?.message ?? DEFAULT_NAVIGATION_FEATURES.navigation.live.message
       }
     };
+
+    console.log("[MOBILE FEATURES RESPONSE]", { navigation: safeNavigation });
 
     response.json({
       data: {
@@ -95,43 +86,53 @@ mobileRouter.get("/features/debug", (_request, response) => {
   try {
     console.debug("[MOBILE_FEATURES_FETCH] fetching mobile navigation feature flags debug info");
     const db = getDatabase();
-    const rows = db
-      .prepare(`SELECT feature_key, enabled FROM mobile_feature_flags WHERE feature_key LIKE 'navigation.%' ORDER BY feature_key`)
-      .all() as Array<{ feature_key: string; enabled: number }>;
+    const rawRows = db
+      .prepare(`SELECT feature_key, enabled, display_message FROM mobile_feature_flags WHERE feature_key LIKE 'navigation.%' ORDER BY feature_key`)
+      .all() as Array<{ feature_key: string; enabled: number; display_message: string | null }>;
 
     const navigation = {
-      liveScores: { enabled: true },
-      sports: { enabled: true },
-      live: { enabled: true }
+      liveScores: {
+        enabled: DEFAULT_NAVIGATION_FEATURES.navigation.liveScores.enabled,
+        message: DEFAULT_NAVIGATION_FEATURES.navigation.liveScores.message
+      },
+      sports: {
+        enabled: DEFAULT_NAVIGATION_FEATURES.navigation.sports.enabled,
+        message: DEFAULT_NAVIGATION_FEATURES.navigation.sports.message
+      },
+      live: {
+        enabled: DEFAULT_NAVIGATION_FEATURES.navigation.live.enabled,
+        message: DEFAULT_NAVIGATION_FEATURES.navigation.live.message
+      }
     };
 
-    for (const row of rows) {
+    for (const row of rawRows) {
       if (row.feature_key === "navigation.liveScores") {
         navigation.liveScores.enabled = row.enabled === 1;
+        navigation.liveScores.message = row.display_message ?? null;
       } else if (row.feature_key === "navigation.sports") {
         navigation.sports.enabled = row.enabled === 1;
+        navigation.sports.message = row.display_message ?? null;
       } else if (row.feature_key === "navigation.live") {
         navigation.live.enabled = row.enabled === 1;
+        navigation.live.message = row.display_message ?? null;
       }
     }
 
     response.json({
       databaseConnected: true,
-      rowsFound: rows.length,
+      rowsFound: rawRows.length,
+      rawRows,
       navigation,
-      buildTimestamp: process.env.BUILD_TIMESTAMP ?? new Date().toISOString()
+      timestamp: new Date().toISOString()
     });
   } catch (error) {
     console.error("[mobile/features/debug] GET failed:", error);
     response.status(500).json({
       databaseConnected: false,
       rowsFound: 0,
-      navigation: {
-        liveScores: { enabled: true },
-        sports: { enabled: true },
-        live: { enabled: true }
-      },
-      buildTimestamp: process.env.BUILD_TIMESTAMP ?? new Date().toISOString()
+      rawRows: [],
+      navigation: DEFAULT_NAVIGATION_FEATURES.navigation,
+      timestamp: new Date().toISOString()
     });
   }
 });
