@@ -139,29 +139,24 @@ export class MobileFeatureService {
       );
     }
 
+    const rowsByKey = new Map(normalizedRows.map((row) => [row.feature_key, row]));
+
     const response: MobileFeaturesResponse = {
       navigation: {
-        liveScores: { ...DEFAULT_NAVIGATION_FEATURES.navigation.liveScores },
-        sports: { ...DEFAULT_NAVIGATION_FEATURES.navigation.sports },
-        live: { ...DEFAULT_NAVIGATION_FEATURES.navigation.live }
+        liveScores: {
+          enabled: Boolean(rowsByKey.get("navigation.liveScores")?.enabled),
+          message: rowsByKey.get("navigation.liveScores")?.display_message ?? null
+        },
+        sports: {
+          enabled: Boolean(rowsByKey.get("navigation.sports")?.enabled),
+          message: rowsByKey.get("navigation.sports")?.display_message ?? null
+        },
+        live: {
+          enabled: Boolean(rowsByKey.get("navigation.live")?.enabled),
+          message: rowsByKey.get("navigation.live")?.display_message ?? null
+        }
       }
     };
-
-    const mapping: Record<string, keyof MobileFeaturesResponse["navigation"]> = {
-      "navigation.liveScores": "liveScores",
-      "navigation.sports": "sports",
-      "navigation.live": "live"
-    };
-
-    for (const row of normalizedRows) {
-      const key = mapping[row.feature_key];
-      if (key) {
-        response.navigation[key] = {
-          enabled: row.enabled,
-          message: row.display_message ?? null
-        };
-      }
-    }
 
     cachedFeatures = response;
     cacheUpdatedAt = now;

@@ -90,33 +90,22 @@ mobileRouter.get("/features/debug", (_request, response) => {
       .prepare(`SELECT feature_key, enabled, display_message FROM mobile_feature_flags WHERE feature_key LIKE 'navigation.%' ORDER BY feature_key`)
       .all() as Array<{ feature_key: string; enabled: number; display_message: string | null }>;
 
+    const rowsByKey = new Map(rawRows.map((row) => [row.feature_key, row]));
+
     const navigation = {
       liveScores: {
-        enabled: DEFAULT_NAVIGATION_FEATURES.navigation.liveScores.enabled,
-        message: DEFAULT_NAVIGATION_FEATURES.navigation.liveScores.message
+        enabled: Boolean(rowsByKey.get("navigation.liveScores")?.enabled),
+        message: rowsByKey.get("navigation.liveScores")?.display_message ?? null
       },
       sports: {
-        enabled: DEFAULT_NAVIGATION_FEATURES.navigation.sports.enabled,
-        message: DEFAULT_NAVIGATION_FEATURES.navigation.sports.message
+        enabled: Boolean(rowsByKey.get("navigation.sports")?.enabled),
+        message: rowsByKey.get("navigation.sports")?.display_message ?? null
       },
       live: {
-        enabled: DEFAULT_NAVIGATION_FEATURES.navigation.live.enabled,
-        message: DEFAULT_NAVIGATION_FEATURES.navigation.live.message
+        enabled: Boolean(rowsByKey.get("navigation.live")?.enabled),
+        message: rowsByKey.get("navigation.live")?.display_message ?? null
       }
     };
-
-    for (const row of rawRows) {
-      if (row.feature_key === "navigation.liveScores") {
-        navigation.liveScores.enabled = row.enabled === 1;
-        navigation.liveScores.message = row.display_message ?? null;
-      } else if (row.feature_key === "navigation.sports") {
-        navigation.sports.enabled = row.enabled === 1;
-        navigation.sports.message = row.display_message ?? null;
-      } else if (row.feature_key === "navigation.live") {
-        navigation.live.enabled = row.enabled === 1;
-        navigation.live.message = row.display_message ?? null;
-      }
-    }
 
     response.json({
       databaseConnected: true,
