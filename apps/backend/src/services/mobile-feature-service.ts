@@ -52,36 +52,38 @@ export type MobileFeatureNavigationRow = {
   display_message: string | null;
 };
 
+const toBool = (value: any): boolean => {
+  return value === 1 || value === "1" || value === true || value === "true";
+};
+
 function normalizeEnabledValue(value: number | boolean | string | null | undefined): boolean {
   if (value === null || value === undefined) {
     return true;
   }
 
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  return Boolean(Number(value));
+  return toBool(value);
 }
 
 export function normalizeNavigation(rows: Array<MobileFeatureNavigationRow>) {
   const featureMap = new Map(rows.map((r) => [r.feature_key, r]));
   console.log("[NAV MAP]", Array.from(featureMap.keys()));
+  console.log("[RAW ENABLED TYPES]", rows.map((r) => typeof r.enabled));
 
-  const getEnabled = (key: string) => Boolean(Number(featureMap.get(key)?.enabled));
+  const getEnabled = (key: string) => toBool(featureMap.get(key)?.enabled);
+  const getMessage = (key: string) => featureMap.get(key)?.display_message ?? null;
 
   const navigation = {
     liveScores: {
       enabled: getEnabled("navigation.liveScores"),
-      message: featureMap.get("navigation.liveScores")?.display_message ?? null
+      message: getMessage("navigation.liveScores")
     },
     sports: {
       enabled: getEnabled("navigation.sports"),
-      message: featureMap.get("navigation.sports")?.display_message ?? null
+      message: getMessage("navigation.sports")
     },
     live: {
       enabled: getEnabled("navigation.live"),
-      message: featureMap.get("navigation.live")?.display_message ?? null
+      message: getMessage("navigation.live")
     }
   };
 

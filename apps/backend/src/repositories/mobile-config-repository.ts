@@ -14,6 +14,10 @@ export type MobileFeature = {
   updated_at: string;
 };
 
+const toBool = (value: any): boolean => {
+  return value === 1 || value === "1" || value === true || value === "true";
+};
+
 export const MobileConfigRepository = {
   /**
    * Get the complete mobile navigation config.
@@ -22,7 +26,7 @@ export const MobileConfigRepository = {
     const db = getDatabase();
     const rows = db
       .prepare(`SELECT feature_name, enabled FROM mobile_features WHERE feature_name LIKE 'navigation.%'`)
-      .all() as Array<{ feature_name: string; enabled: number }>;
+      .all() as Array<{ feature_name: string; enabled: number | string | boolean }>;
 
     const config: MobileNavigationConfig = {
       liveScores: true,
@@ -31,7 +35,7 @@ export const MobileConfigRepository = {
     };
 
     for (const row of rows) {
-      const enabled = row.enabled === 1;
+      const enabled = toBool(row.enabled);
       if (row.feature_name === "navigation.liveScores") {
         config.liveScores = enabled;
       } else if (row.feature_name === "navigation.sports") {
