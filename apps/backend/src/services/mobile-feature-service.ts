@@ -46,6 +46,12 @@ type RawMobileFeatureFlagRow = {
   updated_at: string;
 };
 
+export type MobileFeatureNavigationRow = {
+  feature_key: string;
+  enabled: number | boolean | string | null;
+  display_message: string | null;
+};
+
 function normalizeEnabledValue(value: number | boolean | string | null | undefined): boolean {
   if (value === null || value === undefined) {
     return true;
@@ -55,20 +61,29 @@ function normalizeEnabledValue(value: number | boolean | string | null | undefin
     return value;
   }
 
-  if (typeof value === "number") {
-    return value === 1;
-  }
-
-  const normalized = value.toString().trim().toLowerCase();
-  return normalized === "1" || normalized === "true";
+  return Boolean(Number(value));
 }
 
-function normalizeMobileFeatureRow(row: RawMobileFeatureFlagRow) {
-  return {
-    feature_key: row.feature_key,
-    enabled: normalizeEnabledValue(row.enabled),
-    display_message: row.display_message ?? null
+export function normalizeNavigation(rows: Array<MobileFeatureNavigationRow>) {
+  const rowsByKey = new Map(rows.map((row) => [row.feature_key, row]));
+
+  const navigation = {
+    liveScores: {
+      enabled: normalizeEnabledValue(rowsByKey.get("navigation.liveScores")?.enabled),
+      message: null
+    },
+    sports: {
+      enabled: normalizeEnabledValue(rowsByKey.get("navigation.sports")?.enabled),
+      message: null
+    },
+    live: {
+      enabled: normalizeEnabledValue(rowsByKey.get("navigation.live")?.enabled),
+      message: null
+    }
   };
+
+  console.log("[MOBILE NORMALIZED]", JSON.stringify(navigation));
+  return navigation;
 }
 
 let cachedFeatures: MobileFeaturesResponse | null = null;
@@ -89,8 +104,12 @@ export class MobileFeatureService {
     }
 
     return {
-      ...row,
-      enabled: normalizeEnabledValue(row.enabled)
+      id: row.id,
+      feature_key: row.feature_key,
+      enabled: normalizeEnabledValue(row.enabled),
+      display_message: row.display_message ?? null,
+      created_at: row.created_at,
+      updated_at: row.updated_at
     };
   }
 
@@ -105,14 +124,18 @@ export class MobileFeatureService {
       .prepare(
         `SELECT feature_key, enabled, display_message FROM mobile_feature_flags WHERE feature_key LIKE 'navigation.%' ORDER BY feature_key`
       )
-      .all() as RawMobileFeatureFlagRow[];
+      .all() as Array<MobileFeatureNavigationRow>;
 
     console.debug("[MOBILE_FEATURES_DB_ROWS] found mobile_feature_flags navigation rows", {
       rowCount: rows.length,
       featureKeys: rows.map((row) => row.feature_key)
     });
 
-    const normalizedRows = rows.map(normalizeMobileFeatureRow);
+    const normalizedRows = rows.map((row) => ({
+      feature_key: row.feature_key,
+      enabled: normalizeEnabledValue(row.enabled),
+      display_message: row.display_message ?? null
+    }));
     const existingKeys = new Set(normalizedRows.map((row) => row.feature_key));
     const missingFeatures = DEFAULT_FEATURES.filter((item) => !existingKeys.has(item.feature_key));
 
@@ -139,23 +162,8 @@ export class MobileFeatureService {
       );
     }
 
-    const rowsByKey = new Map(normalizedRows.map((row) => [row.feature_key, row]));
-
     const response: MobileFeaturesResponse = {
-      navigation: {
-        liveScores: {
-          enabled: Boolean(rowsByKey.get("navigation.liveScores")?.enabled),
-          message: rowsByKey.get("navigation.liveScores")?.display_message ?? null
-        },
-        sports: {
-          enabled: Boolean(rowsByKey.get("navigation.sports")?.enabled),
-          message: rowsByKey.get("navigation.sports")?.display_message ?? null
-        },
-        live: {
-          enabled: Boolean(rowsByKey.get("navigation.live")?.enabled),
-          message: rowsByKey.get("navigation.live")?.display_message ?? null
-        }
-      }
+      navigation: normalizeNavigation(normalizedRows)
     };
 
     cachedFeatures = response;

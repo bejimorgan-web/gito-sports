@@ -2,7 +2,7 @@ import type { Request } from "express";
 import { Router } from "express";
 
 import { MatchService } from "../services/match-service.js";
-import { MobileFeatureService, DEFAULT_NAVIGATION_FEATURES } from "../services/mobile-feature-service.js";
+import { MobileFeatureService, DEFAULT_NAVIGATION_FEATURES, normalizeNavigation, MobileFeatureNavigationRow } from "../services/mobile-feature-service.js";
 import { getDatabase } from "../db/connection.js";
 
 function normalizeUploadsUrl(request: Request, url: string | undefined | null) {
@@ -88,24 +88,9 @@ mobileRouter.get("/features/debug", (_request, response) => {
     const db = getDatabase();
     const rawRows = db
       .prepare(`SELECT feature_key, enabled, display_message FROM mobile_feature_flags WHERE feature_key LIKE 'navigation.%' ORDER BY feature_key`)
-      .all() as Array<{ feature_key: string; enabled: number; display_message: string | null }>;
+      .all() as Array<MobileFeatureNavigationRow>;
 
-    const rowsByKey = new Map(rawRows.map((row) => [row.feature_key, row]));
-
-    const navigation = {
-      liveScores: {
-        enabled: Boolean(rowsByKey.get("navigation.liveScores")?.enabled),
-        message: rowsByKey.get("navigation.liveScores")?.display_message ?? null
-      },
-      sports: {
-        enabled: Boolean(rowsByKey.get("navigation.sports")?.enabled),
-        message: rowsByKey.get("navigation.sports")?.display_message ?? null
-      },
-      live: {
-        enabled: Boolean(rowsByKey.get("navigation.live")?.enabled),
-        message: rowsByKey.get("navigation.live")?.display_message ?? null
-      }
-    };
+    const navigation = normalizeNavigation(rawRows);
 
     response.json({
       databaseConnected: true,
