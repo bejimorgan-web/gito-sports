@@ -2,8 +2,11 @@ import type { Request } from "express";
 import { Router } from "express";
 
 import { MatchService } from "../services/match-service.js";
-import { MobileFeatureService, DEFAULT_NAVIGATION_FEATURES, normalizeNavigation, MobileFeatureNavigationRow } from "../services/mobile-feature-service.js";
+import { MobileFeatureService, DEFAULT_NAVIGATION_FEATURES, MobileFeatureNavigationRow } from "../services/mobile-feature-service.js";
 import { getDatabase } from "../db/connection.js";
+
+console.log("[RUNTIME FILE]", __filename);
+console.log("[RUNTIME VERSION]", process.env.NODE_ENV);
 
 function normalizeUploadsUrl(request: Request, url: string | undefined | null) {
   if (!url) {
@@ -49,11 +52,19 @@ mobileRouter.get("/features", (_request, response) => {
   try {
     console.debug("[MOBILE_FEATURES_FETCH] fetching mobile navigation feature flags");
     const result = MobileFeatureService.getNavigationFeatures();
+    const navigation = result.navigation;
 
-    console.log("[MOBILE FEATURES RESPONSE]", { navigation: result.navigation });
+    console.log("[MOBILE FEATURES RESPONSE]", { navigation });
+    console.log("[ROUTE RESPONSE SOURCE]", typeof navigation, navigation);
+    console.log("[DEBUG FINAL NAVIGATION]", navigation);
+    if (!navigation || Object.keys(navigation).length === 0) {
+      console.error("[CRITICAL] navigation was lost after normalization");
+    }
 
     response.json({
-      data: result,
+      data: {
+        navigation
+      },
       timestamp: new Date().toISOString()
     });
   } catch (error) {
@@ -74,13 +85,20 @@ mobileRouter.get("/features/debug", (_request, response) => {
       .all() as Array<MobileFeatureNavigationRow>;
 
     const result = MobileFeatureService.getNavigationFeatures();
+    const navigation = result.navigation;
+
+    console.log("[ROUTE RESPONSE SOURCE]", typeof navigation, navigation);
+    console.log("[DEBUG FINAL NAVIGATION]", navigation);
+    if (!navigation || Object.keys(navigation).length === 0) {
+      console.error("[CRITICAL] navigation was lost after normalization");
+    }
 
     response.json({
       databaseConnected: true,
       rowsFound: rawRows.length,
       rawRows,
-      normalizedNavigation: result.navigation,
-      ...result,
+      normalizedNavigation: navigation,
+      navigation,
       timestamp: new Date().toISOString()
     });
   } catch (error) {

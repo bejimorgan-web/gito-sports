@@ -1,0 +1,11 @@
+services:
+  - type: web_service
+    name: gito-backend
+    env: node
+    rootDir: apps/backend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production

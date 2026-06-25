@@ -1,6 +1,9 @@
 import crypto from "node:crypto";
 import { getDatabase } from "../db/connection.js";
 
+console.log("[RUNTIME FILE]", __filename);
+console.log("[RUNTIME VERSION]", process.env.NODE_ENV);
+
 export type MobileFeatureFlag = {
   id: string;
   feature_key: string;
@@ -65,6 +68,7 @@ function normalizeEnabledValue(value: number | boolean | string | null | undefin
 }
 
 export function normalizeNavigation(rows: Array<MobileFeatureNavigationRow>) {
+  console.log("[DEPLOY CHECK] mobile-feature-service loaded");
   const featureMap = new Map(rows.map((r) => [r.feature_key, r]));
   console.log("[NAV MAP]", Array.from(featureMap.keys()));
   console.log("[RAW ENABLED TYPES]", rows.map((r) => typeof r.enabled));

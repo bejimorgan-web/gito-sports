@@ -4,14 +4,24 @@ import { getDatabase } from "./db/connection.js";
 import validateUploadsAtStartup from "./startup/validateUploads.js";
 import { ScoreService } from "./services/score-service.js";
 import { MobileFeatureService } from "./services/mobile-feature-service.js";
+import {
+  allReadinessFlagsReady,
+  getReadinessStatus,
+  markServerReady,
+  setBootstrapInitialized,
+  setReady
+} from "./core/server-readiness.js";
 import * as Sentry from "@sentry/node";
+
+console.log("[RUNTIME FILE]", __filename);
+console.log("[RUNTIME VERSION]", process.env.NODE_ENV);
 
 let footballServiceInitialized = false;
 
 async function initializeFootballService() {
   if (footballServiceInitialized) {
     console.log('[startup] FOOTBALL initialization already started, skipping duplicate startup call.');
-    return;
+    return false;
   }
 
   footballServiceInitialized = true;
@@ -21,7 +31,7 @@ async function initializeFootballService() {
 
   if (!env.apiFootballKey?.trim()) {
     console.warn('[startup] FOOTBALL disabled because API_FOOTBALL_KEY is missing or empty.');
-    return;
+    return true;
   }
 
   const status = (ScoreService as any).getStatus?.() ?? {
@@ -41,7 +51,7 @@ async function initializeFootballService() {
     if (updated.cacheInitialized) {
       console.log('FOOTBALL INITIAL REFRESH STATUS = success');
       console.log('[startup] FOOTBALL: initial refresh completed lastFetchTime=' + (updated.lastFetchTime ?? 'null') + ' lastResponseCount=' + updated.lastResponseCount);
-      return;
+      return true;
     }
 
     throw new Error('refreshAll did not initialize cache');
@@ -49,6 +59,20 @@ async function initializeFootballService() {
     const message = error instanceof Error ? error.message : String(error);
     console.error('FOOTBALL INIT FAILED ->', message);
     console.error('FOOTBALL INITIAL REFRESH STATUS = fail');
+    return false;
+  }
+}
+
+function markInitialReadiness() {
+  try {
+    getDatabase();
+    setReady("databaseReady");
+    MobileFeatureService.repairMobileFeatureFlags();
+    setReady("featureFlagsReady");
+    setReady("analyticsReady");
+    setBootstrapInitialized();
+  } catch (error) {
+    console.error('[startup] initial readiness bootstrapping failed', error instanceof Error ? error.message : error);
   }
 }
 
@@ -66,15 +90,23 @@ if (runtimeConfig.errorReportingEnabled && runtimeConfig.sentryDsn) {
 
 (async () => {
   const app = createApp();
-  getDatabase();
-  MobileFeatureService.repairMobileFeatureFlags();
+  markInitialReadiness();
 
   const port = Number(process.env.PORT ?? 3000);
-  app.listen(port, "0.0.0.0", () => {
+  app.listen(port, "0.0.0.0", async () => {
     console.log(`GiTO backend listening on port ${port}`);
-    initializeFootballService().catch((error) => {
-      console.error('[startup] FOOTBALL: initial refresh failed', error instanceof Error ? error.message : error);
-    });
+
+    const footballReady = await initializeFootballService();
+    if (footballReady) {
+      setReady("footballCacheReady");
+    }
+
+    if (allReadinessFlagsReady()) {
+      markServerReady();
+      console.log('[startup] server is now fully ready');
+    } else {
+      console.warn('[startup] server initialization completed, but startup readiness flags are not all ready', getReadinessStatus());
+    }
   });
 })();
 

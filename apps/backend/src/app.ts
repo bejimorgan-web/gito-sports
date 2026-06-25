@@ -4,12 +4,14 @@ import helmet from "helmet";
 import crypto from "node:crypto";
 
 import { workflowErrorHandler } from "./middleware/workflow-error.js";
+import { readinessGuard } from "./middleware/readiness-guard.js";
 import { authRouter } from "./routes/auth.js";
 import path from "node:path";
 import fs from "node:fs";
 
 import * as Sentry from "@sentry/node";
 import { healthRouter } from "./routes/health.js";
+import { getReadinessStatus, isServerReady } from "./core/server-readiness.js";
 import { systemRouter } from "./routes/system.js";
 import { iptvRouter } from "./routes/iptv.js";
 import { liveMatchesRouter } from "./routes/live-matches.js";
@@ -140,6 +142,14 @@ export function createApp() {
     });
   });
 
+  app.get("/__debug/readiness", (_req, res) => {
+    res.json({
+      ready: isServerReady(),
+      readiness: getReadinessStatus(),
+      timestamp: new Date().toISOString()
+    });
+  });
+
   app.use("/auth", authRouter);
   app.use("/api/admin", adminRouter);
   app.use("/health", healthRouter);
@@ -162,12 +172,12 @@ export function createApp() {
   app.use("/teams", teamsRouter);
   app.use("/matches", matchesRouter);
   app.use("/live-matches", liveMatchesRouter);
-  app.use("/mobile", mobileRouter);
-  app.use("/analytics", analyticsRouter);
-  app.use("/mobile/analytics", analyticsRouter);
+  app.use("/mobile", readinessGuard, mobileRouter);
+  app.use("/analytics", readinessGuard, analyticsRouter);
+  app.use("/mobile/analytics", readinessGuard, analyticsRouter);
   app.use("/operations", operationsRouter);
   app.use("/scores", scoresRouter);
-  app.use("/api/football", footballRouter);
+  app.use("/api/football", readinessGuard, footballRouter);
   app.use("/iptv", iptvRouter);
   app.use("/streams", streamsRouter);
   app.use('/api/admin/migration', migrationRouter);
