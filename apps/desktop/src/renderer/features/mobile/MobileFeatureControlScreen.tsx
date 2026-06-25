@@ -44,7 +44,8 @@ export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControl
 
     try {
       const response = await apiClient.getMobileFeatures();
-      const navigation = response?.navigation;
+      console.log("[DESKTOP MOBILE FEATURES]", response);
+      const navigation = response?.data?.navigation;
 
       const safeResponse = {
         navigation: {

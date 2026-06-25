@@ -466,7 +466,7 @@ export const apiClient = {
       timestamp: string;
     };
 
-    return body.data;
+    return body;
   },
   updateMobileFeature(featureKey: string, enabled: boolean, message: string | null, accessToken: string) {
     return request<{ featureKey: string; enabled: boolean; message: string | null }>(
