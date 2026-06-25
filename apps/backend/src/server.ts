@@ -13,7 +13,6 @@ import {
 } from "./core/server-readiness.js";
 import * as Sentry from "@sentry/node";
 
-console.log("[RUNTIME FILE]", __filename);
 console.log("[RUNTIME VERSION]", process.env.NODE_ENV);
 
 let footballServiceInitialized = false;

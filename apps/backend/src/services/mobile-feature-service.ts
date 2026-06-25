@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import { getDatabase } from "../db/connection.js";
 
-console.log("[RUNTIME FILE]", __filename);
 console.log("[RUNTIME VERSION]", process.env.NODE_ENV);
 
 export type MobileFeatureFlag = {

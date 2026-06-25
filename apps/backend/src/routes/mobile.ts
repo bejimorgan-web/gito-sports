@@ -5,7 +5,6 @@ import { MatchService } from "../services/match-service.js";
 import { MobileFeatureService, DEFAULT_NAVIGATION_FEATURES, MobileFeatureNavigationRow } from "../services/mobile-feature-service.js";
 import { getDatabase } from "../db/connection.js";
 
-console.log("[RUNTIME FILE]", __filename);
 console.log("[RUNTIME VERSION]", process.env.NODE_ENV);
 
 function normalizeUploadsUrl(request: Request, url: string | undefined | null) {
