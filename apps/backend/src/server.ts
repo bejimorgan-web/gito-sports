@@ -3,6 +3,7 @@ import { env, runtimeConfig } from "./config/env.js";
 import { getDatabase } from "./db/connection.js";
 import validateUploadsAtStartup from "./startup/validateUploads.js";
 import { ScoreService } from "./services/score-service.js";
+import { MobileFeatureService } from "./services/mobile-feature-service.js";
 import * as Sentry from "@sentry/node";
 
 let footballServiceInitialized = false;
@@ -66,6 +67,7 @@ if (runtimeConfig.errorReportingEnabled && runtimeConfig.sentryDsn) {
 (async () => {
   const app = createApp();
   getDatabase();
+  MobileFeatureService.repairMobileFeatureFlags();
 
   const port = Number(process.env.PORT ?? 3000);
   app.listen(port, "0.0.0.0", () => {

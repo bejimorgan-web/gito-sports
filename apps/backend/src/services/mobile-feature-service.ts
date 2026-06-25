@@ -37,6 +37,40 @@ export const DEFAULT_NAVIGATION_FEATURES: MobileFeaturesResponse = {
   }
 };
 
+type RawMobileFeatureFlagRow = {
+  id: string;
+  feature_key: string;
+  enabled: number | boolean | string | null;
+  display_message: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+function normalizeEnabledValue(value: number | boolean | string | null | undefined): boolean {
+  if (value === null || value === undefined) {
+    return true;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    return value === 1;
+  }
+
+  const normalized = value.toString().trim().toLowerCase();
+  return normalized === "1" || normalized === "true";
+}
+
+function normalizeMobileFeatureRow(row: RawMobileFeatureFlagRow) {
+  return {
+    feature_key: row.feature_key,
+    enabled: normalizeEnabledValue(row.enabled),
+    display_message: row.display_message ?? null
+  };
+}
+
 let cachedFeatures: MobileFeaturesResponse | null = null;
 let cacheUpdatedAt: number | null = null;
 const CACHE_TTL_MS = 60 * 1000;
@@ -48,8 +82,16 @@ export class MobileFeatureService {
       .prepare(
         `SELECT id, feature_key, enabled, display_message, created_at, updated_at FROM mobile_feature_flags WHERE feature_key = ?`
       )
-      .get(featureKey) as MobileFeatureFlag | undefined;
-    return row ?? null;
+      .get(featureKey) as RawMobileFeatureFlagRow | undefined;
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      ...row,
+      enabled: normalizeEnabledValue(row.enabled)
+    };
   }
 
   static getNavigationFeatures(): MobileFeaturesResponse {
@@ -63,14 +105,15 @@ export class MobileFeatureService {
       .prepare(
         `SELECT feature_key, enabled, display_message FROM mobile_feature_flags WHERE feature_key LIKE 'navigation.%' ORDER BY feature_key`
       )
-      .all() as Array<{ feature_key: string; enabled: number; display_message: string | null }>;
+      .all() as RawMobileFeatureFlagRow[];
 
     console.debug("[MOBILE_FEATURES_DB_ROWS] found mobile_feature_flags navigation rows", {
       rowCount: rows.length,
       featureKeys: rows.map((row) => row.feature_key)
     });
 
-    const existingKeys = new Set(rows.map((row) => row.feature_key));
+    const normalizedRows = rows.map(normalizeMobileFeatureRow);
+    const existingKeys = new Set(normalizedRows.map((row) => row.feature_key));
     const missingFeatures = DEFAULT_FEATURES.filter((item) => !existingKeys.has(item.feature_key));
 
     if (rows.length === 0) {
@@ -83,6 +126,12 @@ export class MobileFeatureService {
         db.prepare(
           `INSERT OR IGNORE INTO mobile_feature_flags (id, feature_key, enabled, display_message, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
         ).run(missing.id, missing.feature_key, 1, null, nowIso, nowIso);
+
+        normalizedRows.push({
+          feature_key: missing.feature_key,
+          enabled: true,
+          display_message: null
+        });
       }
       console.warn(
         "[MOBILE_FEATURES_FALLBACK_USED] mobile feature flags were incomplete; initialized missing default navigation flags",
@@ -104,11 +153,11 @@ export class MobileFeatureService {
       "navigation.live": "live"
     };
 
-    for (const row of rows) {
+    for (const row of normalizedRows) {
       const key = mapping[row.feature_key];
       if (key) {
         response.navigation[key] = {
-          enabled: row.enabled === 1,
+          enabled: row.enabled,
           message: row.display_message ?? null
         };
       }
@@ -119,6 +168,62 @@ export class MobileFeatureService {
     return response;
   }
 
+  static repairMobileFeatureFlags(): void {
+    const db = getDatabase();
+    const rows = db
+      .prepare(
+        `SELECT id, feature_key, enabled, display_message FROM mobile_feature_flags WHERE feature_key LIKE 'navigation.%' ORDER BY feature_key`
+      )
+      .all() as RawMobileFeatureFlagRow[];
+
+    const nowIso = new Date().toISOString();
+    const normalizedRows = rows.map((row) => {
+      const enabled = normalizeEnabledValue(row.enabled);
+      const normalizedMessage = row.display_message ?? null;
+
+      const shouldUpdate =
+        row.enabled === null ||
+        row.enabled === undefined ||
+        typeof row.enabled === "boolean" ||
+        typeof row.enabled === "string" ||
+        (typeof row.enabled === "number" && row.enabled !== 0 && row.enabled !== 1);
+
+      if (shouldUpdate) {
+        db.prepare(
+          `UPDATE mobile_feature_flags SET enabled = ?, display_message = ?, updated_at = ? WHERE id = ?`
+        ).run(enabled ? 1 : 0, normalizedMessage, nowIso, row.id);
+      }
+
+      return {
+        feature_key: row.feature_key,
+        enabled,
+        display_message: normalizedMessage
+      };
+    });
+
+    const existingKeys = new Set(normalizedRows.map((row) => row.feature_key));
+    const missingFeatures = DEFAULT_FEATURES.filter((item) => !existingKeys.has(item.feature_key));
+
+    if (missingFeatures.length > 0 || rows.length === 0) {
+      for (const missing of missingFeatures) {
+        db.prepare(
+          `INSERT OR IGNORE INTO mobile_feature_flags (id, feature_key, enabled, display_message, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+        ).run(missing.id, missing.feature_key, 1, null, nowIso, nowIso);
+      }
+
+      console.log("[MOBILE_FEATURES_REPAIR] repaired missing or invalid mobile_feature_flags navigation rows", {
+        missingKeys: missingFeatures.map((item) => item.feature_key),
+        rowCount: rows.length
+      });
+      cachedFeatures = null;
+      cacheUpdatedAt = null;
+    }
+
+    if (normalizedRows.length > 0) {
+      console.debug("[MOBILE_FEATURES_REPAIR] normalized rows", normalizedRows);
+    }
+  }
+
   static updateNavigationFeature(
     featureKey: string,
     enabled: boolean,
@@ -126,17 +231,18 @@ export class MobileFeatureService {
   ): MobileFeaturePayload {
     const db = getDatabase();
     const now = new Date().toISOString();
+    const normalizedMessage = displayMessage ?? null;
 
     const existing = this.getFeatureFlag(featureKey);
     if (!existing) {
       const id = DEFAULT_FEATURES.find((item) => item.feature_key === featureKey)?.id ?? crypto.randomUUID();
       db.prepare(
         `INSERT INTO mobile_feature_flags (id, feature_key, enabled, display_message, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
-      ).run(id, featureKey, enabled ? 1 : 0, displayMessage, now, now);
+      ).run(id, featureKey, enabled ? 1 : 0, normalizedMessage, now, now);
     } else {
       db.prepare(
         `UPDATE mobile_feature_flags SET enabled = ?, display_message = ?, updated_at = ? WHERE feature_key = ?`
-      ).run(enabled ? 1 : 0, displayMessage, now, featureKey);
+      ).run(enabled ? 1 : 0, normalizedMessage, now, featureKey);
     }
 
     cachedFeatures = null;
@@ -144,7 +250,7 @@ export class MobileFeatureService {
 
     return {
       enabled,
-      message: displayMessage
+      message: normalizedMessage
     };
   }
 }

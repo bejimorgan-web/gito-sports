@@ -122,6 +122,7 @@ mobileRouter.get("/features/debug", (_request, response) => {
       databaseConnected: true,
       rowsFound: rawRows.length,
       rawRows,
+      normalizedNavigation: navigation,
       navigation,
       timestamp: new Date().toISOString()
     });
