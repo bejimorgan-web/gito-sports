@@ -1,13 +1,5 @@
-// Use standardized `VITE_API_URL` when available, fall back to the older
-// `VITE_GITO_API_BASE_URL` for backwards compatibility, then localhost.
-// NOTE: keep this a plain string — don't join parts which can produce
-// incorrect values like "httplocalhost:4100".
-const DEV_API_BASE_URL = "http://localhost:4100";
-const API_BASE_URL = (
-  (import.meta.env.VITE_API_URL as string | undefined) ??
-  (import.meta.env.VITE_GITO_API_BASE_URL as string | undefined) ??
-  ((import.meta as any).env?.MODE === "production" ? "https://gito-sports.onrender.com" : DEV_API_BASE_URL)
-).replace(/\/$/, "");
+// Resolve asset URLs using the shared API base URL from the API client.
+import { API_BASE_URL } from "../services/api-client";
 
 export function resolveAssetUrl(value?: string) {
   if (!value?.trim()) return "";

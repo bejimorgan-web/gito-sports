@@ -22,18 +22,14 @@ import type {
 
 // Prefer the standardized `VITE_API_URL` but keep backwards compatibility
 // with the older `VITE_GITO_API_BASE_URL` name.
-let API_BASE_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? (import.meta.env.VITE_GITO_API_BASE_URL as string | undefined);
-const DEV_API_BASE_URL = ["http://", "localhost", ":4100"].join("");
+const ENV_API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? (import.meta.env.VITE_GITO_API_BASE_URL as string | undefined);
+const DEV_API_BASE_URL = "http://localhost:4100";
+const PROD_API_BASE_URL = "https://gito-sports.onrender.com";
 
-if (!API_BASE_URL) {
-  API_BASE_URL = (import.meta as any).env?.MODE === "production"
-    ? "https://gito-sports.onrender.com"
-    : DEV_API_BASE_URL;
-}
-
+let API_BASE_URL = ENV_API_URL ?? (import.meta.env.PROD ? PROD_API_BASE_URL : DEV_API_BASE_URL);
 API_BASE_URL = API_BASE_URL.replace(/\/$/, "");
 
-console.log('[api-client] API_BASE_URL=', API_BASE_URL);
+console.log(`[DESKTOP API BASE URL] ${API_BASE_URL}`);
 
 export { API_BASE_URL };
 
