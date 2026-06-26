@@ -95,10 +95,6 @@ export function normalizeNavigation(rows: Array<MobileFeatureNavigationRow>) {
   return navigation;
 }
 
-let cachedFeatures: MobileFeaturesResponse | null = null;
-let cacheUpdatedAt: number | null = null;
-const CACHE_TTL_MS = 60 * 1000;
-
 export class MobileFeatureService {
   static getFeatureFlag(featureKey: string): MobileFeatureFlag | null {
     const db = getDatabase();
@@ -123,17 +119,21 @@ export class MobileFeatureService {
   }
 
   static getNavigationFeatures(): MobileFeaturesResponse {
-    const now = Date.now();
-    if (cachedFeatures && cacheUpdatedAt && now - cacheUpdatedAt < CACHE_TTL_MS) {
-      return cachedFeatures;
-    }
-
     const db = getDatabase();
-    const rows = db
+    let rows = db
       .prepare(
         `SELECT feature_key, enabled, display_message FROM mobile_feature_flags WHERE feature_key LIKE 'navigation.%' ORDER BY feature_key`
       )
       .all() as Array<MobileFeatureNavigationRow>;
+
+    if (rows.length === 0) {
+      this.repairMobileFeatureFlags();
+      rows = db
+        .prepare(
+          `SELECT feature_key, enabled, display_message FROM mobile_feature_flags WHERE feature_key LIKE 'navigation.%' ORDER BY feature_key`
+        )
+        .all() as Array<MobileFeatureNavigationRow>;
+    }
 
     console.debug("[MOBILE_FEATURES_DB_ROWS] found mobile_feature_flags navigation rows", {
       rowCount: rows.length,
@@ -148,6 +148,11 @@ export class MobileFeatureService {
     const existingKeys = new Set(normalizedRows.map((row) => row.feature_key));
     const missingFeatures = DEFAULT_FEATURES.filter((item) => !existingKeys.has(item.feature_key));
 
+    const legacyRows = db
+      .prepare(`SELECT feature_name, enabled FROM mobile_features WHERE feature_name LIKE 'navigation.%' ORDER BY feature_name`)
+      .all() as Array<{ feature_name: string; enabled: number | boolean | string | null }>;
+    const legacyMap = new Map(legacyRows.map((row) => [row.feature_name, normalizeEnabledValue(row.enabled)]));
+
     if (rows.length === 0) {
       console.warn("[MOBILE_FEATURES_DB_EMPTY] mobile_feature_flags contains no navigation rows; using default navigation flags");
     }
@@ -155,13 +160,14 @@ export class MobileFeatureService {
     if (missingFeatures.length > 0) {
       const nowIso = new Date().toISOString();
       for (const missing of missingFeatures) {
+        const enabled = legacyMap.has(missing.feature_key) ? legacyMap.get(missing.feature_key)! : true;
         db.prepare(
           `INSERT OR IGNORE INTO mobile_feature_flags (id, feature_key, enabled, display_message, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
-        ).run(missing.id, missing.feature_key, 1, null, nowIso, nowIso);
+        ).run(missing.id, missing.feature_key, enabled ? 1 : 0, null, nowIso, nowIso);
 
         normalizedRows.push({
           feature_key: missing.feature_key,
-          enabled: true,
+          enabled,
           display_message: null
         });
       }
@@ -171,13 +177,9 @@ export class MobileFeatureService {
       );
     }
 
-    const response: MobileFeaturesResponse = {
+    return {
       navigation: normalizeNavigation(normalizedRows)
     };
-
-    cachedFeatures = response;
-    cacheUpdatedAt = now;
-    return response;
   }
 
   static repairMobileFeatureFlags(): void {
@@ -216,19 +218,30 @@ export class MobileFeatureService {
     const existingKeys = new Set(normalizedRows.map((row) => row.feature_key));
     const missingFeatures = DEFAULT_FEATURES.filter((item) => !existingKeys.has(item.feature_key));
 
+    const legacyRows = db
+      .prepare(`SELECT feature_name, enabled FROM mobile_features WHERE feature_name LIKE 'navigation.%' ORDER BY feature_name`)
+      .all() as Array<{ feature_name: string; enabled: number | boolean | string | null }>;
+    const legacyMap = new Map(legacyRows.map((row) => [row.feature_name, normalizeEnabledValue(row.enabled)]));
+
     if (missingFeatures.length > 0 || rows.length === 0) {
       for (const missing of missingFeatures) {
+        const enabled = legacyMap.has(missing.feature_key) ? legacyMap.get(missing.feature_key)! : true;
         db.prepare(
           `INSERT OR IGNORE INTO mobile_feature_flags (id, feature_key, enabled, display_message, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
-        ).run(missing.id, missing.feature_key, 1, null, nowIso, nowIso);
+        ).run(missing.id, missing.feature_key, enabled ? 1 : 0, null, nowIso, nowIso);
+
+        normalizedRows.push({
+          feature_key: missing.feature_key,
+          enabled,
+          display_message: null
+        });
       }
 
       console.log("[MOBILE_FEATURES_REPAIR] repaired missing or invalid mobile_feature_flags navigation rows", {
         missingKeys: missingFeatures.map((item) => item.feature_key),
+        migratedLegacyKeys: Array.from(legacyMap.keys()).filter((key) => missingFeatures.some((item) => item.feature_key === key)),
         rowCount: rows.length
       });
-      cachedFeatures = null;
-      cacheUpdatedAt = null;
     }
 
     if (normalizedRows.length > 0) {
@@ -256,9 +269,6 @@ export class MobileFeatureService {
         `UPDATE mobile_feature_flags SET enabled = ?, display_message = ?, updated_at = ? WHERE feature_key = ?`
       ).run(enabled ? 1 : 0, normalizedMessage, now, featureKey);
     }
-
-    cachedFeatures = null;
-    cacheUpdatedAt = null;
 
     return {
       enabled,
