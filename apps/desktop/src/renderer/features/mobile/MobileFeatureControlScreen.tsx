@@ -25,8 +25,10 @@ interface MobileFeatureControlScreenProps {
 
 export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControlScreenProps) {
   const [features, setFeatures] = useState<MobileFeatureState[]>([]);
+  const [originalFeatures, setOriginalFeatures] = useState<MobileFeatureState[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   const [toasts, setToasts] = useState<{ id: string; message: string; type: "success" | "error" | "info" }[]>([]);
 
   const pushToast = useCallback((message: string, type: "success" | "error" | "info" = "success") => {
@@ -64,7 +66,7 @@ export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControl
         }
       };
 
-      setFeatures([
+      const loadedFeatures: MobileFeatureState[] = [
         {
           key: "navigation.liveScores",
           label: featureLabels["navigation.liveScores"],
@@ -89,7 +91,10 @@ export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControl
           isSaving: false,
           error: null
         }
-      ]);
+      ];
+
+      setFeatures(loadedFeatures);
+      setOriginalFeatures(loadedFeatures);
     } catch (loadError) {
       const message = loadError instanceof Error ? loadError.message : String(loadError);
       setError(`Unable to load mobile navigation feature flags: ${message}`);
@@ -103,39 +108,47 @@ export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControl
     void loadFeatures();
   }, [loadFeatures]);
 
-  const updateFeature = useCallback(async (featureKey: MobileFeatureKey, enabled: boolean) => {
+  const updateFeature = useCallback((featureKey: MobileFeatureKey, enabled: boolean) => {
     setFeatures((current) =>
       current.map((feature) =>
-        feature.key === featureKey ? { ...feature, enabled, isSaving: true, error: null } : feature
+        feature.key === featureKey ? { ...feature, enabled, error: null } : feature
       )
     );
+  }, []);
+
+  const saveChanges = useCallback(async () => {
+    setIsSaving(true);
 
     try {
-      const response = await apiClient.updateMobileFeature(featureKey, enabled, null, accessToken);
-      setFeatures((current) =>
-        current.map((feature) =>
-          feature.key === featureKey
-            ? {
-                ...feature,
-                enabled: response.enabled,
-                message: response.message,
-                isSaving: false,
-                error: null
-              }
-            : feature
-        )
-      );
-      pushToast(`${featureLabels[featureKey]} has been ${enabled ? "enabled" : "disabled"}.`);
-    } catch (updateError) {
-      const message = updateError instanceof Error ? updateError.message : String(updateError);
-      setFeatures((current) =>
-        current.map((feature) =>
-          feature.key === featureKey ? { ...feature, isSaving: false, error: message } : feature
-        )
-      );
-      pushToast(`Unable to update ${featureLabels[featureKey]}: ${message}`, "error");
+      const navigationUpdate = {
+        liveScores: features.find((f) => f.key === "navigation.liveScores")?.enabled ?? true,
+        sports: features.find((f) => f.key === "navigation.sports")?.enabled ?? true,
+        live: features.find((f) => f.key === "navigation.live")?.enabled ?? true
+      };
+
+      const response = await apiClient.updateMobileFeatures(navigationUpdate);
+      console.log("[DESKTOP MOBILE FEATURES SAVED]", response);
+
+      pushToast("Mobile navigation feature flags saved successfully.", "success");
+
+      // Reload features to ensure we have the latest state from backend
+      await loadFeatures();
+    } catch (saveError) {
+      const message = saveError instanceof Error ? saveError.message : String(saveError);
+      console.error("[DESKTOP MOBILE FEATURES SAVE ERROR]", message);
+      pushToast(`Failed to save mobile navigation flags: ${message}`, "error");
+    } finally {
+      setIsSaving(false);
     }
-  }, [accessToken, pushToast]);
+  }, [features, pushToast, loadFeatures]);
+
+  const hasChanges = useMemo(() => {
+    if (features.length !== originalFeatures.length) {
+      return true;
+    }
+
+    return features.some((feature, index) => feature.enabled !== originalFeatures[index]?.enabled);
+  }, [features, originalFeatures]);
 
   const featureRows = useMemo(
     () =>
@@ -151,18 +164,17 @@ export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControl
                 <input
                   type="checkbox"
                   checked={feature.enabled}
-                  disabled={feature.isSaving}
+                  disabled={isSaving}
                   onChange={(event) => void updateFeature(feature.key, event.target.checked)}
                 />
                 <span className="slider" />
               </label>
-              {feature.isSaving ? <span className="feature-status">Saving…</span> : null}
             </div>
           </div>
           {feature.error ? <p className="feature-error">{feature.error}</p> : null}
         </div>
       )),
-    [features, updateFeature]
+    [features, isSaving, updateFeature]
   );
 
   return (
@@ -184,6 +196,28 @@ export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControl
           </div>
         )}
       </div>
+
+      {!loading && !error && (
+        <div className="button-group" style={{ marginTop: "1.5rem", display: "flex", gap: "1rem" }}>
+          <button
+            onClick={() => void saveChanges()}
+            disabled={isSaving || loading}
+            style={{
+              padding: "0.75rem 1.5rem",
+              backgroundColor: "#0066cc",
+              color: "white",
+              border: "none",
+              borderRadius: "4px",
+              cursor: isSaving ? "not-allowed" : "pointer",
+              opacity: isSaving ? 0.6 : 1,
+              fontSize: "1rem",
+              fontWeight: "500"
+            }}
+          >
+            {isSaving ? "Saving…" : "Save Changes"}
+          </button>
+        </div>
+      )}
 
       <div className="toasts-container">
         {toasts.map((toast) => (

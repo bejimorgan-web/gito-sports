@@ -111,3 +111,64 @@ mobileRouter.get("/features/debug", (_request, response) => {
     });
   }
 });
+
+mobileRouter.post("/features/update", (request, response) => {
+  try {
+    const body = request.body as {
+      navigation?: {
+        liveScores?: boolean;
+        sports?: boolean;
+        live?: boolean;
+      };
+    };
+
+    if (!body.navigation || typeof body.navigation !== "object") {
+      response.status(400).json({
+        error: "invalid_payload",
+        message: "Request body must contain 'navigation' object"
+      });
+      return;
+    }
+
+    const navigation = body.navigation;
+    const updates: Record<string, boolean> = {};
+
+    // Update each navigation feature
+    if (typeof navigation.liveScores === "boolean") {
+      MobileFeatureService.updateNavigationFeature("navigation.liveScores", navigation.liveScores, null);
+      updates.liveScores = navigation.liveScores;
+      console.log("[MOBILE_FEATURES_UPDATE] updated navigation.liveScores =", navigation.liveScores);
+    }
+
+    if (typeof navigation.sports === "boolean") {
+      MobileFeatureService.updateNavigationFeature("navigation.sports", navigation.sports, null);
+      updates.sports = navigation.sports;
+      console.log("[MOBILE_FEATURES_UPDATE] updated navigation.sports =", navigation.sports);
+    }
+
+    if (typeof navigation.live === "boolean") {
+      MobileFeatureService.updateNavigationFeature("navigation.live", navigation.live, null);
+      updates.live = navigation.live;
+      console.log("[MOBILE_FEATURES_UPDATE] updated navigation.live =", navigation.live);
+    }
+
+    // Fetch and return updated navigation
+    const result = MobileFeatureService.getNavigationFeatures();
+    const updatedNavigation = result.navigation;
+
+    console.log("[MOBILE_FEATURES_UPDATE] response", { updatedNavigation, updates });
+
+    response.json({
+      data: {
+        navigation: updatedNavigation
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error("[mobile/features] POST failed:", error);
+    response.status(500).json({
+      error: "mobile_features_update_failed",
+      message: "Failed to update mobile feature flags"
+    });
+  }
+});

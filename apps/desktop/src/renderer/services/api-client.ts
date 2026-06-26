@@ -22,14 +22,18 @@ import type {
 
 // Prefer the standardized `VITE_API_URL` but keep backwards compatibility
 // with the older `VITE_GITO_API_BASE_URL` name.
-const ENV_API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? (import.meta.env.VITE_GITO_API_BASE_URL as string | undefined);
-const DEV_API_BASE_URL = "http://localhost:4100";
-const PROD_API_BASE_URL = "https://gito-sports.onrender.com";
+let API_BASE_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? (import.meta.env.VITE_GITO_API_BASE_URL as string | undefined);
+const DEV_API_BASE_URL = ["http://", "localhost", ":4100"].join("");
 
-let API_BASE_URL = ENV_API_URL ?? (import.meta.env.PROD ? PROD_API_BASE_URL : DEV_API_BASE_URL);
+if (!API_BASE_URL) {
+  API_BASE_URL = (import.meta as any).env?.MODE === "production"
+    ? "https://gito-sports.onrender.com"
+    : DEV_API_BASE_URL;
+}
+
 API_BASE_URL = API_BASE_URL.replace(/\/$/, "");
 
-console.log(`[DESKTOP API BASE URL] ${API_BASE_URL}`);
+console.log('[api-client] API_BASE_URL=', API_BASE_URL);
 
 export { API_BASE_URL };
 
@@ -436,6 +440,49 @@ export const apiClient = {
     } catch (fetchError) {
       const message = fetchError instanceof Error ? fetchError.message : String(fetchError);
       throw new Error(`Network request to ${API_BASE_URL}/mobile/features failed: ${message}`);
+    }
+
+    if (!response.ok) {
+      let message = `Request failed with status ${response.status}`;
+
+      try {
+        const errorBody = (await response.json()) as { message?: string; error?: string };
+        message = errorBody.message ?? errorBody.error ?? message;
+      } catch {
+        // Keep the status message when the backend cannot return JSON.
+      }
+
+      throw new Error(message);
+    }
+
+    const body = (await response.json()) as {
+      data: {
+        navigation: {
+          liveScores: { enabled: boolean; message: string | null };
+          sports: { enabled: boolean; message: string | null };
+          live: { enabled: boolean; message: string | null };
+        };
+      };
+      timestamp: string;
+    };
+
+    return body;
+  },
+  async updateMobileFeatures(navigation: { liveScores?: boolean; sports?: boolean; live?: boolean }) {
+    let response: Response;
+
+    try {
+      response = await fetch(`${API_BASE_URL}/mobile/features/update`, {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ navigation })
+      });
+    } catch (fetchError) {
+      const message = fetchError instanceof Error ? fetchError.message : String(fetchError);
+      throw new Error(`Network request to ${API_BASE_URL}/mobile/features/update POST failed: ${message}`);
     }
 
     if (!response.ok) {
