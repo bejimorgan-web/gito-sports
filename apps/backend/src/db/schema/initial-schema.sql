@@ -421,3 +421,83 @@ VALUES
   ('flag_live_scores', 'navigation.liveScores', 1, NULL, datetime('now'), datetime('now')),
   ('flag_sports', 'navigation.sports', 1, NULL, datetime('now'), datetime('now')),
   ('flag_live', 'navigation.live', 1, NULL, datetime('now'), datetime('now'));
+
+-- IPTV subsystem schema (phase 1)
+CREATE TABLE IF NOT EXISTS iptv_providers (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL, -- m3u | xtream | stalker
+  server_url TEXT NOT NULL,
+  encrypted_credentials TEXT, -- AES-256-GCM encrypted JSON blob { username, password }
+  expires_at TEXT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  health_status TEXT NOT NULL DEFAULT 'unknown',
+  last_refresh_at TEXT NULL,
+  total_channels INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_iptv_providers_type ON iptv_providers(type);
+CREATE INDEX IF NOT EXISTS idx_iptv_providers_enabled ON iptv_providers(enabled);
+
+CREATE TABLE IF NOT EXISTS iptv_channels (
+  id TEXT PRIMARY KEY,
+  provider_id TEXT NOT NULL,
+  provider_channel_id TEXT NULL,
+  name TEXT NOT NULL,
+  logo_url TEXT,
+  category TEXT,
+  language TEXT,
+  country TEXT,
+  resolution TEXT,
+  stream_url TEXT NOT NULL,
+  checksum TEXT, -- for duplicate detection
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (provider_id) REFERENCES iptv_providers(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_iptv_channels_provider ON iptv_channels(provider_id);
+CREATE INDEX IF NOT EXISTS idx_iptv_channels_name ON iptv_channels(name);
+
+CREATE TABLE IF NOT EXISTS iptv_provider_health (
+  id TEXT PRIMARY KEY,
+  provider_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  last_checked_at TEXT NOT NULL,
+  details TEXT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (provider_id) REFERENCES iptv_providers(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_iptv_provider_health_provider ON iptv_provider_health(provider_id);
+
+CREATE TABLE IF NOT EXISTS iptv_logs (
+  id TEXT PRIMARY KEY,
+  provider_id TEXT NULL,
+  channel_id TEXT NULL,
+  level TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  message TEXT,
+  metadata TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_iptv_logs_provider ON iptv_logs(provider_id);
+CREATE INDEX IF NOT EXISTS idx_iptv_logs_channel ON iptv_logs(channel_id);
+
+-- lightweight channel index for fast search and dedupe
+CREATE TABLE IF NOT EXISTS iptv_channel_index (
+  id TEXT PRIMARY KEY, -- same as iptv_channels.id
+  name TEXT NOT NULL,
+  provider_id TEXT NOT NULL,
+  category TEXT,
+  checksum TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_iptv_channel_index_name ON iptv_channel_index(name);
+CREATE INDEX IF NOT EXISTS idx_iptv_channel_index_checksum ON iptv_channel_index(checksum);

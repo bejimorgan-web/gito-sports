@@ -1,7 +1,5 @@
 import { Router } from "express";
-
 import type { CreateProviderRequest } from "@gito/shared";
-
 import { IPTVService } from "../services/iptv-service.js";
 import { parseM3uPlaylist, M3uParseError } from "../services/m3u-parser.js";
 import { fetchXtreamChannels, testXtreamConnection, XtreamParseError } from "../services/xtream-codes.js";
@@ -39,7 +37,6 @@ iptvRouter.post("/providers", (request, response) => {
 
   const provider = IPTVService.createProvider(body);
 
-  // Created providers start in pending state and must be tested explicitly.
   response.status(201).json({ data: provider });
 });
 
@@ -135,13 +132,15 @@ iptvRouter.get("/categories", (request, response) => {
   });
 });
 
-iptvRouter.post("/providers/test", async (request, response) => {
+iptvRouter.post("/providers/test", async (request: any, response: any) => {
   const { baseUrl, username, password, type } = request.body as {
     baseUrl?: string;
     username?: string;
     password?: string;
     type?: string;
   };
+
+  const providerId = String(request.params?.providerId ?? request.body?.providerId ?? "");
 
   if (!baseUrl) {
     response.status(400).json({ error: "base_url_required" });
@@ -175,13 +174,15 @@ iptvRouter.post("/providers/test", async (request, response) => {
     }
 
     if (type === "m3u") {
-      const body = await testResponse.text();
+      const bodyText = await testResponse.text();
       const invalidEntries: M3uParseError[] = [];
-      const parsed = parseM3uPlaylist(body, (entry) => invalidEntries.push(entry));
+      const parsed = parseM3uPlaylist(bodyText, (entry) => invalidEntries.push(entry));
+      const providerId = String(request.params?.providerId ?? request.body?.providerId ?? "");
 
       for (const invalid of invalidEntries) {
         logChannelSyncTrace({
-          providerMode: "partial",
+          providerId,
+          providerMode: (IPTVService.getProvider(providerId) as any)?.syncMode ?? "partial",
           syncPhase: "parse",
           action: "reject",
           reason: invalid.reason,
@@ -190,179 +191,68 @@ iptvRouter.post("/providers/test", async (request, response) => {
       }
 
       if (parsed.length === 0) {
-        response.json({
-          data: {
-            ok: false,
-            statusCode: testResponse.status,
-            message: "Provider responded but playlist is empty or invalid."
-          }
+        if (providerId) {
+          IPTVService.setProviderStatus(providerId, 'failed');
+        }
+        response.status(400).json({
+          error: "playlist_contains_invalid_or_empty_m3u",
+          message: "Provider responded but playlist is empty or invalid."
         });
         return;
       }
 
+      const validChannels: typeof parsed = [];
+      const invalidChannels: { name: string; url: string; error: string }[] = [];
+
+      for (const ch of parsed) {
+        const error = validateHttpStreamUrl(ch.url);
+        if (error) {
+          invalidChannels.push({ name: ch.name, url: ch.url, error });
+        } else {
+          validChannels.push(ch);
+        }
+      }
+
+      const channels = validChannels.length > 0 ? IPTVService.syncProviderChannels(providerId, validChannels) : [];
+      if (providerId) {
+        IPTVService.setProviderStatus(providerId, channels.length > 0 ? 'active' : 'failed');
+      }
       response.json({
         data: {
-          ok: true,
+          ok: channels.length > 0,
           statusCode: testResponse.status,
-          message: `Provider validated and ${parsed.length} channels were found.`
+          channelsCreated: channels.length,
+          channelsParsed: parsed.length,
+          channelsRejected: invalidChannels.length,
+          categories: Array.from(new Set(channels.map((channel) => (channel as any).category).filter(Boolean))),
+          rejectedChannels: invalidChannels.slice(0, 10)
         }
       });
       return;
     }
 
-    response.json({
-      data: {
-        ok: true,
-        statusCode: testResponse.status,
-        message: "Provider responded."
-      }
-    });
+    response.json({ data: { ok: true, statusCode: testResponse.status, message: "Provider responded." } });
   } catch (error) {
-    response.json({
-      data: {
-        ok: false,
-        message: error instanceof Error ? error.message : "Provider connection failed."
-      }
-    });
-  }
-});
-
-// Test a stored provider and re-sync channels on success/failure
-iptvRouter.post("/providers/:providerId/test", async (request, response) => {
-  const provider = IPTVService.getProviderCredentials(request.params.providerId);
-
-  if (!provider) {
-    response.status(404).json({ error: "provider_not_found" });
-    return;
-  }
-
-  const { base_url: baseUrl, credential_username: username, credential_password: password, type } = provider;
-
-  // Run appropriate test
-  try {
-    let testResult;
-
-    if (type === "xtream") {
-      if (!username || !password) {
-        response.status(400).json({ error: "stored_xtream_credentials_required" });
-        return;
-      }
-
-      testResult = await testXtreamConnection(baseUrl, username, password);
-
-      if (testResult.ok) {
-        // fetch channels and sync
-        const parsed = await fetchXtreamChannels(baseUrl, username, password);
-        const validChannels: typeof parsed = [];
-        const invalidChannels: { name: string; url: string; error: string }[] = [];
-
-        for (const ch of parsed) {
-          const error = validateHttpStreamUrl(ch.url);
-          if (error) {
-            invalidChannels.push({ name: ch.name, url: ch.url, error });
-          } else {
-            validChannels.push(ch);
-          }
-        }
-
-        const channels = validChannels.length > 0 ? IPTVService.syncProviderChannels(request.params.providerId, validChannels) : [];
-        IPTVService.setProviderStatus(request.params.providerId, channels.length > 0 ? 'active' : 'failed');
-
-        response.json({ 
-          data: { 
-            test: testResult, 
-            channelsCreated: channels.length,
-            channelsParsed: parsed.length,
-            channelsRejected: invalidChannels.length,
-            rejectedChannels: invalidChannels.slice(0, 10)
-          } 
-        });
-        return;
-      }
-
-      IPTVService.setProviderStatus(request.params.providerId, 'failed');
-      response.json({ data: { test: testResult } });
-      return;
+    const providerId = String(request.params?.providerId ?? request.body?.providerId ?? "");
+    if (providerId) {
+      IPTVService.setProviderStatus(providerId, 'failed');
     }
-
-    // generic http test for m3u/manual
-    try {
-      const r = await fetch(baseUrl, { method: "GET" });
-
-      if (r.ok) {
-        if (type === "m3u") {
-          const body = await r.text();
-          const invalidEntries: M3uParseError[] = [];
-          const parsed = parseM3uPlaylist(body, (entry) => invalidEntries.push(entry));
-
-          for (const invalid of invalidEntries) {
-            logChannelSyncTrace({
-              providerId: request.params.providerId,
-              providerMode: provider.sync_mode ?? "partial",
-              syncPhase: "parse",
-              action: "reject",
-              reason: invalid.reason,
-              payload: invalid
-            });
-          }
-
-          if (parsed.length === 0) {
-            IPTVService.setProviderStatus(request.params.providerId, 'failed');
-            response.status(400).json({
-              error: "playlist_contains_invalid_or_empty_m3u",
-              message: "Provider responded but playlist is empty or invalid."
-            });
-            return;
-          }
-
-          const validChannels: typeof parsed = [];
-          const invalidChannels: { name: string; url: string; error: string }[] = [];
-
-          for (const ch of parsed) {
-            const error = validateHttpStreamUrl(ch.url);
-            if (error) {
-              invalidChannels.push({ name: ch.name, url: ch.url, error });
-            } else {
-              validChannels.push(ch);
-            }
-          }
-
-          const channels = validChannels.length > 0 ? IPTVService.syncProviderChannels(request.params.providerId, validChannels) : [];
-          IPTVService.setProviderStatus(request.params.providerId, channels.length > 0 ? 'active' : 'failed');
-          response.json({ 
-            data: { 
-              ok: channels.length > 0, 
-              statusCode: r.status, 
-              channelsCreated: channels.length,
-              channelsParsed: parsed.length,
-              channelsRejected: invalidChannels.length,
-              categories: Array.from(new Set(channels.map((channel) => channel.groupName).filter(Boolean))),
-              rejectedChannels: invalidChannels.slice(0, 10)
-            } 
-          });
-          return;
-        }
-
-        response.json({ data: { ok: true, statusCode: r.status, message: "Provider responded." } });
-        return;
-      }
-
-      IPTVService.setProviderStatus(request.params.providerId, 'failed');
-      response.json({ data: { ok: false, statusCode: r.status } });
-    } catch (error) {
-      IPTVService.setProviderStatus(request.params.providerId, 'failed');
-      response.json({ data: { ok: false, message: error instanceof Error ? error.message : "Provider connection failed." } });
-    }
-  } catch (error) {
-    response.status(500).json({ error: "provider_test_failed", message: error instanceof Error ? error.message : String(error) });
+    response.json({ data: { ok: false, message: error instanceof Error ? error.message : "Provider connection failed." } });
   }
 });
 
 iptvRouter.post("/providers/:providerId/m3u", (request, response) => {
   const { playlist } = request.body as { playlist?: string };
+  const providerId = request.params.providerId;
 
   if (!playlist) {
     response.status(400).json({ error: "playlist_required" });
+    return;
+  }
+
+  const provider = IPTVService.getProvider(providerId);
+  if (!provider) {
+    response.status(404).json({ error: "provider_not_found" });
     return;
   }
 
@@ -373,8 +263,8 @@ iptvRouter.post("/providers/:providerId/m3u", (request, response) => {
 
   for (const invalid of invalidEntries) {
     logChannelSyncTrace({
-      providerId: request.params.providerId,
-      providerMode: (IPTVService.getProvider(request.params.providerId) as any)?.syncMode ?? "partial",
+      providerId,
+      providerMode: (provider as any)?.syncMode ?? "partial",
       syncPhase: "parse",
       action: "reject",
       reason: invalid.reason,
@@ -391,14 +281,14 @@ iptvRouter.post("/providers/:providerId/m3u", (request, response) => {
     }
   }
 
-  const channels = validChannels.length > 0 ? IPTVService.syncProviderChannels(request.params.providerId, validChannels) : [];
+  const channels = validChannels.length > 0 ? IPTVService.syncProviderChannels(providerId, validChannels) : [];
 
   response.status(201).json({
     data: {
       channelsCreated: channels.length,
       channelsParsed: parsedChannels.length,
       channelsRejected: invalidChannels.length,
-      categories: Array.from(new Set(channels.map((channel) => channel.groupName).filter(Boolean))),
+      categories: Array.from(new Set(channels.map((channel) => (channel as any).category).filter(Boolean))),
       rejectedChannels: invalidChannels.slice(0, 10)
     }
   });
@@ -421,7 +311,6 @@ iptvRouter.post("/providers/:providerId/status", (request, response) => {
     return;
   }
 
-  // Persist status
   IPTVService.setProviderStatus(request.params.providerId, status as any);
 
   response.json({ data: IPTVService.getProvider(request.params.providerId) });
@@ -430,23 +319,36 @@ iptvRouter.post("/providers/:providerId/status", (request, response) => {
 iptvRouter.post("/providers/:providerId/xtream/sync", async (request, response) => {
   const provider = IPTVService.getProviderCredentials(request.params.providerId);
 
-  if (!provider?.credential_username || !provider.credential_password) {
+  if (!provider) {
+    response.status(404).json({ error: "provider_not_found" });
+    return;
+  }
+
+  if (provider.type !== "xtream") {
+    response.status(400).json({ error: "provider_not_xtream" });
+    return;
+  }
+
+  const username = (provider as any).credential_username ?? (provider as any).username ?? null;
+  const password = (provider as any).credential_password ?? (provider as any).password ?? null;
+
+  if (!username || !password) {
     response.status(400).json({ error: "stored_xtream_credentials_required" });
     return;
   }
 
   const invalidEntries: XtreamParseError[] = [];
   const parsedChannels = await fetchXtreamChannels(
-    provider.base_url,
-    provider.credential_username,
-    provider.credential_password,
+    provider.server_url,
+    username,
+    password,
     (entry) => invalidEntries.push(entry)
   );
 
   for (const invalid of invalidEntries) {
     logChannelSyncTrace({
       providerId: request.params.providerId,
-      providerMode: provider.sync_mode ?? "partial",
+      providerMode: (provider as any).syncMode ?? (provider as any).sync_mode ?? "partial",
       syncPhase: "parse",
       action: "reject",
       reason: invalid.reason,
@@ -472,7 +374,7 @@ iptvRouter.post("/providers/:providerId/xtream/sync", async (request, response) 
       channelsCreated: channels.length,
       channelsParsed: parsedChannels.length,
       channelsRejected: invalidChannels.length,
-      categories: Array.from(new Set(channels.map((channel) => channel.groupName).filter(Boolean))),
+      categories: Array.from(new Set(channels.map((channel) => (channel as any).category).filter(Boolean))),
       rejectedChannels: invalidChannels.slice(0, 10)
     }
   });
@@ -489,3 +391,5 @@ iptvRouter.get("/parity/:providerId", (request, response) => {
 
   response.json({ data: diagnostic });
 });
+
+export default iptvRouter;

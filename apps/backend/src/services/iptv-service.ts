@@ -1,23 +1,8 @@
-import type { Channel, CreateProviderRequest, IPTVProvider } from "@gito/shared";
+import type { Channel, CreateProviderRequest } from "@gito/shared";
 import { EventBus } from "../events/event-bus.js";
-
-import {
-  createProvider,
-  getProviderById,
-  getProviderChannelDiagnostics,
-  getProviderCredentials,
-  getLatestIngestionReport,
-  getParityDiagnostics,
-  listChannelCategories,
-  listProviderChannels,
-  listProviders,
-  setProviderStatus,
-  softDeleteProvider,
-  syncProviderChannels,
-  updateProvider,
-  type IngestionReport,
-  type ParityDiagnostic
-} from "../repositories/provider-repository.js";
+import { IptvProviderService } from "./iptv-provider-service.js";
+import { IptvChannelService } from "./iptv-channel-service.js";
+import type { IptvChannelRow, IptvProviderRow } from "../repositories/iptv-repository.js";
 
 const channelCache = new Map<string, Channel[] | unknown[]>();
 
@@ -53,24 +38,24 @@ EventBus.on("iptv:provider:updated", (payload) => {
 });
 
 export const IPTVService = {
-  listProviders(): IPTVProvider[] {
-    return listProviders();
+  listProviders(): IptvProviderRow[] {
+    return IptvProviderService.listProviders();
   },
 
-  getProvider(providerId: string): IPTVProvider | undefined {
-    return getProviderById(providerId);
+  getProvider(providerId: string): IptvProviderRow | undefined {
+    return IptvProviderService.getProvider(providerId) ?? undefined;
   },
 
-  createProvider(input: CreateProviderRequest): IPTVProvider {
-    return createProvider(input);
+  createProvider(input: CreateProviderRequest): IptvProviderRow | null {
+    return IptvProviderService.createProvider(input);
   },
 
-  updateProvider(providerId: string, input: Partial<CreateProviderRequest>): IPTVProvider | undefined {
-    return updateProvider(providerId, input);
+  updateProvider(providerId: string, input: Partial<CreateProviderRequest>): IptvProviderRow | null {
+    return IptvProviderService.updateProvider(providerId, input);
   },
 
   deleteProvider(providerId: string): boolean {
-    return softDeleteProvider(providerId);
+    return IptvProviderService.deleteProvider(providerId);
   },
 
   getProviderChannels(providerId?: string, mode: "active" | "includeInactive" | "debug" | "raw" = "active", opts?: { q?: string; category?: string }) {
@@ -88,7 +73,7 @@ export const IPTVService = {
       query.providerId = providerId;
     }
 
-    const result = listProviderChannels(mode as any, query);
+    const result = IptvChannelService.listChannels(query, mode);
     channelCache.set(cacheKey, result);
     return result;
   },
@@ -102,19 +87,30 @@ export const IPTVService = {
   },
 
   getProviderChannelDiagnostics(providerId: string) {
-    return getProviderChannelDiagnostics(providerId);
+    return IptvChannelService.getProviderChannelDiagnostics(providerId);
   },
 
   listCategories(providerId?: string): string[] {
-    return listChannelCategories(providerId);
+    return IptvChannelService.listCategories(providerId);
   },
 
-  getProviderCredentials,
-  syncProviderChannels,
-  setProviderStatus,
+  getProviderCredentials(providerId: string) {
+    return IptvProviderService.getProviderCredentials(providerId);
+  },
 
-  getLatestIngestionReport,
-  getParityDiagnostics
+  syncProviderChannels(providerId: string, channels: any[]) {
+    return IptvChannelService.syncProviderChannels(providerId, channels);
+  },
+
+  setProviderStatus(providerId: string, status: 'active' | 'failed' | 'pending' | 'invalid' | 'inactive') {
+    return IptvProviderService.setProviderStatus(providerId, status);
+  },
+
+  getLatestIngestionReport(providerId: string): any {
+    return IptvChannelService.getLatestIngestionReport(providerId);
+  },
+
+  getParityDiagnostics(providerId: string): any {
+    return IptvChannelService.getParityDiagnostics(providerId);
+  }
 };
-
-export type { IngestionReport, ParityDiagnostic };

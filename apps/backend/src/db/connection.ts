@@ -172,6 +172,22 @@ export function getDatabase(): DatabaseSync {
     throw err;
   }
 
+  // Ensure Phase 1 IPTV tables exist even on existing database files.
+  try {
+    if (
+      !hasTable(database, "iptv_providers") ||
+      !hasTable(database, "iptv_channels") ||
+      !hasTable(database, "iptv_provider_health") ||
+      !hasTable(database, "iptv_channel_index")
+    ) {
+      database.exec(readInitialSchema());
+      console.log("[startup] applied missing IPTV schema fragments to existing database");
+    }
+  } catch (err) {
+    console.error("[startup] failed to apply missing IPTV schema", err);
+    throw err;
+  }
+
   // If DB was freshly created (size zero), apply initial schema
   try {
     const stats = fs.statSync(resolvedDatabasePath);
