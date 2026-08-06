@@ -1,5 +1,5 @@
 import * as Sentry from "@sentry/electron";
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, Menu } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,6 +34,63 @@ function loadErrorScreen(window: BrowserWindow) {
   void window.loadURL(errorHtml);
 }
 
+function sendNavigationSelection(screenKey: string, window: BrowserWindow | null | undefined) {
+  window?.webContents.send("navigate-to-screen", screenKey);
+}
+
+function buildAppMenu(window: BrowserWindow | null | undefined) {
+  const analyticsItems = [
+    { label: "Analytics Overview", key: "analyticsOverview" },
+    { label: "Stream Analytics", key: "analyticsStreaming" },
+    { label: "User Analytics", key: "analyticsUsers" }
+  ].map((item) => ({
+    label: item.label,
+    click: () => sendNavigationSelection(item.key, window)
+  }));
+
+  return Menu.buildFromTemplate([
+    {
+      label: "File",
+      submenu: [
+        { label: "Exit", accelerator: "Alt+F4", click: () => app.quit() }
+      ]
+    },
+    {
+      label: "View",
+      submenu: [
+        {
+          label: "Analytics",
+          submenu: analyticsItems
+        },
+        { type: "separator" },
+        {
+          label: "Dashboard",
+          click: () => sendNavigationSelection("dashboard", window)
+        },
+        {
+          label: "IPTV Management",
+          click: () => sendNavigationSelection("iptv", window)
+        },
+        {
+          label: "Broadcast Console",
+          click: () => sendNavigationSelection("matchAssignment", window)
+        }
+      ]
+    },
+    {
+      label: "Help",
+      submenu: [
+        {
+          label: "About GiTO Live Sports",
+          click: () => {
+            void window?.webContents.executeJavaScript("window.alert('GiTO Live Sports Desktop')");
+          }
+        }
+      ]
+    }
+  ]);
+}
+
 function createMainWindow() {
   const preloadScript = path.join(currentDirectory, "preload.cjs");
   const mainWindow = new BrowserWindow({
@@ -48,6 +105,8 @@ function createMainWindow() {
       nodeIntegration: false
     }
   });
+
+  Menu.setApplicationMenu(buildAppMenu(mainWindow));
 
   // Enable DevTools only in development mode
   if (isDev) {

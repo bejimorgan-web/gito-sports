@@ -2,6 +2,11 @@ import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("gito", {
   platform: "desktop",
+  onNavigateToScreen: (callback: (screen: string) => void) => {
+    const listener = (_event: unknown, screen: string) => callback(screen);
+    ipcRenderer.on("navigate-to-screen", listener);
+    return () => ipcRenderer.removeListener("navigate-to-screen", listener);
+  },
   sendRendererError: (error: unknown) => {
     try {
       ipcRenderer.send('renderer-error', {

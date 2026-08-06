@@ -6,6 +6,7 @@ import { useRealtimeSync } from "@gito/shared";
 
 import { LiveMatchApprovalScreen } from "./features/approvals/LiveMatchApprovalScreen";
 import { BroadcastConsoleScreen } from "./features/broadcast/BroadcastConsoleScreen";
+import { DashboardShell } from "./features/dashboard/DashboardShell";
 import { MatchSchedulerScreen } from "./features/matches/MatchSchedulerScreen";
 import { IptvManagementScreen } from "./features/iptv/IptvManagementScreen";
 import { SportsWorkspaceScreen } from "./features/sports/SportsWorkspaceScreen";
@@ -24,7 +25,6 @@ import type { NavigationKey } from "./types/navigation";
 type ProviderList = Awaited<ReturnType<typeof apiClient.listProviders>>;
 type BackendStatus = "online" | "offline" | "reconnecting";
 
-const SESSION_STORAGE_KEY = "gito-live-sports-operator-state";
 const AUTH_STORAGE_KEY = "gito-live-sports-auth";
 
 function isSelectedChannelStillValid(
@@ -55,6 +55,10 @@ function renderScreen(
     providers: ProviderList;
     selectedChannel: Channel | undefined;
     liveMode: boolean;
+    channelSearch: string;
+    channelCategory: string;
+    channelProviderFilter: string;
+    channelContentType: "all" | "live" | "movies" | "series";
   },
   actions: {
     approveStream: (streamId: string) => Promise<void>;
@@ -84,16 +88,36 @@ function renderScreen(
         <IptvManagementScreen
           channels={state.channels}
           providers={state.providers}
-          selectedChannelId={state.selectedChannel?.id}
           onCreateProvider={actions.createProvider}
           onUpdateProvider={actions.updateProvider}
           onDeleteProvider={actions.deleteProvider}
           onIngestM3u={actions.ingestM3u}
-          onSelectChannel={actions.selectChannel}
           onSyncXtream={actions.syncXtream}
           onTestProvider={actions.testProvider}
           onTestProviderById={actions.testProviderById}
           onSetProviderStatus={actions.setProviderStatus}
+        />
+      );
+    case "matchAssignment":
+      return (
+        <BroadcastConsoleScreen
+          assignment={state.assignment}
+          backendStatus={state.backendStatus}
+          channels={state.channels}
+          liveMatches={state.liveMatches}
+          previewedChannelId={state.previewedChannelId}
+          providers={state.providers}
+          selectedChannel={state.selectedChannel}
+          liveMode={state.liveMode}
+          onApprove={actions.approveStream}
+          onAssignMatch={actions.assignMatch}
+          onClearAssignment={actions.clearAssignment}
+          onPreviewReady={actions.markPreviewReady}
+          onPublish={actions.publishStream}
+          onReportHealth={actions.reportStreamHealth}
+          onSelectChannel={actions.selectChannel}
+          onSetLiveMode={actions.setLiveMode}
+          onOpenMatch={actions.openMatch}
         />
       );
     case "preview":
@@ -135,6 +159,15 @@ function renderScreen(
     case "mobileFeatures":
       return <MobileFeatureControlScreen accessToken={state.accessToken} />;
     case "dashboard":
+      return (
+        <DashboardShell
+          failedStreamCount={state.assignment?.stream.status === "failed" ? 1 : 0}
+          pendingApprovalCount={state.assignment && state.assignment.stream.status === "assigned" ? 1 : 0}
+          liveMatchCount={state.liveMatches.length}
+          channelCount={state.channels.length}
+          providerCount={state.providers.length}
+        />
+      );
     default:
       return (
         <BroadcastConsoleScreen
@@ -177,6 +210,10 @@ export function App() {
   const [selectedChannel, setSelectedChannel] = useState<Channel>();
   const [selectedMatchId, setSelectedMatchId] = useState<string | undefined>(undefined);
   const [liveMode, setLiveMode] = useState(false);
+  const [channelSearch, setChannelSearch] = useState("");
+  const [channelCategory, setChannelCategory] = useState("");
+  const [channelProviderFilter, setChannelProviderFilter] = useState("");
+  const [channelContentType, setChannelContentType] = useState<"all" | "live" | "movies" | "series">("all");
   const assignmentRef = useRef<MatchAssignmentResult>();
   const backendStatusRef = useRef<BackendStatus>("reconnecting");
   const lastHealthReportRef = useRef<{ status: Stream["healthStatus"]; reason?: string; sentAt: number }>();
@@ -185,19 +222,7 @@ export function App() {
 
   // Restore auth on mount
   useEffect(() => {
-    try {
-      const storedAuth = window.localStorage.getItem(AUTH_STORAGE_KEY);
-      if (storedAuth) {
-        const auth = JSON.parse(storedAuth) as { email: string; accessToken: string };
-        // Restore session
-        setCurrentEmail(auth.email);
-        setAccessToken(auth.accessToken);
-        setIsAuthenticated(true);
-      }
-    } catch {
-      // Clear invalid auth data
-      window.localStorage.removeItem(AUTH_STORAGE_KEY);
-    }
+    // no local persistence for auth to keep backend source of truth and avoid client-only state.
   }, []);
 
   // Handle login
@@ -205,8 +230,6 @@ export function App() {
     setCurrentEmail(email);
     setAccessToken(accessToken);
     setIsAuthenticated(true);
-    // Persist auth session
-    window.localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ email, accessToken }));
   }, []);
 
   // Handle logout
@@ -222,14 +245,11 @@ export function App() {
     setPreviewedChannelId(undefined);
     setSelectedChannel(undefined);
     setSelectedMatchId(undefined);
-    window.localStorage.removeItem(AUTH_STORAGE_KEY);
-    window.localStorage.removeItem(SESSION_STORAGE_KEY);
   }, []);
 
   const clearPreviewState = useCallback(() => {
     setSelectedChannel(undefined);
     setPreviewedChannelId(undefined);
-    window.localStorage.removeItem(SESSION_STORAGE_KEY);
   }, []);
 
   function applyResolvedState<T>(
@@ -247,6 +267,18 @@ export function App() {
   useEffect(() => {
     assignmentRef.current = assignment;
   }, [assignment]);
+
+  useEffect(() => {
+    const dispose = window.gito?.onNavigateToScreen?.((screen) => {
+      setActiveScreen(screen as NavigationKey);
+    });
+
+    return () => {
+      if (typeof dispose === "function") {
+        dispose();
+      }
+    };
+  }, []);
 
   useEffect(() => {
     backendStatusRef.current = backendStatus;
@@ -291,62 +323,11 @@ export function App() {
   }, [clearPreviewState]);
 
   useEffect(() => {
-    const storedState = window.localStorage.getItem(SESSION_STORAGE_KEY);
-
-    if (storedState) {
-      try {
-        const parsed = JSON.parse(storedState) as {
-          assignment?: MatchAssignmentResult;
-          channels?: Channel[];
-          liveMatches?: PublishedLiveMatch[];
-          providers?: ProviderList;
-          previewedChannelId?: string;
-          selectedChannel?: Channel;
-          selectedMatchId?: string;
-        };
-
-        setAssignment(parsed.assignment);
-        if (parsed.providers !== undefined) {
-          applyResolvedState("iptv:providers", parsed.providers, setProviders, "cache");
-        }
-        if (parsed.channels !== undefined) {
-          applyResolvedState("iptv:channels", parsed.channels, setChannels, "cache");
-        }
-        if (parsed.liveMatches !== undefined) {
-          applyResolvedState("live:matches", parsed.liveMatches, setLiveMatches, "cache");
-        }
-        setPreviewedChannelId(parsed.previewedChannelId);
-        setSelectedChannel(parsed.selectedChannel);
-        setSelectedMatchId(parsed.selectedMatchId);
-      } catch {
-        window.localStorage.removeItem(SESSION_STORAGE_KEY);
-      }
-    }
-
-    // Only refresh if authenticated with an access token
     if (accessToken) {
       void refreshOperations("full");
     }
   }, [refreshOperations, accessToken]);
 
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      window.localStorage.setItem(
-        SESSION_STORAGE_KEY,
-        JSON.stringify({
-          assignment,
-          channels,
-          liveMatches,
-          providers,
-          previewedChannelId,
-          selectedChannel,
-          selectedMatchId
-        })
-      );
-    }, 500);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [assignment, channels, liveMatches, previewedChannelId, providers, selectedChannel]);
 
   const realtimeSyncConfig = useMemo(
     () => ({
@@ -660,6 +641,10 @@ const testProviderById = useCallback(async (providerId: string) => {
         reportStreamHealth,
         setLiveMode,
         selectChannel,
+        setChannelSearch,
+        setChannelCategory,
+        setChannelProviderFilter,
+        setChannelContentType,
           openMatch: (matchId?: string) => {
             setSelectedMatchId(matchId);
             setActiveScreen("matches");
@@ -681,6 +666,10 @@ const testProviderById = useCallback(async (providerId: string) => {
         reportStreamHealth,
         setLiveMode,
         selectChannel,
+        setChannelSearch,
+        setChannelCategory,
+        setChannelProviderFilter,
+        setChannelContentType,
           setSelectedMatchId,
         syncXtream,
         setProviderStatus,
@@ -698,7 +687,11 @@ const testProviderById = useCallback(async (providerId: string) => {
       previewedChannelId,
       providers,
       selectedChannel,
-      liveMode
+      liveMode,
+      channelSearch,
+      channelCategory,
+      channelProviderFilter,
+      channelContentType
     }),
     [
       accessToken,
@@ -709,7 +702,11 @@ const testProviderById = useCallback(async (providerId: string) => {
       previewedChannelId,
       providers,
       selectedChannel,
-      liveMode
+      liveMode,
+      channelSearch,
+      channelCategory,
+      channelProviderFilter,
+      channelContentType
     ]
   );
 

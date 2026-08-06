@@ -7,6 +7,7 @@ import "./renderer/styles.css";
 declare global {
   interface Window {
     gito?: {
+      onNavigateToScreen?: (callback: (screen: string) => void) => (() => void) | void;
       sendRendererError?: (data: unknown) => void;
       sendRendererConsoleError?: (args: unknown) => void;
     };
