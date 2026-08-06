@@ -15,10 +15,24 @@ class MobileNavigationConfig {
   });
 
   factory MobileNavigationConfig.fromJson(Map<String, dynamic> json) {
+    bool _readEnabled(String key) {
+      final value = json[key];
+      if (value is bool) {
+        return value;
+      }
+      if (value is Map<String, dynamic>) {
+        return value['enabled'] as bool? ?? true;
+      }
+      if (value is Map) {
+        return (value['enabled'] as bool?) ?? true;
+      }
+      return true;
+    }
+
     return MobileNavigationConfig(
-      liveScores: json['liveScores'] as bool? ?? true,
-      sports: json['sports'] as bool? ?? true,
-      live: json['live'] as bool? ?? true,
+      liveScores: _readEnabled('liveScores'),
+      sports: _readEnabled('sports'),
+      live: _readEnabled('live'),
     );
   }
 
@@ -45,7 +59,9 @@ class MobileNavigationConfig {
 /// Service for fetching and caching remote mobile configuration.
 class RemoteConfigService {
   static const String _cacheKeyNavigation = 'gito_nav_config';
-  static const Duration _cacheTtl = Duration(hours: 24);
+  // Always re-check the backend for the latest navigation state so desktop toggles
+  // are reflected immediately after the app refreshes.
+  static const Duration _cacheTtl = Duration.zero;
 
   final String apiBaseUrl;
   final SharedPreferences prefs;

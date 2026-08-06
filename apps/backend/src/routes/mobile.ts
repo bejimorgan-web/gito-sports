@@ -49,15 +49,11 @@ mobileRouter.get("/matches/live", (request, response) => {
 
 mobileRouter.get("/features", (_request, response) => {
   try {
-    console.debug("[MOBILE_FEATURES_FETCH] fetching mobile navigation feature flags");
     const result = MobileFeatureService.getNavigationFeatures();
     const navigation = result.navigation;
 
-    console.log("[MOBILE FEATURES RESPONSE]", { navigation });
-    console.log("[ROUTE RESPONSE SOURCE]", typeof navigation, navigation);
-    console.log("[DEBUG FINAL NAVIGATION]", navigation);
     if (!navigation || Object.keys(navigation).length === 0) {
-      console.error("[CRITICAL] navigation was lost after normalization");
+      console.error("[mobile/features] navigation response was empty");
     }
 
     response.json({
@@ -77,7 +73,6 @@ mobileRouter.get("/features", (_request, response) => {
 
 mobileRouter.get("/features/debug", (_request, response) => {
   try {
-    console.debug("[MOBILE_FEATURES_FETCH] fetching mobile navigation feature flags debug info");
     const db = getDatabase();
     const rawRows = db
       .prepare(`SELECT feature_key, enabled, display_message FROM mobile_feature_flags WHERE feature_key LIKE 'navigation.%' ORDER BY feature_key`)
@@ -86,10 +81,8 @@ mobileRouter.get("/features/debug", (_request, response) => {
     const result = MobileFeatureService.getNavigationFeatures();
     const navigation = result.navigation;
 
-    console.log("[ROUTE RESPONSE SOURCE]", typeof navigation, navigation);
-    console.log("[DEBUG FINAL NAVIGATION]", navigation);
     if (!navigation || Object.keys(navigation).length === 0) {
-      console.error("[CRITICAL] navigation was lost after normalization");
+      console.error("[mobile/features/debug] navigation response was empty");
     }
 
     response.json({
@@ -156,7 +149,7 @@ mobileRouter.post("/features/update", (request, response) => {
     const result = MobileFeatureService.getNavigationFeatures();
     const updatedNavigation = result.navigation;
 
-    console.log("[MOBILE_FEATURES_UPDATE] response", { updatedNavigation, updates });
+    console.info("[mobile/features] updated navigation flags", { updates });
 
     response.json({
       data: {

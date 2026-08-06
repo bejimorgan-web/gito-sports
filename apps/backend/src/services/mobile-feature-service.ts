@@ -66,37 +66,50 @@ function normalizeEnabledValue(value: number | boolean | string | null | undefin
   return toBool(value);
 }
 
-export function normalizeNavigation(rows: Array<MobileFeatureNavigationRow>) {
-  console.log("[DEPLOY CHECK] mobile-feature-service loaded");
-  const featureMap = new Map(rows.map((r) => [r.feature_key, r]));
-  console.log("[NAV MAP]", Array.from(featureMap.keys()));
-  console.log("[RAW ENABLED TYPES]", rows.map((r) => typeof r.enabled));
-
-  const getEnabled = (key: string) => toBool(featureMap.get(key)?.enabled);
-  const getMessage = (key: string) => featureMap.get(key)?.display_message ?? null;
-
-  const navigation = {
-    liveScores: {
-      enabled: getEnabled("navigation.liveScores"),
-      message: getMessage("navigation.liveScores")
-    },
-    sports: {
-      enabled: getEnabled("navigation.sports"),
-      message: getMessage("navigation.sports")
-    },
-    live: {
-      enabled: getEnabled("navigation.live"),
-      message: getMessage("navigation.live")
-    }
-  };
-
-  console.log("[MOBILE NORMALIZED]", JSON.stringify(navigation));
-  console.log("[FINAL NAV OUTPUT]", JSON.stringify(navigation, null, 2));
-  return navigation;
-}
-
 export class MobileFeatureService {
+  private static ensureNavigationTables(): void {
+    const db = getDatabase();
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS mobile_features (
+        id TEXT PRIMARY KEY,
+        feature_name TEXT NOT NULL UNIQUE,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_mobile_features_feature_name ON mobile_features(feature_name);
+
+      CREATE TABLE IF NOT EXISTS mobile_feature_flags (
+        id TEXT PRIMARY KEY,
+        feature_key TEXT NOT NULL UNIQUE,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        display_message TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_mobile_feature_flags_feature_key ON mobile_feature_flags(feature_key);
+    `);
+
+    db.exec(`
+      INSERT OR IGNORE INTO mobile_features (id, feature_name, enabled, created_at, updated_at)
+      VALUES
+        ('nav_live_scores', 'navigation.liveScores', 1, datetime('now'), datetime('now')),
+        ('nav_sports', 'navigation.sports', 1, datetime('now'), datetime('now')),
+        ('nav_live', 'navigation.live', 1, datetime('now'), datetime('now'));
+
+      INSERT OR IGNORE INTO mobile_feature_flags (id, feature_key, enabled, display_message, created_at, updated_at)
+      VALUES
+        ('flag_live_scores', 'navigation.liveScores', 1, NULL, datetime('now'), datetime('now')),
+        ('flag_sports', 'navigation.sports', 1, NULL, datetime('now'), datetime('now')),
+        ('flag_live', 'navigation.live', 1, NULL, datetime('now'), datetime('now'));
+    `);
+  }
+
   static getFeatureFlag(featureKey: string): MobileFeatureFlag | null {
+    this.ensureNavigationTables();
     const db = getDatabase();
     const row = db
       .prepare(
@@ -119,6 +132,7 @@ export class MobileFeatureService {
   }
 
   static getNavigationFeatures(): MobileFeaturesResponse {
+    this.ensureNavigationTables();
     const db = getDatabase();
     let rows = db
       .prepare(
@@ -135,10 +149,9 @@ export class MobileFeatureService {
         .all() as Array<MobileFeatureNavigationRow>;
     }
 
-    console.debug("[MOBILE_FEATURES_DB_ROWS] found mobile_feature_flags navigation rows", {
-      rowCount: rows.length,
-      featureKeys: rows.map((row) => row.feature_key)
-    });
+    if (rows.length === 0) {
+      console.info("[mobile-feature-service] no navigation feature rows found; initializing defaults");
+    }
 
     const normalizedRows = rows.map((row) => ({
       feature_key: row.feature_key,
@@ -171,10 +184,9 @@ export class MobileFeatureService {
           display_message: null
         });
       }
-      console.warn(
-        "[MOBILE_FEATURES_FALLBACK_USED] mobile feature flags were incomplete; initialized missing default navigation flags",
-        missingFeatures.map((item) => item.feature_key)
-      );
+      console.info("[mobile-feature-service] initialized missing navigation features", {
+        missingKeys: missingFeatures.map((item) => item.feature_key)
+      });
     }
 
     return {
@@ -183,6 +195,7 @@ export class MobileFeatureService {
   }
 
   static repairMobileFeatureFlags(): void {
+    this.ensureNavigationTables();
     const db = getDatabase();
     const rows = db
       .prepare(
@@ -237,16 +250,12 @@ export class MobileFeatureService {
         });
       }
 
-      console.log("[MOBILE_FEATURES_REPAIR] repaired missing or invalid mobile_feature_flags navigation rows", {
+      console.info("[mobile-feature-service] repaired navigation feature rows", {
         missingKeys: missingFeatures.map((item) => item.feature_key),
-        migratedLegacyKeys: Array.from(legacyMap.keys()).filter((key) => missingFeatures.some((item) => item.feature_key === key)),
         rowCount: rows.length
       });
     }
 
-    if (normalizedRows.length > 0) {
-      console.debug("[MOBILE_FEATURES_REPAIR] normalized rows", normalizedRows);
-    }
   }
 
   static updateNavigationFeature(
@@ -254,6 +263,7 @@ export class MobileFeatureService {
     enabled: boolean,
     displayMessage: string | null
   ): MobileFeaturePayload {
+    this.ensureNavigationTables();
     const db = getDatabase();
     const now = new Date().toISOString();
     const normalizedMessage = displayMessage ?? null;
@@ -276,3 +286,28 @@ export class MobileFeatureService {
     };
   }
 }
+
+export function normalizeNavigation(rows: Array<MobileFeatureNavigationRow>) {
+  const featureMap = new Map(rows.map((r) => [r.feature_key, r]));
+
+  const getEnabled = (key: string) => toBool(featureMap.get(key)?.enabled);
+  const getMessage = (key: string) => featureMap.get(key)?.display_message ?? null;
+
+  const navigation = {
+    liveScores: {
+      enabled: getEnabled("navigation.liveScores"),
+      message: getMessage("navigation.liveScores")
+    },
+    sports: {
+      enabled: getEnabled("navigation.sports"),
+      message: getMessage("navigation.sports")
+    },
+    live: {
+      enabled: getEnabled("navigation.live"),
+      message: getMessage("navigation.live")
+    }
+  };
+
+  return navigation;
+}
+
