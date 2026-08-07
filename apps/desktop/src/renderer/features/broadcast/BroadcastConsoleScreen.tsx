@@ -261,7 +261,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
     [assignment, previewConfirmed, selectedChannel, matchDetailsComplete]
   );
   useEffect(() => {
-    if (selectedChannel?.providerId && selectedChannel.providerId !== selectedProviderId) {
+    if (!selectedProviderId && selectedChannel?.providerId) {
       setSelectedProviderId(selectedChannel.providerId);
     }
   }, [selectedChannel?.providerId, selectedProviderId]);
@@ -274,6 +274,11 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
       }
     }
   }, [providers, selectedProviderId]);
+
+  useEffect(() => {
+    setSelectedGroup("");
+    setChannelSearchQuery("");
+  }, [selectedProviderId, selectedContentType]);
 
   const selectedProvider = useMemo(
     () => providers.find((provider) => provider.id === selectedProviderId),
@@ -321,6 +326,17 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
           ),
     [selectedGroupChannels, channelSearchQuery]
   );
+
+  useEffect(() => {
+    const firstChannel = filteredSelectedGroupChannels[0];
+    if (!firstChannel) {
+      return;
+    }
+
+    if (!selectedChannel || selectedChannel.id !== firstChannel.id) {
+      onSelectChannel(firstChannel);
+    }
+  }, [filteredSelectedGroupChannels, onSelectChannel, selectedChannel]);
 
   useEffect(() => {
     if (selectedCompetition && selectedSportId && selectedCompetition.sportId !== selectedSportId) {
@@ -650,7 +666,11 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
               <span>Active IPTV provider</span>
               <select
                 value={selectedProviderId}
-                onChange={(event) => setSelectedProviderId(event.target.value)}
+                onChange={(event) => {
+                  setSelectedProviderId(event.target.value);
+                  setSelectedGroup("");
+                  setChannelSearchQuery("");
+                }}
                 style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #253647", background: "#0a1119", color: "#e7edf4" }}
               >
                 {providers.map((provider) => (
@@ -800,165 +820,172 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
             </aside>
           </div>
 
+          <div className="match-control-panel console-panel">
+            <div className="panel-heading panel-heading-accent">
+              <div>
+                <h3>Match Control</h3>
+                <span>Assign the previewed stream to a live match</span>
+              </div>
+              <span className="status-pill">{status}</span>
+            </div>
+
+            <div className="match-control-grid">
+              <div className="match-control-column">
+                <label className="dropdown-label">
+                  <span>Competition</span>
+                  <select value={selectedCompetitionId} onChange={(e) => setSelectedCompetitionId(e.target.value)}>
+                    <option value="">-- Select competition --</option>
+                    {filteredCompetitions.map((competition) => (
+                      <option key={competition.id} value={competition.id}>
+                        {competition.name}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedSport ? (
+                    <small>{filteredCompetitions.length} competition{filteredCompetitions.length === 1 ? "" : "s"} for {selectedSport.name}</small>
+                  ) : null}
+                </label>
+
+                <label className="dropdown-label">
+                  <span>Home Team</span>
+                  <select value={selectedHomeTeamId} onChange={(e) => setSelectedHomeTeamId(e.target.value)}>
+                    <option value="">-- Select home team --</option>
+                    {filteredTeams.map((team) => (
+                      <option key={team.id} value={team.id}>
+                        {team.name}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedSport ? (
+                    <small>{filteredTeams.length} team{filteredTeams.length === 1 ? "" : "s"} for {selectedSport.name}</small>
+                  ) : null}
+                </label>
+              </div>
+
+              <div className="match-control-column">
+                <label className="dropdown-label">
+                  <span>Away Team</span>
+                  <select value={selectedAwayTeamId} onChange={(e) => setSelectedAwayTeamId(e.target.value)}>
+                    <option value="">-- Select away team --</option>
+                    {filteredTeams.map((team) => (
+                      <option key={team.id} value={team.id}>
+                        {team.name}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedSport ? (
+                    <small>{filteredTeams.length} team{filteredTeams.length === 1 ? "" : "s"} for {selectedSport.name}</small>
+                  ) : null}
+                </label>
+
+                <label className="dropdown-label">
+                  <span>Sport</span>
+                  <select value={selectedSportId} onChange={(e) => setSelectedSportId(e.target.value)}>
+                    <option value="">-- Select sport --</option>
+                    {sports.map((sport) => (
+                      <option key={sport.id} value={sport.id}>
+                        {sport.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="kickoff-label">
+                  <span>Kickoff</span>
+                  <input
+                    type="datetime-local"
+                    value={startsAt}
+                    onChange={(event) => setStartsAt(event.target.value)}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="blocked-reason">
+              {!selectedChannel && "Blocked: select an IPTV channel."}
+              {selectedChannel && !previewConfirmed && "Blocked: preview must be confirmed before assignment."}
+              {!selectedCompetition && "Select a competition."}
+              {!selectedSportId && "Select a sport."}
+              {!selectedHomeTeam && "Select a home team."}
+              {!selectedAwayTeam && "Select an away team."}
+              {selectedChannel && previewConfirmed && !matchDetailsComplete && "Complete match details before assignment."}
+              {backendOffline && "Waiting for backend reconnection."}
+              {assignment?.stream.healthStatus === "degraded" && "Signal unstable. Keep previewing before publish."}
+              {assignment?.stream.healthStatus === "failed" && "Stream failed. Choose another source."}
+              {!backendOffline && assignment && !canApprove && !canPublish && `Current state: ${assignment.match.status} / ${assignment.stream.status}.`}
+            </div>
+
+            <div className="action-stack">
+              <button type="button" disabled={!canAssign || backendOffline || streamFailed} onClick={handleAssign}>
+                Assign Previewed Stream
+              </button>
+              <button
+                type="button"
+                disabled={!assignment || !canApprove || backendOffline || streamFailed}
+                onClick={() => assignment && void handleApprove(assignment.stream)}
+              >
+                Approve Stream
+              </button>
+              <button
+                className="publish-button"
+                type="button"
+                disabled={!assignment || !canPublish || backendOffline || streamFailed}
+                onClick={() => assignment && void handlePublish(assignment.stream)}
+              >
+                Publish Live
+              </button>
+            </div>
+
+            {terminalAssignment ? (
+              <div className="terminal-action">
+                <button type="button" className="secondary" onClick={onClearAssignment}>
+                  Reset active work item
+                </button>
+              </div>
+            ) : null}
+
+            <section className="current-assignment">
+              <h4>Active Work Item</h4>
+              <dl>
+                <dt>Channel</dt>
+                <dd>{selectedChannel?.name ?? "None selected"}</dd>
+                <dt>Competition</dt>
+                <dd className="selected-entity-row">
+                  {selectedCompetition?.logoUrl ? (
+                    <img className="entity-logo" src={selectedCompetition.logoUrl} alt={selectedCompetition.name} />
+                  ) : null}
+                  <span>{selectedCompetition?.name ?? "None selected"}</span>
+                </dd>
+                <dt>Sport</dt>
+                <dd className="selected-entity-row">
+                  {selectedSport?.logoUrl ? (
+                    <img className="entity-logo" src={selectedSport.logoUrl} alt={selectedSport.name} />
+                  ) : null}
+                  <span>{selectedSport?.name ?? "None selected"}</span>
+                </dd>
+                <dt>Match</dt>
+                <dd className="selected-entity-row">
+                  {selectedHomeTeam?.logoUrl ? (
+                    <img className="entity-logo" src={selectedHomeTeam.logoUrl} alt={selectedHomeTeam.name} />
+                  ) : null}
+                  <span>{selectedHomeTeam?.name ?? "None selected"}</span>
+                  <strong className="vs-label">vs</strong>
+                  {selectedAwayTeam?.logoUrl ? (
+                    <img className="entity-logo" src={selectedAwayTeam.logoUrl} alt={selectedAwayTeam.name} />
+                  ) : null}
+                  <span>{selectedAwayTeam?.name ?? "None selected"}</span>
+                </dd>
+                <dt>Status</dt>
+                <dd>{unifiedStatus.label}</dd>
+              </dl>
+            </section>
+          </div>
+
           <div className="single-state-row">
             <span className={`unified-status-badge ${unifiedStatus.tone}`}>{unifiedStatus.label}</span>
             <small>{unifiedStatus.detail}</small>
           </div>
         </section>
-
-        <aside className="action-rail console-panel">
-          <div className="panel-heading">
-            <h3>Match Control</h3>
-            <span className="status-pill">{status}</span>
-          </div>
-
-          <div className="match-control-selectors">
-            <label className="dropdown-label">
-              <span>Competition</span>
-              <select value={selectedCompetitionId} onChange={(e) => setSelectedCompetitionId(e.target.value)}>
-                <option value="">-- Select competition --</option>
-                {filteredCompetitions.map((competition) => (
-                  <option key={competition.id} value={competition.id}>
-                    {competition.name}
-                  </option>
-                ))}
-              </select>
-              {selectedSport ? (
-                <small>{filteredCompetitions.length} competition{filteredCompetitions.length === 1 ? "" : "s"} for {selectedSport.name}</small>
-              ) : null}
-            </label>
-
-            <label className="dropdown-label">
-              <span>Home Team</span>
-              <select value={selectedHomeTeamId} onChange={(e) => setSelectedHomeTeamId(e.target.value)}>
-                <option value="">-- Select home team --</option>
-                {filteredTeams.map((team) => (
-                  <option key={team.id} value={team.id}>
-                    {team.name}
-                  </option>
-                ))}
-              </select>
-              {selectedSport ? (
-                <small>{filteredTeams.length} team{filteredTeams.length === 1 ? "" : "s"} for {selectedSport.name}</small>
-              ) : null}
-            </label>
-
-            <label className="dropdown-label">
-              <span>Away Team</span>
-              <select value={selectedAwayTeamId} onChange={(e) => setSelectedAwayTeamId(e.target.value)}>
-                <option value="">-- Select away team --</option>
-                {filteredTeams.map((team) => (
-                  <option key={team.id} value={team.id}>
-                    {team.name}
-                  </option>
-                ))}
-              </select>
-              {selectedSport ? (
-                <small>{filteredTeams.length} team{filteredTeams.length === 1 ? "" : "s"} for {selectedSport.name}</small>
-              ) : null}
-            </label>
-
-            <label className="dropdown-label">
-              <span>Sport</span>
-              <select value={selectedSportId} onChange={(e) => setSelectedSportId(e.target.value)}>
-                <option value="">-- Select sport --</option>
-                {sports.map((sport) => (
-                  <option key={sport.id} value={sport.id}>
-                    {sport.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="kickoff-label">
-              <span>Kickoff</span>
-              <input
-                type="datetime-local"
-                value={startsAt}
-                onChange={(event) => setStartsAt(event.target.value)}
-              />
-            </label>
-          </div>
-
-          <div className="blocked-reason">
-            {!selectedChannel && "Blocked: select an IPTV channel."}
-            {selectedChannel && !previewConfirmed && "Blocked: preview must be confirmed before assignment."}
-            {!selectedCompetition && "Select a competition."}
-            {!selectedSportId && "Select a sport."}
-            {!selectedHomeTeam && "Select a home team."}
-            {!selectedAwayTeam && "Select an away team."}
-            {selectedChannel && previewConfirmed && !matchDetailsComplete && "Complete match details before assignment."}
-            {backendOffline && "Waiting for backend reconnection."}
-            {assignment?.stream.healthStatus === "degraded" && "Signal unstable. Keep previewing before publish."}
-            {assignment?.stream.healthStatus === "failed" && "Stream failed. Choose another source."}
-            {!backendOffline && assignment && !canApprove && !canPublish && `Current state: ${assignment.match.status} / ${assignment.stream.status}.`}
-          </div>
-
-          <div className="action-stack">
-            <button type="button" disabled={!canAssign || backendOffline || streamFailed} onClick={handleAssign}>
-              Assign Previewed Stream
-            </button>
-            <button
-              type="button"
-              disabled={!assignment || !canApprove || backendOffline || streamFailed}
-              onClick={() => assignment && void handleApprove(assignment.stream)}
-            >
-              Approve Stream
-            </button>
-            <button
-              className="publish-button"
-              type="button"
-              disabled={!assignment || !canPublish || backendOffline || streamFailed}
-              onClick={() => assignment && void handlePublish(assignment.stream)}
-            >
-              Publish Live
-            </button>
-          </div>
-
-          {terminalAssignment ? (
-            <div className="terminal-action">
-              <button type="button" className="secondary" onClick={onClearAssignment}>
-                Reset active work item
-              </button>
-            </div>
-          ) : null}
-
-          <section className="current-assignment">
-            <h4>Active Work Item</h4>
-            <dl>
-              <dt>Channel</dt>
-              <dd>{selectedChannel?.name ?? "None selected"}</dd>
-              <dt>Competition</dt>
-              <dd className="selected-entity-row">
-                {selectedCompetition?.logoUrl ? (
-                  <img className="entity-logo" src={selectedCompetition.logoUrl} alt={selectedCompetition.name} />
-                ) : null}
-                <span>{selectedCompetition?.name ?? "None selected"}</span>
-              </dd>
-              <dt>Sport</dt>
-              <dd className="selected-entity-row">
-                {selectedSport?.logoUrl ? (
-                  <img className="entity-logo" src={selectedSport.logoUrl} alt={selectedSport.name} />
-                ) : null}
-                <span>{selectedSport?.name ?? "None selected"}</span>
-              </dd>
-              <dt>Match</dt>
-              <dd className="selected-entity-row">
-                {selectedHomeTeam?.logoUrl ? (
-                  <img className="entity-logo" src={selectedHomeTeam.logoUrl} alt={selectedHomeTeam.name} />
-                ) : null}
-                <span>{selectedHomeTeam?.name ?? "None selected"}</span>
-                <strong className="vs-label">vs</strong>
-                {selectedAwayTeam?.logoUrl ? (
-                  <img className="entity-logo" src={selectedAwayTeam.logoUrl} alt={selectedAwayTeam.name} />
-                ) : null}
-                <span>{selectedAwayTeam?.name ?? "None selected"}</span>
-              </dd>
-              <dt>Status</dt>
-              <dd>{unifiedStatus.label}</dd>
-            </dl>
-          </section>
-        </aside>
       </div> : null}
     </section>
   );
