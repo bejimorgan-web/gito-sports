@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   Channel,
@@ -28,6 +28,7 @@ interface BroadcastConsoleScreenProps {
   previewedChannelId: string | undefined;
   providers: IPTVProvider[];
   selectedChannel: Channel | undefined;
+  preferredProviderId?: string | undefined;
   onApprove: (streamId: string) => Promise<void>;
   onAssignMatch: (input: MatchAssignmentRequest) => Promise<MatchAssignmentResult>;
   onPreviewReady: (channelId: string) => void;
@@ -174,7 +175,9 @@ function getOperatorMessage(input: {
   return "No critical action required.";
 }
 
-function matchesContentType(channel: Channel, contentType: "live" | "movies" | "series") {
+type ContentTypeOption = "live" | "movies" | "series" | "favorites";
+
+function matchesContentType(channel: Channel, contentType: ContentTypeOption) {
   const sourceText = [channel.groupName ?? "", channel.externalRef ?? "", channel.name ?? ""].join(" ").toLowerCase();
 
   const hasExplicitVodToken = /(^|[^a-z])(vod)([^a-z]|$)/.test(sourceText);
@@ -205,7 +208,7 @@ function getGuideMetadataCopy({
 }: {
   channel: Channel | undefined;
   provider: IPTVProvider | undefined;
-  contentType: "live" | "movies" | "series";
+  contentType: ContentTypeOption;
   groupName: string;
   groupChannels: Channel[];
   providerDiagnostics: ProviderChannelDiagnostics | null;
@@ -214,7 +217,7 @@ function getGuideMetadataCopy({
   const providerName = provider?.name ?? "IPTV account";
   const resolvedGroupName = groupName || channel?.groupName || "Live lineup";
   const normalizedGroup = resolvedGroupName.toLowerCase();
-  const contentTypeLabel = contentType === "movies" ? "Movie" : contentType === "series" ? "Series" : "Live";
+  const contentTypeLabel = contentType === "movies" ? "Movie" : contentType === "series" ? "Series" : contentType === "favorites" ? "Favorite" : "Live";
   const diagnosticsSummary = providerDiagnostics
     ? {
         total: providerDiagnostics.totalChannels,
@@ -289,6 +292,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
   previewedChannelId,
   providers,
   selectedChannel,
+  preferredProviderId,
   onApprove,
   onAssignMatch,
   onPreviewReady,
@@ -310,9 +314,22 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
   const [teams, setTeams] = useState<Team[]>([]);
   const [selectedGroup, setSelectedGroup] = useState("");
   const [groupSearchQuery, setGroupSearchQuery] = useState("");
-  const [selectedContentType, setSelectedContentType] = useState<"live" | "movies" | "series">("live");
+  const [selectedContentType, setSelectedContentType] = useState<ContentTypeOption>("live");
+  const [favoriteChannelIds, setFavoriteChannelIds] = useState<string[]>(() => {
+    if (typeof window === "undefined") {
+      return [];
+    }
+
+    try {
+      const raw = window.localStorage.getItem("gito-broadcast-favorite-channels");
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
   const [selectedProviderId, setSelectedProviderId] = useState("");
   const [channelSearchQuery, setChannelSearchQuery] = useState("");
+  const manualProviderSelectionRef = useRef(false);
   const [providerDiagnostics, setProviderDiagnostics] = useState<ProviderChannelDiagnostics | null>(null);
   const [providerDiagnosticsError, setProviderDiagnosticsError] = useState<string | null>(null);
   const [systemStatus, setSystemStatus] = useState<{
@@ -326,6 +343,9 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
   const [systemStatusError, setSystemStatusError] = useState<string | null>(null);
 
   const previewConfirmed = Boolean(selectedChannel) && previewedChannelId === selectedChannel?.id;
+  const visibleProviders = useMemo(() => providers.filter((provider) => provider.status === "active"), [providers]);
+  const favoriteChannelIdSet = useMemo(() => new Set(favoriteChannelIds), [favoriteChannelIds]);
+  const visibleProviderIds = useMemo(() => new Set(visibleProviders.map((provider) => provider.id)), [visibleProviders]);
   const selectedCompetition = useMemo(
     () => competitions.find((item) => item.id === selectedCompetitionId),
     [competitions, selectedCompetitionId]
@@ -352,55 +372,110 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
     [assignment, previewConfirmed, selectedChannel, matchDetailsComplete]
   );
   useEffect(() => {
-    if (!providers.length) {
+    if (!visibleProviders.length) {
       if (selectedProviderId) {
         setSelectedProviderId("");
       }
+      manualProviderSelectionRef.current = false;
       return;
     }
 
     const selectedProvider = selectedProviderId
-      ? providers.find((provider) => provider.id === selectedProviderId)
+      ? visibleProviders.find((provider) => provider.id === selectedProviderId)
       : undefined;
     const selectedProviderIsUsable = Boolean(selectedProvider && selectedProvider.status === "active");
+
+    if (manualProviderSelectionRef.current) {
+      if (!selectedProviderIsUsable) {
+        const fallbackProvider = preferredProviderId
+          ? visibleProviders.find((provider) => provider.id === preferredProviderId && provider.status === "active")
+          : visibleProviders.find((provider) => provider.status === "active");
+
+        if (fallbackProvider) {
+          setSelectedProviderId(fallbackProvider.id);
+          manualProviderSelectionRef.current = false;
+        }
+      }
+      return;
+    }
+
+    const requestedProvider = preferredProviderId
+      ? visibleProviders.find((provider) => provider.id === preferredProviderId && provider.status === "active")
+      : undefined;
+
+    if (requestedProvider) {
+      if (selectedProviderId !== requestedProvider.id) {
+        setSelectedProviderId(requestedProvider.id);
+      }
+      return;
+    }
 
     if (selectedProviderIsUsable) {
       return;
     }
 
     const preferredProvider = selectedChannel?.providerId
-      ? providers.find((provider) => provider.id === selectedChannel.providerId && provider.status === "active")
-      : providers.find((provider) => provider.status === "active");
+      ? visibleProviders.find((provider) => provider.id === selectedChannel.providerId && provider.status === "active")
+      : visibleProviders.find((provider) => provider.status === "active");
 
-    const fallbackProvider = preferredProvider ?? providers[0];
+    const fallbackProvider = preferredProvider ?? visibleProviders[0];
 
     if (fallbackProvider) {
       setSelectedProviderId(fallbackProvider.id);
     }
-  }, [providers, selectedChannel?.providerId, selectedProviderId]);
+  }, [preferredProviderId, visibleProviders, selectedChannel?.providerId, selectedProviderId]);
 
   useEffect(() => {
     setSelectedGroup("");
     setChannelSearchQuery("");
   }, [selectedProviderId, selectedContentType]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem("gito-broadcast-favorite-channels", JSON.stringify(favoriteChannelIds));
+  }, [favoriteChannelIds]);
+
+  const toggleFavoriteChannel = useCallback((channelId: string) => {
+    setFavoriteChannelIds((current) => {
+      if (current.includes(channelId)) {
+        return current.filter((id) => id !== channelId);
+      }
+
+      return [...current, channelId];
+    });
+  }, []);
+
   const selectedProvider = useMemo(
-    () => providers.find((provider) => provider.id === selectedProviderId),
-    [providers, selectedProviderId]
+    () => visibleProviders.find((provider) => provider.id === selectedProviderId),
+    [visibleProviders, selectedProviderId]
   );
   const activeProviderChannels = useMemo(
     () => {
+      const visibleChannels = channels.filter((channel) => visibleProviderIds.has(channel.providerId));
       const providerChannels = selectedProvider
-        ? channels.filter((channel) => channel.providerId === selectedProvider.id)
-        : channels;
+        ? visibleChannels.filter((channel) => channel.providerId === selectedProvider.id)
+        : visibleChannels;
+
+      if (selectedContentType === "favorites") {
+        return providerChannels.filter((channel) => favoriteChannelIdSet.has(channel.id));
+      }
 
       return providerChannels.filter((channel) => matchesContentType(channel, selectedContentType));
     },
-    [channels, selectedProvider, selectedContentType]
+    [channels, favoriteChannelIdSet, selectedContentType, selectedProvider, visibleProviderIds]
   );
   const channelGroups = useMemo(
-    () => [...new Set(activeProviderChannels.map((channel) => channel.groupName ?? "Ungrouped"))],
-    [activeProviderChannels]
+    () => {
+      if (selectedContentType === "favorites") {
+        return activeProviderChannels.length ? ["Favorites"] : [];
+      }
+
+      return [...new Set(activeProviderChannels.map((channel) => channel.groupName ?? "Ungrouped"))];
+    },
+    [activeProviderChannels, selectedContentType]
   );
   const filteredChannelGroups = useMemo(
     () =>
@@ -412,14 +487,26 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
     [channelGroups, groupSearchQuery]
   );
   useEffect(() => {
+    if (selectedContentType === "favorites") {
+      if (selectedGroup !== "Favorites") {
+        setSelectedGroup("Favorites");
+      }
+      return;
+    }
+
     if (!selectedGroup || !filteredChannelGroups.includes(selectedGroup)) {
       setSelectedGroup(filteredChannelGroups[0] ?? "");
     }
-  }, [filteredChannelGroups, selectedGroup]);
+  }, [filteredChannelGroups, selectedContentType, selectedGroup]);
   const selectedGroupChannels = useMemo(
-    () =>
-      activeProviderChannels.filter((channel) => (channel.groupName ?? "Ungrouped") === selectedGroup),
-    [activeProviderChannels, selectedGroup]
+    () => {
+      if (selectedContentType === "favorites") {
+        return activeProviderChannels;
+      }
+
+      return activeProviderChannels.filter((channel) => (channel.groupName ?? "Ungrouped") === selectedGroup);
+    },
+    [activeProviderChannels, selectedContentType, selectedGroup]
   );
   const filteredSelectedGroupChannels = useMemo(
     () =>
@@ -798,7 +885,8 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
           {[
             { key: "live", label: "Live TV", icon: "📺" },
             { key: "movies", label: "Movies", icon: "🎬" },
-            { key: "series", label: "Series", icon: "📺" }
+            { key: "series", label: "Series", icon: "📺" },
+            { key: "favorites", label: "Favorites", icon: "⭐" }
           ].map((option) => {
             const selected = selectedContentType === option.key;
             return (
@@ -806,16 +894,18 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
                 key={option.key}
                 type="button"
                 className={`priority-card ${selected ? "live" : ""}`}
-                onClick={() => setSelectedContentType(option.key as "live" | "movies" | "series")}
+                onClick={() => setSelectedContentType(option.key as ContentTypeOption)}
                 style={{
                   textAlign: "left",
                   cursor: "pointer",
                   border: selected ? "1px solid #4ad7ff" : "1px solid #243649",
-                  background: selected ? "rgba(74, 215, 255, 0.12)" : "rgba(8, 16, 24, 0.85)"
+                  background: selected ? "rgba(74, 215, 255, 0.12)" : "rgba(8, 16, 24, 0.85)",
+                  boxShadow: selected && option.key === "favorites" ? "0 0 0 1px rgba(74, 215, 255, 0.2) inset" : undefined
                 }}
               >
                 <span style={{ fontSize: "1.1rem" }}>{option.icon}</span>
                 <strong>{option.label}</strong>
+                {option.key === "favorites" ? <span style={{ color: "#8fa1b3", fontSize: "0.8rem" }}>{favoriteChannelIds.length} saved</span> : null}
               </button>
             );
           })}
@@ -827,13 +917,14 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
               <select
                 value={selectedProviderId}
                 onChange={(event) => {
+                  manualProviderSelectionRef.current = true;
                   setSelectedProviderId(event.target.value);
                   setSelectedGroup("");
                   setChannelSearchQuery("");
                 }}
                 style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #253647", background: "#0a1119", color: "#e7edf4" }}
               >
-                {providers.map((provider) => (
+                {visibleProviders.map((provider) => (
                   <option key={provider.id} value={provider.id}>
                     {provider.name} ({provider.status})
                   </option>
@@ -946,7 +1037,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
               <aside className="group-column console-panel">
                 <div className="panel-heading">
                   <h4>Channel Groups</h4>
-                  <span>{selectedProvider?.name ?? "Active provider"}</span>
+                  <span>{selectedContentType === "favorites" ? "Pinned favorites" : selectedProvider?.name ?? "Active provider"}</span>
                 </div>
               <input
                 type="text"
@@ -974,17 +1065,17 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
                     onClick={() => setSelectedGroup(groupName)}
                   >
                     <strong>{groupName}</strong>
-                    <span>{activeProviderChannels.filter((channel) => (channel.groupName ?? "Ungrouped") === groupName).length} channels</span>
+                    <span>{selectedContentType === "favorites" ? `${activeProviderChannels.length} favorites` : `${activeProviderChannels.filter((channel) => (channel.groupName ?? "Ungrouped") === groupName).length} channels`}</span>
                   </button>
                 ))}
-                {filteredChannelGroups.length === 0 ? <div className="empty-row">{groupSearchQuery.trim() !== "" ? "No matching groups found." : "No groups available for this provider."}</div> : null}
+                {filteredChannelGroups.length === 0 ? <div className="empty-row">{groupSearchQuery.trim() !== "" ? "No matching groups found." : selectedContentType === "favorites" ? "No favorite channels saved yet." : "No groups available for this provider."}</div> : null}
               </div>
             </aside>
 
             <aside className="channel-column console-panel">
               <div className="panel-heading">
                 <h4>Channels</h4>
-                <span>{selectedGroup || "Group not selected"}</span>
+                <span>{selectedContentType === "favorites" ? `${favoriteChannelIds.length} saved` : selectedGroup || "Group not selected"}</span>
               </div>
               <input
                 type="text"
@@ -1003,22 +1094,49 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
                   boxSizing: "border-box"
                 }}
               />
+                {selectedContentType === "favorites" ? (
+                  <div style={{ marginBottom: 8, padding: "10px 11px", borderRadius: 8, border: "1px solid rgba(74, 215, 255, 0.2)", background: "rgba(74, 215, 255, 0.1)", color: "#9bdcff" }}>
+                    <div style={{ fontWeight: 600 }}>Favorites queue</div>
+                    <div style={{ fontSize: "0.85rem", color: "#8fa1b3", marginTop: 2 }}>Your pinned channels are collected here for fast, premium browsing.</div>
+                  </div>
+                ) : null}
                 <div className="compact-channel-list">
-                  {filteredSelectedGroupChannels.map((channel) => (
-                    <button
-                      className={channel.id === selectedChannel?.id ? "selected" : ""}
-                      key={channel.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedProviderId(channel.providerId);
-                        onSelectChannel(channel);
-                      }}
-                    >
-                      <strong>{channel.name}</strong>
-                      <span>{channel.groupName ?? "Uncategorized"}</span>
-                    </button>
-                  ))}
-                  {filteredSelectedGroupChannels.length === 0 ? <div className="empty-row">{channelSearchQuery.trim() !== "" ? "No matching channels found." : "No channels in this group."}</div> : null}
+                  {filteredSelectedGroupChannels.map((channel) => {
+                    const isFavorite = favoriteChannelIdSet.has(channel.id);
+
+                    return (
+                      <div
+                        key={channel.id}
+                        style={{ display: "flex", alignItems: "center", gap: 8, width: "100%" }}
+                      >
+                        <button
+                          className={channel.id === selectedChannel?.id ? "selected" : ""}
+                          type="button"
+                          onClick={() => {
+                            manualProviderSelectionRef.current = true;
+                            setSelectedProviderId(channel.providerId);
+                            onSelectChannel(channel);
+                          }}
+                          style={{ flex: 1, textAlign: "left" }}
+                        >
+                          <strong>{channel.name}</strong>
+                          <span>{channel.groupName ?? "Uncategorized"}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            toggleFavoriteChannel(channel.id);
+                          }}
+                          style={{ border: "1px solid #253647", borderRadius: 999, background: isFavorite ? "rgba(74, 215, 255, 0.18)" : "transparent", color: isFavorite ? "#4ad7ff" : "#8fa1b3", width: 32, height: 32, display: "grid", placeItems: "center", cursor: "pointer" }}
+                          aria-label={isFavorite ? "Remove favorite" : "Add favorite"}
+                        >
+                          {isFavorite ? "★" : "☆"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {filteredSelectedGroupChannels.length === 0 ? <div className="empty-row">{channelSearchQuery.trim() !== "" ? "No matching channels found." : selectedContentType === "favorites" ? "No favorite channels saved yet." : "No channels in this group."}</div> : null}
                 </div>
               </aside>
             </div>

@@ -30,16 +30,19 @@ export function IptvChannelsScreen({
   onProviderFilterChange,
   onContentTypeChange
 }: IptvChannelsScreenProps) {
-  const filteredProvider = providers.find((provider) => provider.id === selectedProviderId);
+  const visibleProviders = useMemo(() => providers.filter((provider) => provider.status === "active"), [providers]);
+  const visibleProviderIds = useMemo(() => new Set(visibleProviders.map((provider) => provider.id)), [visibleProviders]);
+  const filteredProvider = visibleProviders.find((provider) => provider.id === selectedProviderId);
 
   const categories = useMemo(() => {
     const set = new Set<string>();
     for (const channel of channels) {
+      if (!visibleProviderIds.has(channel.providerId)) continue;
       const group = channel.groupName?.trim() || "Uncategorized";
       set.add(group);
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [channels]);
+  }, [channels, visibleProviderIds]);
 
   const contentTypeMatches = (channel: Channel) => {
     if (contentType === "all") return true;
@@ -61,6 +64,7 @@ export function IptvChannelsScreen({
   const displayChannels = useMemo(() => {
     return channels
       .filter((channel) => {
+        if (!visibleProviderIds.has(channel.providerId)) return false;
         if (selectedProviderId && channel.providerId !== selectedProviderId) return false;
         if (!contentTypeMatches(channel)) return false;
         if (category && category !== "") {
@@ -77,7 +81,7 @@ export function IptvChannelsScreen({
         );
       })
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [channels, selectedProviderId, category, contentType, search]);
+  }, [channels, selectedProviderId, category, contentType, search, visibleProviderIds]);
 
   return (
     <section className="console-panel">
@@ -95,7 +99,7 @@ export function IptvChannelsScreen({
           Provider
           <select value={selectedProviderId} onChange={(event) => onProviderFilterChange(event.target.value)}>
             <option value="">All providers</option>
-            {providers.map((provider) => (
+            {visibleProviders.map((provider) => (
               <option key={provider.id} value={provider.id}>
                 {provider.name}
               </option>

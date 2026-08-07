@@ -1,6 +1,18 @@
 import { useMemo } from "react";
 import type { Channel, CreateProviderRequest, IPTVProvider } from "@gito/shared";
 
+function classifyChannelContent(channel: Channel) {
+  const sourceText = [channel.groupName ?? "", channel.externalRef ?? "", channel.name ?? ""].join(" ").toLowerCase();
+  const hasExplicitVodToken = /(^|[^a-z])(vod)([^a-z]|$)/.test(sourceText);
+  const hasExplicitMovieToken = /(^|[^a-z])(movies?|films?)([^a-z]|$)/.test(sourceText);
+  const hasExplicitSeriesToken = /(^|[^a-z])(series?|shows?|episodes?)([^a-z]|$)/.test(sourceText);
+
+  return {
+    isMovieContent: hasExplicitVodToken && hasExplicitMovieToken,
+    isSeriesContent: hasExplicitVodToken && hasExplicitSeriesToken
+  };
+}
+
 interface IptvProvidersScreenProps {
   providers: IPTVProvider[];
   channels: Channel[];
@@ -49,11 +61,26 @@ export function IptvProvidersScreen({
   onValidateProvider
 }: IptvProvidersScreenProps) {
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
+  const activeProviders = useMemo(() => providers.filter((provider) => provider.status !== "inactive"), [providers]);
+  const inactiveProviders = useMemo(() => providers.filter((provider) => provider.status === "inactive"), [providers]);
   const providerChannelCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
+    const counts: Record<string, { total: number; movies: number; series: number }> = {};
+
     for (const channel of channels) {
-      counts[channel.providerId] = (counts[channel.providerId] ?? 0) + 1;
+      const current = counts[channel.providerId] ?? { total: 0, movies: 0, series: 0 };
+      const content = classifyChannelContent(channel);
+
+      current.total += 1;
+      if (content.isMovieContent) {
+        current.movies += 1;
+      }
+      if (content.isSeriesContent) {
+        current.series += 1;
+      }
+
+      counts[channel.providerId] = current;
     }
+
     return counts;
   }, [channels]);
 
@@ -86,9 +113,9 @@ export function IptvProvidersScreen({
         <label>
           Type
           <select value={type} onChange={(event) => onChangeType(event.target.value as CreateProviderRequest["type"])}>
-            <option value="m3u">M3U</option>
-            <option value="xtream">Xtream</option>
-            <option value="manual">Manual</option>
+            <option value="manual">Auto-detect</option>
+            <option value="m3u">Force M3U</option>
+            <option value="xtream">Force Xtream</option>
           </select>
         </label>
 
@@ -138,53 +165,105 @@ export function IptvProvidersScreen({
         {providers.length === 0 ? (
           <div className="empty-row">No IPTV providers configured yet.</div>
         ) : (
-          providers.map((provider) => {
-            const channelCount = providerChannelCounts[provider.id] ?? 0;
-            const isActive = provider.status === "active";
-            return (
-              <article key={provider.id} className="provider-card provider-hero-card">
-                <div className="provider-card-header">
-                  <div>
-                    <strong>{provider.name}</strong>
-                    <span>{provider.type.toUpperCase()}</span>
+          <>
+            {activeProviders.map((provider) => {
+              const channelMetrics = providerChannelCounts[provider.id] ?? { total: 0, movies: 0, series: 0 };
+              const isActive = provider.status === "active";
+              const isPending = provider.status === "pending";
+              const isInactive = provider.status === "inactive";
+              const isFailed = provider.status === "failed";
+              const stateLabel = isActive ? "Active" : isPending ? "Pending" : isInactive ? "Deactivated" : isFailed ? "Failed" : provider.status;
+              const stateClass = isActive ? "active" : isPending ? "pending" : isInactive ? "inactive" : isFailed ? "failed" : "inactive";
+              return (
+                <article key={provider.id} className="provider-card provider-hero-card">
+                  <div className="provider-card-header">
+                    <div>
+                      <strong>{provider.name}</strong>
+                      <span>{provider.type.toUpperCase()}</span>
+                    </div>
+                    <span className={`provider-status-badge ${stateClass}`}>
+                      {stateLabel}
+                    </span>
                   </div>
-                  <span className={`provider-status-badge ${isActive ? "active" : "inactive"}`}>
-                    {isActive ? "Active" : "Inactive"}
-                  </span>
-                </div>
 
-                <div className="provider-card-details">
-                  <div>
-                    <small>Total channels</small>
-                    <strong>{channelCount}</strong>
+                  <div className="provider-card-details">
+                    <div>
+                      <small>Channels</small>
+                      <strong>{channelMetrics.total}</strong>
+                    </div>
+                    <div>
+                      <small>Movies</small>
+                      <strong>{channelMetrics.movies}</strong>
+                    </div>
+                    <div>
+                      <small>Series</small>
+                      <strong>{channelMetrics.series}</strong>
+                    </div>
+                    <div>
+                      <small>Status</small>
+                      <strong>{provider.status}</strong>
+                    </div>
+                    <div>
+                      <small>Availability</small>
+                      <strong>{provider.availabilityStatus}</strong>
+                    </div>
                   </div>
-                  <div>
-                    <small>Status</small>
-                    <strong>{provider.status}</strong>
-                  </div>
-                  <div>
-                    <small>Availability</small>
-                    <strong>{provider.availabilityStatus}</strong>
-                  </div>
-                </div>
 
-                <div className="provider-card-actions">
-                  <button type="button" onClick={() => onSelectProvider(provider.id)}>
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onSetProviderStatus(provider.id, isActive ? "inactive" : "active")}
-                  >
-                    {isActive ? "Deactivate" : "Activate"}
-                  </button>
-                  <button type="button" onClick={() => onDeleteProvider(provider.id)}>
-                    Delete
-                  </button>
+                  <div className="provider-card-actions">
+                    <button type="button" onClick={() => onSelectProvider(provider.id)}>
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onSetProviderStatus(provider.id, isActive ? "inactive" : "active")}
+                    >
+                      {isActive ? "Deactivate" : "Activate"}
+                    </button>
+                    <button type="button" onClick={() => onDeleteProvider(provider.id)}>
+                      Delete
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+
+            {inactiveProviders.length > 0 ? (
+              <div style={{ marginTop: 18, borderTop: "1px solid #243649", paddingTop: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <strong style={{ color: "#8fa1b3" }}>Disabled accounts</strong>
+                  <span style={{ color: "#6f7d8a", fontSize: "0.9rem" }}>{inactiveProviders.length} inactive</span>
                 </div>
-              </article>
-            );
-          })
+                <div style={{ display: "grid", gap: 10 }}>
+                  {inactiveProviders.map((provider) => (
+                    <div
+                      key={provider.id}
+                      style={{
+                        border: "1px solid #243649",
+                        background: "rgba(8, 16, 24, 0.76)",
+                        borderRadius: 10,
+                        padding: "10px 12px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: 12
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 600, color: "#e7edf4" }}>{provider.name}</div>
+                        <div style={{ color: "#8fa1b3", fontSize: "0.9rem" }}>{provider.type.toUpperCase()}</div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span className="provider-status-badge inactive">Deactivated</span>
+                        <button type="button" onClick={() => onSetProviderStatus(provider.id, "active")}>
+                          Activate
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </>
         )}
       </div>
     </section>
