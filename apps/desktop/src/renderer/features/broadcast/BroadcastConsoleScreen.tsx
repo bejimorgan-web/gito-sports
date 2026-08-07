@@ -7,6 +7,7 @@ import type {
   MatchAssignmentResult,
   PublishedLiveMatch,
   IPTVProvider,
+  ProviderChannelDiagnostics,
   Sport,
   Stream,
   Team
@@ -174,21 +175,109 @@ function getOperatorMessage(input: {
 }
 
 function matchesContentType(channel: Channel, contentType: "live" | "movies" | "series") {
+  const sourceText = [channel.groupName ?? "", channel.externalRef ?? "", channel.name ?? ""].join(" ").toLowerCase();
+
+  const hasExplicitVodToken = /(^|[^a-z])(vod)([^a-z]|$)/.test(sourceText);
+  const hasExplicitMovieToken = /(^|[^a-z])(movies?|films?)([^a-z]|$)/.test(sourceText);
+  const hasExplicitSeriesToken = /(^|[^a-z])(series?|shows?|episodes?)([^a-z]|$)/.test(sourceText);
+
+  const isMovieContent = hasExplicitVodToken && hasExplicitMovieToken;
+  const isSeriesContent = hasExplicitVodToken && hasExplicitSeriesToken;
+
   if (contentType === "movies") {
-    const group = (channel.groupName ?? "").toLowerCase();
-    const categoryValue = (channel.groupName ?? channel.externalRef ?? "").toLowerCase();
-    return group.includes("movie") || categoryValue.includes("movie") || channel.name.toLowerCase().includes("movie");
+    return isMovieContent;
   }
 
   if (contentType === "series") {
-    const group = (channel.groupName ?? "").toLowerCase();
-    const categoryValue = (channel.groupName ?? channel.externalRef ?? "").toLowerCase();
-    return group.includes("series") || categoryValue.includes("series") || channel.name.toLowerCase().includes("series");
+    return isSeriesContent;
   }
 
-  const group = (channel.groupName ?? "").toLowerCase();
-  const categoryValue = (channel.groupName ?? channel.externalRef ?? "").toLowerCase();
-  return !(group.includes("movie") || group.includes("series") || categoryValue.includes("movie") || categoryValue.includes("series"));
+  return !isMovieContent && !isSeriesContent;
+}
+
+function getGuideMetadataCopy({
+  channel,
+  provider,
+  contentType,
+  groupName,
+  groupChannels,
+  providerDiagnostics
+}: {
+  channel: Channel | undefined;
+  provider: IPTVProvider | undefined;
+  contentType: "live" | "movies" | "series";
+  groupName: string;
+  groupChannels: Channel[];
+  providerDiagnostics: ProviderChannelDiagnostics | null;
+}) {
+  const channelName = channel?.name ?? "Selected channel";
+  const providerName = provider?.name ?? "IPTV account";
+  const resolvedGroupName = groupName || channel?.groupName || "Live lineup";
+  const normalizedGroup = resolvedGroupName.toLowerCase();
+  const contentTypeLabel = contentType === "movies" ? "Movie" : contentType === "series" ? "Series" : "Live";
+  const diagnosticsSummary = providerDiagnostics
+    ? {
+        total: providerDiagnostics.totalChannels,
+        active: providerDiagnostics.counts.active,
+        health: providerDiagnostics.healthScore,
+        availability: providerDiagnostics.availabilityStatus
+      }
+    : null;
+
+  const genreKey = normalizedGroup.includes("movie")
+    ? "movies"
+    : normalizedGroup.includes("series")
+    ? "series"
+    : normalizedGroup.includes("sport")
+    ? "sports"
+    : normalizedGroup.includes("news")
+    ? "news"
+    : normalizedGroup.includes("kids")
+    ? "kids"
+    : normalizedGroup.includes("music")
+    ? "music"
+    : "live";
+
+  const nowLabel = genreKey === "movies"
+    ? "Now showing"
+    : genreKey === "series"
+    ? "Now airing"
+    : genreKey === "sports"
+    ? "Now live"
+    : genreKey === "news"
+    ? "Now on air"
+    : "Now on channel";
+
+  const nextLabel = genreKey === "movies"
+    ? "Next screening"
+    : genreKey === "series"
+    ? "Next episode"
+    : genreKey === "sports"
+    ? "Up next: match window"
+    : genreKey === "news"
+    ? "Up next: bulletin"
+    : "Next up";
+
+  const continuityLabel = genreKey === "movies"
+    ? "Channel continuity"
+    : genreKey === "series"
+    ? "Channel continuity"
+    : "Channel continuity";
+
+  const relatedChannels = groupChannels.filter((item) => item.id !== channel?.id).slice(0, 2);
+  const description = diagnosticsSummary
+    ? `${resolvedGroupName} is currently served by ${providerName} with ${diagnosticsSummary.active} active channels synced and ${diagnosticsSummary.health}% health.`
+    : `${resolvedGroupName} is currently mapped from ${providerName} and is ready for preview in the ${contentTypeLabel.toLowerCase()} view.`;
+
+  return {
+    title: `${nowLabel}: ${channelName}`,
+    description: `${description} ${contentTypeLabel} content is staged for preview.`,
+    upcoming: [
+      `${nextLabel}: ${resolvedGroupName}`,
+      relatedChannels[0] ? `${relatedChannels[0].name} in this block` : `${resolvedGroupName} lineup continues`,
+      continuityLabel
+    ]
+  };
 }
 
 export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
@@ -224,6 +313,8 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
   const [selectedContentType, setSelectedContentType] = useState<"live" | "movies" | "series">("live");
   const [selectedProviderId, setSelectedProviderId] = useState("");
   const [channelSearchQuery, setChannelSearchQuery] = useState("");
+  const [providerDiagnostics, setProviderDiagnostics] = useState<ProviderChannelDiagnostics | null>(null);
+  const [providerDiagnosticsError, setProviderDiagnosticsError] = useState<string | null>(null);
   const [systemStatus, setSystemStatus] = useState<{
     backend: string;
     database: string;
@@ -327,6 +418,17 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
     [selectedGroupChannels, channelSearchQuery]
   );
 
+  const previewChannelMetadata = useMemo(() => {
+    return getGuideMetadataCopy({
+      channel: selectedChannel,
+      provider: selectedProvider,
+      contentType: selectedContentType,
+      groupName: selectedGroup || selectedChannel?.groupName || "Live lineup",
+      groupChannels: selectedGroupChannels,
+      providerDiagnostics
+    });
+  }, [providerDiagnostics, selectedChannel, selectedContentType, selectedProvider, selectedGroup, selectedGroupChannels]);
+
   useEffect(() => {
     const firstChannel = filteredSelectedGroupChannels[0];
     if (!firstChannel) {
@@ -374,6 +476,39 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
   const providerRisk = selectedProvider?.availabilityStatus === "offline" || selectedProvider?.availabilityStatus === "degraded";
   const streamFailed = assignment?.stream.healthStatus === "failed" || assignment?.stream.status === "failed";
   const terminalAssignment = Boolean(assignment && !canApprove && !canPublish);
+
+  useEffect(() => {
+    if (!selectedProviderId) {
+      setProviderDiagnostics(null);
+      setProviderDiagnosticsError(null);
+      return;
+    }
+
+    let active = true;
+
+    const loadProviderDiagnostics = async () => {
+      try {
+        const diagnostics = await apiClient.getProviderDiagnostics(selectedProviderId);
+        if (!active) {
+          return;
+        }
+        setProviderDiagnostics(diagnostics);
+        setProviderDiagnosticsError(null);
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+        setProviderDiagnostics(null);
+        setProviderDiagnosticsError(error instanceof Error ? error.message : String(error));
+      }
+    };
+
+    void loadProviderDiagnostics();
+
+    return () => {
+      active = false;
+    };
+  }, [selectedProviderId]);
 
   useEffect(() => {
     const diagnostics = {
@@ -732,12 +867,54 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
 
       {!liveMode ? <div className="broadcast-grid">
         <section className="preview-core">
-          <StreamPreviewPanel
-            channel={selectedChannel}
-            onHealthChange={onReportHealth}
-            onPreviewReady={onPreviewReady}
-            compact
-          />
+          <div className="preview-top-layout">
+            <div className="preview-player-card">
+              <StreamPreviewPanel
+                channel={selectedChannel}
+                onHealthChange={onReportHealth}
+                onPreviewReady={onPreviewReady}
+                compact
+              />
+            </div>
+
+            <aside className="preview-meta-panel console-panel">
+              <div className="panel-heading panel-heading-accent">
+                <div>
+                  <h3>Channel Guide</h3>
+                  <span>Upcoming program metadata</span>
+                </div>
+                <span className="status-pill">{selectedProvider?.name ?? "Provider feed"}</span>
+              </div>
+
+              <div className="preview-meta-card">
+                <div className="preview-meta-title">{previewChannelMetadata.title}</div>
+                <p>{previewChannelMetadata.description}</p>
+
+                {providerDiagnosticsError ? (
+                  <div className="preview-meta-section">
+                    <span className="preview-meta-label">Diagnostics</span>
+                    <ul>
+                      <li>{providerDiagnosticsError}</li>
+                    </ul>
+                  </div>
+                ) : null}
+
+                <div className="preview-meta-section">
+                  <span className="preview-meta-label">Upcoming</span>
+                  <ul>
+                    {previewChannelMetadata.upcoming.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="preview-meta-footer">
+                  <span>{selectedChannel?.groupName ?? "Channel group"}</span>
+                  <span>{selectedChannel?.name ?? "No channel selected"}</span>
+                </div>
+              </div>
+            </aside>
+          </div>
 
           <div className="channel-group-layout">
             <aside className="group-column console-panel">
@@ -820,164 +997,183 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
             </aside>
           </div>
 
-          <div className="match-control-panel console-panel">
-            <div className="panel-heading panel-heading-accent">
-              <div>
-                <h3>Match Control</h3>
-                <span>Assign the previewed stream to a live match</span>
-              </div>
-              <span className="status-pill">{status}</span>
-            </div>
-
-            <div className="match-control-grid">
-              <div className="match-control-column">
-                <label className="dropdown-label">
-                  <span>Competition</span>
-                  <select value={selectedCompetitionId} onChange={(e) => setSelectedCompetitionId(e.target.value)}>
-                    <option value="">-- Select competition --</option>
-                    {filteredCompetitions.map((competition) => (
-                      <option key={competition.id} value={competition.id}>
-                        {competition.name}
-                      </option>
-                    ))}
-                  </select>
-                  {selectedSport ? (
-                    <small>{filteredCompetitions.length} competition{filteredCompetitions.length === 1 ? "" : "s"} for {selectedSport.name}</small>
-                  ) : null}
-                </label>
-
-                <label className="dropdown-label">
-                  <span>Home Team</span>
-                  <select value={selectedHomeTeamId} onChange={(e) => setSelectedHomeTeamId(e.target.value)}>
-                    <option value="">-- Select home team --</option>
-                    {filteredTeams.map((team) => (
-                      <option key={team.id} value={team.id}>
-                        {team.name}
-                      </option>
-                    ))}
-                  </select>
-                  {selectedSport ? (
-                    <small>{filteredTeams.length} team{filteredTeams.length === 1 ? "" : "s"} for {selectedSport.name}</small>
-                  ) : null}
-                </label>
+          <div className="match-control-layout">
+            <section className="match-control-panel console-panel">
+              <div className="panel-heading panel-heading-accent">
+                <div>
+                  <h3>Match Control</h3>
+                  <span>Assign the previewed stream to a live match</span>
+                </div>
+                <span className="status-pill">{status}</span>
               </div>
 
-              <div className="match-control-column">
-                <label className="dropdown-label">
-                  <span>Away Team</span>
-                  <select value={selectedAwayTeamId} onChange={(e) => setSelectedAwayTeamId(e.target.value)}>
-                    <option value="">-- Select away team --</option>
-                    {filteredTeams.map((team) => (
-                      <option key={team.id} value={team.id}>
-                        {team.name}
-                      </option>
-                    ))}
-                  </select>
-                  {selectedSport ? (
-                    <small>{filteredTeams.length} team{filteredTeams.length === 1 ? "" : "s"} for {selectedSport.name}</small>
-                  ) : null}
-                </label>
+              <div className="match-control-grid">
+                <div className="match-control-column">
+                  <label className="dropdown-label">
+                    <span>Competition</span>
+                    <select value={selectedCompetitionId} onChange={(e) => setSelectedCompetitionId(e.target.value)}>
+                      <option value="">-- Select competition --</option>
+                      {filteredCompetitions.map((competition) => (
+                        <option key={competition.id} value={competition.id}>
+                          {competition.name}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedSport ? (
+                      <small>{filteredCompetitions.length} competition{filteredCompetitions.length === 1 ? "" : "s"} for {selectedSport.name}</small>
+                    ) : null}
+                  </label>
 
-                <label className="dropdown-label">
-                  <span>Sport</span>
-                  <select value={selectedSportId} onChange={(e) => setSelectedSportId(e.target.value)}>
-                    <option value="">-- Select sport --</option>
-                    {sports.map((sport) => (
-                      <option key={sport.id} value={sport.id}>
-                        {sport.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                  <label className="dropdown-label">
+                    <span>Home Team</span>
+                    <select value={selectedHomeTeamId} onChange={(e) => setSelectedHomeTeamId(e.target.value)}>
+                      <option value="">-- Select home team --</option>
+                      {filteredTeams.map((team) => (
+                        <option key={team.id} value={team.id}>
+                          {team.name}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedSport ? (
+                      <small>{filteredTeams.length} team{filteredTeams.length === 1 ? "" : "s"} for {selectedSport.name}</small>
+                    ) : null}
+                  </label>
+                </div>
 
-                <label className="kickoff-label">
-                  <span>Kickoff</span>
-                  <input
-                    type="datetime-local"
-                    value={startsAt}
-                    onChange={(event) => setStartsAt(event.target.value)}
-                  />
-                </label>
+                <div className="match-control-column">
+                  <label className="dropdown-label">
+                    <span>Away Team</span>
+                    <select value={selectedAwayTeamId} onChange={(e) => setSelectedAwayTeamId(e.target.value)}>
+                      <option value="">-- Select away team --</option>
+                      {filteredTeams.map((team) => (
+                        <option key={team.id} value={team.id}>
+                          {team.name}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedSport ? (
+                      <small>{filteredTeams.length} team{filteredTeams.length === 1 ? "" : "s"} for {selectedSport.name}</small>
+                    ) : null}
+                  </label>
+
+                  <label className="dropdown-label">
+                    <span>Sport</span>
+                    <select value={selectedSportId} onChange={(e) => setSelectedSportId(e.target.value)}>
+                      <option value="">-- Select sport --</option>
+                      {sports.map((sport) => (
+                        <option key={sport.id} value={sport.id}>
+                          {sport.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="kickoff-label">
+                    <span>Kickoff</span>
+                    <input
+                      type="datetime-local"
+                      value={startsAt}
+                      onChange={(event) => setStartsAt(event.target.value)}
+                    />
+                  </label>
+                </div>
               </div>
-            </div>
 
-            <div className="blocked-reason">
-              {!selectedChannel && "Blocked: select an IPTV channel."}
-              {selectedChannel && !previewConfirmed && "Blocked: preview must be confirmed before assignment."}
-              {!selectedCompetition && "Select a competition."}
-              {!selectedSportId && "Select a sport."}
-              {!selectedHomeTeam && "Select a home team."}
-              {!selectedAwayTeam && "Select an away team."}
-              {selectedChannel && previewConfirmed && !matchDetailsComplete && "Complete match details before assignment."}
-              {backendOffline && "Waiting for backend reconnection."}
-              {assignment?.stream.healthStatus === "degraded" && "Signal unstable. Keep previewing before publish."}
-              {assignment?.stream.healthStatus === "failed" && "Stream failed. Choose another source."}
-              {!backendOffline && assignment && !canApprove && !canPublish && `Current state: ${assignment.match.status} / ${assignment.stream.status}.`}
-            </div>
+              <div className="blocked-reason">
+                {!selectedChannel && "Blocked: select an IPTV channel."}
+                {selectedChannel && !previewConfirmed && "Blocked: preview must be confirmed before assignment."}
+                {!selectedCompetition && "Select a competition."}
+                {!selectedSportId && "Select a sport."}
+                {!selectedHomeTeam && "Select a home team."}
+                {!selectedAwayTeam && "Select an away team."}
+                {selectedChannel && previewConfirmed && !matchDetailsComplete && "Complete match details before assignment."}
+                {backendOffline && "Waiting for backend reconnection."}
+                {assignment?.stream.healthStatus === "degraded" && "Signal unstable. Keep previewing before publish."}
+                {assignment?.stream.healthStatus === "failed" && "Stream failed. Choose another source."}
+                {!backendOffline && assignment && !canApprove && !canPublish && `Current state: ${assignment.match.status} / ${assignment.stream.status}.`}
+              </div>
 
-            <div className="action-stack">
-              <button type="button" disabled={!canAssign || backendOffline || streamFailed} onClick={handleAssign}>
-                Assign Previewed Stream
-              </button>
-              <button
-                type="button"
-                disabled={!assignment || !canApprove || backendOffline || streamFailed}
-                onClick={() => assignment && void handleApprove(assignment.stream)}
-              >
-                Approve Stream
-              </button>
-              <button
-                className="publish-button"
-                type="button"
-                disabled={!assignment || !canPublish || backendOffline || streamFailed}
-                onClick={() => assignment && void handlePublish(assignment.stream)}
-              >
-                Publish Live
-              </button>
-            </div>
-
-            {terminalAssignment ? (
-              <div className="terminal-action">
-                <button type="button" className="secondary" onClick={onClearAssignment}>
-                  Reset active work item
+              <div className="action-stack">
+                <button type="button" disabled={!canAssign || backendOffline || streamFailed} onClick={handleAssign}>
+                  Assign Previewed Stream
+                </button>
+                <button
+                  type="button"
+                  disabled={!assignment || !canApprove || backendOffline || streamFailed}
+                  onClick={() => assignment && void handleApprove(assignment.stream)}
+                >
+                  Approve Stream
+                </button>
+                <button
+                  className="publish-button"
+                  type="button"
+                  disabled={!assignment || !canPublish || backendOffline || streamFailed}
+                  onClick={() => assignment && void handlePublish(assignment.stream)}
+                >
+                  Publish Live
                 </button>
               </div>
-            ) : null}
+            </section>
 
-            <section className="current-assignment">
-              <h4>Active Work Item</h4>
-              <dl>
-                <dt>Channel</dt>
-                <dd>{selectedChannel?.name ?? "None selected"}</dd>
-                <dt>Competition</dt>
-                <dd className="selected-entity-row">
-                  {selectedCompetition?.logoUrl ? (
-                    <img className="entity-logo" src={selectedCompetition.logoUrl} alt={selectedCompetition.name} />
-                  ) : null}
-                  <span>{selectedCompetition?.name ?? "None selected"}</span>
-                </dd>
-                <dt>Sport</dt>
-                <dd className="selected-entity-row">
-                  {selectedSport?.logoUrl ? (
-                    <img className="entity-logo" src={selectedSport.logoUrl} alt={selectedSport.name} />
-                  ) : null}
-                  <span>{selectedSport?.name ?? "None selected"}</span>
-                </dd>
-                <dt>Match</dt>
-                <dd className="selected-entity-row">
-                  {selectedHomeTeam?.logoUrl ? (
-                    <img className="entity-logo" src={selectedHomeTeam.logoUrl} alt={selectedHomeTeam.name} />
-                  ) : null}
-                  <span>{selectedHomeTeam?.name ?? "None selected"}</span>
-                  <strong className="vs-label">vs</strong>
-                  {selectedAwayTeam?.logoUrl ? (
-                    <img className="entity-logo" src={selectedAwayTeam.logoUrl} alt={selectedAwayTeam.name} />
-                  ) : null}
-                  <span>{selectedAwayTeam?.name ?? "None selected"}</span>
-                </dd>
-                <dt>Status</dt>
-                <dd>{unifiedStatus.label}</dd>
-              </dl>
+            <section className="match-control-panel console-panel">
+              <div className="panel-heading panel-heading-accent">
+                <div>
+                  <h3>Active Work Item</h3>
+                  <span>Current broadcast assignment summary</span>
+                </div>
+                <span className="status-pill">{unifiedStatus.label}</span>
+              </div>
+
+              <div className="work-item-grid">
+                <div className="work-item-card">
+                  <div className="work-item-label">Channel</div>
+                  <div className="work-item-value">{selectedChannel?.name ?? "None selected"}</div>
+                </div>
+
+                <div className="work-item-card">
+                  <div className="work-item-label">Sport</div>
+                  <div className="work-item-value entity-inline">
+                    {selectedSport?.logoUrl ? (
+                      <img className="entity-logo" src={selectedSport.logoUrl} alt={selectedSport.name} />
+                    ) : null}
+                    <span>{selectedSport?.name ?? "None selected"}</span>
+                  </div>
+                </div>
+
+                <div className="work-item-card">
+                  <div className="work-item-label">Competition</div>
+                  <div className="work-item-value entity-inline">
+                    {selectedCompetition?.logoUrl ? (
+                      <img className="entity-logo" src={selectedCompetition.logoUrl} alt={selectedCompetition.name} />
+                    ) : null}
+                    <span>{selectedCompetition?.name ?? "None selected"}</span>
+                  </div>
+                </div>
+
+                <div className="work-item-card">
+                  <div className="work-item-label">Status</div>
+                  <div className="work-item-value">{unifiedStatus.label}</div>
+                </div>
+
+                <div className="work-item-card wide">
+                  <div className="work-item-label">Teams</div>
+                  <div className="work-item-value team-inline">
+                    <div className="team-pair">
+                      {selectedHomeTeam?.logoUrl ? (
+                        <img className="entity-logo" src={selectedHomeTeam.logoUrl} alt={selectedHomeTeam.name} />
+                      ) : null}
+                      <span>{selectedHomeTeam?.name ?? "None selected"}</span>
+                    </div>
+                    <strong className="vs-label">vs</strong>
+                    <div className="team-pair">
+                      {selectedAwayTeam?.logoUrl ? (
+                        <img className="entity-logo" src={selectedAwayTeam.logoUrl} alt={selectedAwayTeam.name} />
+                      ) : null}
+                      <span>{selectedAwayTeam?.name ?? "None selected"}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </section>
           </div>
 
