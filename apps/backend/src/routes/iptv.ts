@@ -8,6 +8,116 @@ import { logChannelSyncTrace } from "../services/iptv-trace.js";
 
 type ChannelListMode = "active" | "includeInactive" | "debug" | "raw";
 
+async function validateProviderConnection(input: {
+  baseUrl?: string;
+  username?: string;
+  password?: string;
+  type?: string;
+  providerId?: string;
+}) {
+  const { baseUrl, type, providerId } = input;
+  const storedCredentials = providerId ? IPTVService.getProviderCredentials(providerId) : undefined;
+  const username = input.username ?? (storedCredentials as any)?.credential_username ?? undefined;
+  const password = input.password ?? (storedCredentials as any)?.credential_password ?? undefined;
+
+  if (!baseUrl) {
+    return { ok: false, message: "Base URL is required." };
+  }
+
+  if (type === "xtream") {
+    if (!username || !password) {
+      return { ok: false, message: "Xtream providers require both username and password." };
+    }
+
+    const testResult = await testXtreamConnection(baseUrl, username, password);
+    if (!testResult.ok) {
+      return {
+        ...testResult,
+        channels: [] as any[]
+      };
+    }
+
+    const invalidEntries: XtreamParseError[] = [];
+    const channels = await fetchXtreamChannels(baseUrl, username, password, (entry) => invalidEntries.push(entry));
+
+    return {
+      ok: channels.length > 0,
+      statusCode: testResult.statusCode,
+      message: channels.length > 0 ? "Xtream provider connection is valid." : "No channels were returned for this Xtream account.",
+      channels,
+      channelsParsed: channels.length,
+      channelsRejected: invalidEntries.length,
+      categories: Array.from(new Set(channels.map((channel) => channel.groupName).filter(Boolean) as string[])),
+      rejectedChannels: invalidEntries.slice(0, 10)
+    };
+  }
+
+  try {
+    const testResponse = await fetch(baseUrl, { method: "GET" });
+
+    if (!testResponse.ok) {
+      return {
+        ok: false,
+        statusCode: testResponse.status,
+        message: "Provider returned an error."
+      };
+    }
+
+    const bodyText = await testResponse.text();
+    const invalidEntries: M3uParseError[] = [];
+    const parsed = parseM3uPlaylist(bodyText, (entry) => invalidEntries.push(entry));
+
+    if (parsed.length === 0) {
+      return {
+        ok: false,
+        statusCode: testResponse.status,
+        message: "Provider responded but playlist is empty or invalid."
+      };
+    }
+
+    const validChannels: Array<{ name: string; url: string; externalRef?: string; groupName?: string }> = [];
+    const invalidChannels: Array<{ name: string; url: string; error: string }> = [];
+
+    for (const ch of parsed) {
+      const error = validateHttpStreamUrl(ch.url);
+      if (error) {
+        invalidChannels.push({ name: ch.name, url: ch.url, error });
+      } else {
+        validChannels.push(ch);
+      }
+    }
+
+    return {
+      ok: validChannels.length > 0,
+      statusCode: testResponse.status,
+      message: validChannels.length > 0 ? "Provider connection is valid." : "No valid channels could be parsed from the playlist.",
+      channels: validChannels,
+      channelsParsed: parsed.length,
+      channelsRejected: invalidChannels.length,
+      categories: Array.from(new Set(validChannels.map((channel) => channel.groupName).filter(Boolean) as string[])),
+      rejectedChannels: invalidChannels.slice(0, 10)
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "Provider connection failed."
+    };
+  }
+}
+
+async function persistValidatedProvider(providerId: string, validation: Awaited<ReturnType<typeof validateProviderConnection>>, input: { type?: string }) {
+  if (!validation.ok) {
+    return false;
+  }
+
+  if (input.type && input.type !== "manual" && Array.isArray(validation.channels) && validation.channels.length > 0) {
+    IPTVService.syncProviderChannels(providerId, validation.channels as any[]);
+  }
+
+  IPTVService.setProviderStatus(providerId, "active");
+  return true;
+}
+
 export const iptvRouter = Router();
 
 iptvRouter.get("/providers", (_request, response) => {
@@ -27,7 +137,7 @@ iptvRouter.get("/providers/:providerId", (request, response) => {
   response.json({ data: provider });
 });
 
-iptvRouter.post("/providers", (request, response) => {
+iptvRouter.post("/providers", async (request, response) => {
   const body = request.body as CreateProviderRequest;
 
   if (!body.name || !body.baseUrl || !body.type) {
@@ -35,13 +145,41 @@ iptvRouter.post("/providers", (request, response) => {
     return;
   }
 
-  const provider = IPTVService.createProvider(body);
+  const validation = await validateProviderConnection(body);
+  if (!validation.ok) {
+    response.status(400).json({ error: "provider_validation_failed", message: validation.message });
+    return;
+  }
 
-  response.status(201).json({ data: provider });
+  const provider = IPTVService.createProvider(body);
+  if (provider) {
+    await persistValidatedProvider(provider.id, validation, body);
+  }
+
+  response.status(201).json({ data: provider ? IPTVService.getProvider(provider.id) ?? provider : provider });
 });
 
-iptvRouter.put("/providers/:providerId", (request, response) => {
+iptvRouter.put("/providers/:providerId", async (request, response) => {
   const input = request.body as Partial<CreateProviderRequest>;
+  const existing = IPTVService.getProvider(request.params.providerId);
+
+  if (!existing) {
+    response.status(404).json({ error: "provider_not_found" });
+    return;
+  }
+
+  const validation = await validateProviderConnection({
+    baseUrl: input.baseUrl ?? existing.baseUrl,
+    username: input.username ?? undefined,
+    password: input.password ?? undefined,
+    type: input.type ?? existing.type,
+    providerId: request.params.providerId
+  });
+
+  if (!validation.ok) {
+    response.status(400).json({ error: "provider_validation_failed", message: validation.message });
+    return;
+  }
 
   const updated = IPTVService.updateProvider(request.params.providerId, input);
 
@@ -50,7 +188,9 @@ iptvRouter.put("/providers/:providerId", (request, response) => {
     return;
   }
 
-  response.json({ data: updated });
+  await persistValidatedProvider(updated.id, validation, updated);
+
+  response.json({ data: IPTVService.getProvider(updated.id) ?? updated });
 });
 
 iptvRouter.delete("/providers/:providerId", (request, response) => {
@@ -142,103 +282,72 @@ iptvRouter.post("/providers/test", async (request: any, response: any) => {
 
   const providerId = String(request.params?.providerId ?? request.body?.providerId ?? "");
 
-  if (!baseUrl) {
-    response.status(400).json({ error: "base_url_required" });
-    return;
-  }
-
-  if (type === "xtream") {
-    if (!username || !password) {
-      response.status(400).json({ error: "xtream_credentials_required" });
-      return;
+  const validation = await validateProviderConnection({ baseUrl, username, password, type, providerId });
+  if (!validation.ok) {
+    if (providerId) {
+      IPTVService.setProviderStatus(providerId, 'failed');
     }
-
-    response.json({
-      data: await testXtreamConnection(baseUrl, username, password)
+    response.status(400).json({
+      error: "provider_validation_failed",
+      message: validation.message
     });
     return;
   }
 
-  try {
-    const testResponse = await fetch(baseUrl, { method: "GET" });
-
-    if (!testResponse.ok) {
-      response.json({
-        data: {
-          ok: false,
-          statusCode: testResponse.status,
-          message: "Provider returned an error."
-        }
-      });
-      return;
-    }
-
-    if (type === "m3u") {
-      const bodyText = await testResponse.text();
-      const invalidEntries: M3uParseError[] = [];
-      const parsed = parseM3uPlaylist(bodyText, (entry) => invalidEntries.push(entry));
-      const providerId = String(request.params?.providerId ?? request.body?.providerId ?? "");
-
-      for (const invalid of invalidEntries) {
-        logChannelSyncTrace({
-          providerId,
-          providerMode: (IPTVService.getProvider(providerId) as any)?.syncMode ?? "partial",
-          syncPhase: "parse",
-          action: "reject",
-          reason: invalid.reason,
-          payload: invalid
-        });
-      }
-
-      if (parsed.length === 0) {
-        if (providerId) {
-          IPTVService.setProviderStatus(providerId, 'failed');
-        }
-        response.status(400).json({
-          error: "playlist_contains_invalid_or_empty_m3u",
-          message: "Provider responded but playlist is empty or invalid."
-        });
-        return;
-      }
-
-      const validChannels: typeof parsed = [];
-      const invalidChannels: { name: string; url: string; error: string }[] = [];
-
-      for (const ch of parsed) {
-        const error = validateHttpStreamUrl(ch.url);
-        if (error) {
-          invalidChannels.push({ name: ch.name, url: ch.url, error });
-        } else {
-          validChannels.push(ch);
-        }
-      }
-
-      const channels = validChannels.length > 0 ? IPTVService.syncProviderChannels(providerId, validChannels) : [];
-      if (providerId) {
-        IPTVService.setProviderStatus(providerId, channels.length > 0 ? 'active' : 'failed');
-      }
-      response.json({
-        data: {
-          ok: channels.length > 0,
-          statusCode: testResponse.status,
-          channelsCreated: channels.length,
-          channelsParsed: parsed.length,
-          channelsRejected: invalidChannels.length,
-          categories: Array.from(new Set(channels.map((channel) => (channel as any).category).filter(Boolean))),
-          rejectedChannels: invalidChannels.slice(0, 10)
-        }
-      });
-      return;
-    }
-
-    response.json({ data: { ok: true, statusCode: testResponse.status, message: "Provider responded." } });
-  } catch (error) {
-    const providerId = String(request.params?.providerId ?? request.body?.providerId ?? "");
-    if (providerId) {
-      IPTVService.setProviderStatus(providerId, 'failed');
-    }
-    response.json({ data: { ok: false, message: error instanceof Error ? error.message : "Provider connection failed." } });
+  if (providerId) {
+    await persistValidatedProvider(providerId, validation, { type });
   }
+
+  response.json({
+    data: {
+      ok: true,
+      statusCode: (validation as any).statusCode,
+      message: validation.message,
+      channelsCreated: Array.isArray(validation.channels) ? validation.channels.length : 0,
+      channelsParsed: (validation as any).channelsParsed ?? 0,
+      channelsRejected: (validation as any).channelsRejected ?? 0,
+      categories: (validation as any).categories ?? [],
+      rejectedChannels: (validation as any).rejectedChannels ?? []
+    }
+  });
+});
+
+iptvRouter.post("/providers/:providerId/test", async (request, response) => {
+  const provider = IPTVService.getProvider(request.params.providerId);
+
+  if (!provider) {
+    response.status(404).json({ error: "provider_not_found" });
+    return;
+  }
+
+  const validation = await validateProviderConnection({
+    baseUrl: provider.baseUrl,
+    username: undefined,
+    password: undefined,
+    type: provider.type,
+    providerId: provider.id
+  });
+
+  if (!validation.ok) {
+    IPTVService.setProviderStatus(provider.id, 'failed');
+    response.status(400).json({ error: "provider_validation_failed", message: validation.message });
+    return;
+  }
+
+  await persistValidatedProvider(provider.id, validation, provider);
+
+  response.json({
+    data: {
+      ok: true,
+      statusCode: (validation as any).statusCode,
+      message: validation.message,
+      channelsCreated: Array.isArray(validation.channels) ? validation.channels.length : 0,
+      channelsParsed: (validation as any).channelsParsed ?? 0,
+      channelsRejected: (validation as any).channelsRejected ?? 0,
+      categories: (validation as any).categories ?? [],
+      rejectedChannels: (validation as any).rejectedChannels ?? []
+    }
+  });
 });
 
 iptvRouter.post("/providers/:providerId/m3u", (request, response) => {
@@ -295,7 +404,7 @@ iptvRouter.post("/providers/:providerId/m3u", (request, response) => {
 });
 
 // Allow operator to manually set provider status (active, inactive, failed, pending, invalid)
-iptvRouter.post("/providers/:providerId/status", (request, response) => {
+iptvRouter.post("/providers/:providerId/status", async (request, response) => {
   const { status } = request.body as { status?: string };
   const allowed = new Set(["active", "inactive", "failed", "pending", "invalid"]);
 
@@ -311,7 +420,31 @@ iptvRouter.post("/providers/:providerId/status", (request, response) => {
     return;
   }
 
-  IPTVService.setProviderStatus(request.params.providerId, status as any);
+  if (status === "active") {
+    const provider = IPTVService.getProvider(request.params.providerId);
+    if (!provider) {
+      response.status(404).json({ error: "provider_not_found" });
+      return;
+    }
+
+    const validation = await validateProviderConnection({
+      baseUrl: provider.baseUrl,
+      username: undefined,
+      password: undefined,
+      type: provider.type,
+      providerId: provider.id
+    });
+
+    if (!validation.ok) {
+      IPTVService.setProviderStatus(request.params.providerId, 'failed');
+      response.status(400).json({ error: "provider_validation_failed", message: validation.message });
+      return;
+    }
+
+    await persistValidatedProvider(provider.id, validation, provider);
+  } else {
+    IPTVService.setProviderStatus(request.params.providerId, status as any);
+  }
 
   response.json({ data: IPTVService.getProvider(request.params.providerId) });
 });
@@ -331,15 +464,21 @@ iptvRouter.post("/providers/:providerId/xtream/sync", async (request, response) 
 
   const username = (provider as any).credential_username ?? (provider as any).username ?? null;
   const password = (provider as any).credential_password ?? (provider as any).password ?? null;
+  const serverUrl = (provider as any).server_url ?? (provider as any).base_url ?? (provider as any).baseUrl ?? null;
 
   if (!username || !password) {
     response.status(400).json({ error: "stored_xtream_credentials_required" });
     return;
   }
 
+  if (!serverUrl) {
+    response.status(400).json({ error: "stored_xtream_server_url_required" });
+    return;
+  }
+
   const invalidEntries: XtreamParseError[] = [];
   const parsedChannels = await fetchXtreamChannels(
-    provider.server_url,
+    serverUrl,
     username,
     password,
     (entry) => invalidEntries.push(entry)

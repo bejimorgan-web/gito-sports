@@ -1,4 +1,4 @@
-import type { Channel, CreateProviderRequest } from "@gito/shared";
+import type { Channel, CreateProviderRequest, IPTVProvider } from "@gito/shared";
 import { EventBus } from "../events/event-bus.js";
 import { IptvProviderService } from "./iptv-provider-service.js";
 import { IptvChannelService } from "./iptv-channel-service.js";
@@ -38,20 +38,20 @@ EventBus.on("iptv:provider:updated", (payload) => {
 });
 
 export const IPTVService = {
-  listProviders(): IptvProviderRow[] {
+  listProviders(): IPTVProvider[] {
     return IptvProviderService.listProviders();
   },
 
-  getProvider(providerId: string): IptvProviderRow | undefined {
+  getProvider(providerId: string): IPTVProvider | undefined {
     return IptvProviderService.getProvider(providerId) ?? undefined;
   },
 
-  createProvider(input: CreateProviderRequest): IptvProviderRow | null {
+  createProvider(input: CreateProviderRequest): IPTVProvider | null {
     return IptvProviderService.createProvider(input);
   },
 
-  updateProvider(providerId: string, input: Partial<CreateProviderRequest>): IptvProviderRow | null {
-    return IptvProviderService.updateProvider(providerId, input);
+  updateProvider(providerId: string, input: Partial<CreateProviderRequest>): IPTVProvider | null {
+    return IptvProviderService.updateProvider(providerId, input) ?? null;
   },
 
   deleteProvider(providerId: string): boolean {

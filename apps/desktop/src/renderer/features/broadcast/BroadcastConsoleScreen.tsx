@@ -173,6 +173,24 @@ function getOperatorMessage(input: {
   return "No critical action required.";
 }
 
+function matchesContentType(channel: Channel, contentType: "live" | "movies" | "series") {
+  if (contentType === "movies") {
+    const group = (channel.groupName ?? "").toLowerCase();
+    const categoryValue = (channel.groupName ?? channel.externalRef ?? "").toLowerCase();
+    return group.includes("movie") || categoryValue.includes("movie") || channel.name.toLowerCase().includes("movie");
+  }
+
+  if (contentType === "series") {
+    const group = (channel.groupName ?? "").toLowerCase();
+    const categoryValue = (channel.groupName ?? channel.externalRef ?? "").toLowerCase();
+    return group.includes("series") || categoryValue.includes("series") || channel.name.toLowerCase().includes("series");
+  }
+
+  const group = (channel.groupName ?? "").toLowerCase();
+  const categoryValue = (channel.groupName ?? channel.externalRef ?? "").toLowerCase();
+  return !(group.includes("movie") || group.includes("series") || categoryValue.includes("movie") || categoryValue.includes("series"));
+}
+
 export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
   assignment,
   backendStatus,
@@ -203,6 +221,8 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
   const [teams, setTeams] = useState<Team[]>([]);
   const [selectedGroup, setSelectedGroup] = useState("");
   const [groupSearchQuery, setGroupSearchQuery] = useState("");
+  const [selectedContentType, setSelectedContentType] = useState<"live" | "movies" | "series">("live");
+  const [selectedProviderId, setSelectedProviderId] = useState("");
   const [channelSearchQuery, setChannelSearchQuery] = useState("");
   const [systemStatus, setSystemStatus] = useState<{
     backend: string;
@@ -240,19 +260,34 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
     () => getNextAction({ assignment, previewConfirmed, selectedChannel, matchDetailsComplete }),
     [assignment, previewConfirmed, selectedChannel, matchDetailsComplete]
   );
+  useEffect(() => {
+    if (selectedChannel?.providerId && selectedChannel.providerId !== selectedProviderId) {
+      setSelectedProviderId(selectedChannel.providerId);
+    }
+  }, [selectedChannel?.providerId, selectedProviderId]);
+
+  useEffect(() => {
+    if (!selectedProviderId && providers.length > 0) {
+      const preferredProvider = providers.find((provider) => provider.status === "active") ?? providers[0];
+      if (preferredProvider) {
+        setSelectedProviderId(preferredProvider.id);
+      }
+    }
+  }, [providers, selectedProviderId]);
+
   const selectedProvider = useMemo(
-    () =>
-      selectedChannel
-        ? providers.find((provider) => provider.id === selectedChannel.providerId)
-        : undefined,
-    [providers, selectedChannel]
+    () => providers.find((provider) => provider.id === selectedProviderId),
+    [providers, selectedProviderId]
   );
   const activeProviderChannels = useMemo(
-    () =>
-      selectedProvider
+    () => {
+      const providerChannels = selectedProvider
         ? channels.filter((channel) => channel.providerId === selectedProvider.id)
-        : channels,
-    [channels, selectedProvider]
+        : channels;
+
+      return providerChannels.filter((channel) => matchesContentType(channel, selectedContentType));
+    },
+    [channels, selectedProvider, selectedContentType]
   );
   const channelGroups = useMemo(
     () => [...new Set(activeProviderChannels.map((channel) => channel.groupName ?? "Ungrouped"))],
@@ -576,35 +611,56 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
         </div>
       </header>
 
-      <div className="dashboard-summary-grid">
-        {dashboardMetrics.map((metric) => (
-          <article className="dashboard-metric-card" key={metric.label}>
-            <span>{metric.label}</span>
-            <strong>{metric.value}</strong>
-            <small>{metric.detail}</small>
-          </article>
-        ))}
-      </div>
-
       <div className={liveMode ? "unified-status live-mode-status" : "unified-status"}>
         <strong className={`unified-status-badge ${unifiedStatus.tone}`}>{unifiedStatus.label}</strong>
         <span>{operatorMessage}</span>
       </div>
 
       {!liveMode ? (
-        <div className="priority-strip simplified-priority-strip">
-          <article className="priority-card live">
-            <span>Live</span>
-            <strong>{liveMatches.length}</strong>
-          </article>
-          <article className="priority-card">
-            <span>Alerts</span>
-            <strong>{actionableAlerts.length}</strong>
-          </article>
-          <article className="priority-card">
-            <span>Selected Source</span>
-            <strong>{selectedChannel ? "Ready" : "None"}</strong>
-          </article>
+        <div style={{ display: "grid", gap: 12 }}>
+          <div className="priority-strip simplified-priority-strip content-type-strip">
+          {[
+            { key: "live", label: "Live TV", icon: "📺" },
+            { key: "movies", label: "Movies", icon: "🎬" },
+            { key: "series", label: "Series", icon: "📺" }
+          ].map((option) => {
+            const selected = selectedContentType === option.key;
+            return (
+              <button
+                key={option.key}
+                type="button"
+                className={`priority-card ${selected ? "live" : ""}`}
+                onClick={() => setSelectedContentType(option.key as "live" | "movies" | "series")}
+                style={{
+                  textAlign: "left",
+                  cursor: "pointer",
+                  border: selected ? "1px solid #4ad7ff" : "1px solid #243649",
+                  background: selected ? "rgba(74, 215, 255, 0.12)" : "rgba(8, 16, 24, 0.85)"
+                }}
+              >
+                <span style={{ fontSize: "1.1rem" }}>{option.icon}</span>
+                <strong>{option.label}</strong>
+              </button>
+            );
+          })}
+          </div>
+
+          <div className="console-panel" style={{ padding: 12 }}>
+            <label style={{ display: "grid", gap: 6, color: "#8fa1b3" }}>
+              <span>Active IPTV provider</span>
+              <select
+                value={selectedProviderId}
+                onChange={(event) => setSelectedProviderId(event.target.value)}
+                style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #253647", background: "#0a1119", color: "#e7edf4" }}
+              >
+                {providers.map((provider) => (
+                  <option key={provider.id} value={provider.id}>
+                    {provider.name} ({provider.status})
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
         </div>
       ) : null}
 
@@ -730,7 +786,10 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
                     className={channel.id === selectedChannel?.id ? "selected" : ""}
                     key={channel.id}
                     type="button"
-                    onClick={() => onSelectChannel(channel)}
+                    onClick={() => {
+                      setSelectedProviderId(channel.providerId);
+                      onSelectChannel(channel);
+                    }}
                   >
                     <strong>{channel.name}</strong>
                     <span>{channel.groupName ?? "Uncategorized"}</span>

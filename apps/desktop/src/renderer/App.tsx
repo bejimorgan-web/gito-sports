@@ -161,11 +161,15 @@ function renderScreen(
     case "dashboard":
       return (
         <DashboardShell
+          actionableAlertCount={(state.backendStatus !== "online" ? 1 : 0) + (state.assignment?.stream.status === "failed" ? 1 : 0) + (state.assignment && state.assignment.stream.status === "assigned" ? 1 : 0) + (state.providers.length === 0 ? 1 : 0)}
+          backendStatus={state.backendStatus}
           failedStreamCount={state.assignment?.stream.status === "failed" ? 1 : 0}
           pendingApprovalCount={state.assignment && state.assignment.stream.status === "assigned" ? 1 : 0}
           liveMatchCount={state.liveMatches.length}
           channelCount={state.channels.length}
           providerCount={state.providers.length}
+          systemStatusDetail={state.backendStatus === "online" ? `Operations active · ${state.channels.length} channels · ${state.providers.length} providers` : "Service availability check in progress"}
+          systemStatusLabel={state.backendStatus === "online" ? "Operational" : state.backendStatus === "reconnecting" ? "Reconnecting" : "Offline"}
         />
       );
     default:
@@ -269,11 +273,21 @@ export function App() {
   }, [assignment]);
 
   useEffect(() => {
+    const handleNavigation = (event: Event) => {
+      const detail = (event as CustomEvent<string>).detail;
+      if (typeof detail === "string") {
+        setActiveScreen(detail as NavigationKey);
+      }
+    };
+
+    window.addEventListener("gito:navigate", handleNavigation as EventListener);
+
     const dispose = window.gito?.onNavigateToScreen?.((screen) => {
       setActiveScreen(screen as NavigationKey);
     });
 
     return () => {
+      window.removeEventListener("gito:navigate", handleNavigation as EventListener);
       if (typeof dispose === "function") {
         dispose();
       }

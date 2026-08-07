@@ -22,6 +22,7 @@ interface IptvProvidersScreenProps {
   onDeleteProvider: (providerId: string) => Promise<void>;
   onSetProviderStatus: (providerId: string, status: string) => Promise<void>;
   onTestProviderById: ((providerId: string) => Promise<any>) | undefined;
+  onValidateProvider?: () => Promise<void>;
 }
 
 export function IptvProvidersScreen({
@@ -44,7 +45,8 @@ export function IptvProvidersScreen({
   onUpdateProvider,
   onDeleteProvider,
   onSetProviderStatus,
-  onTestProviderById
+  onTestProviderById,
+  onValidateProvider
 }: IptvProvidersScreenProps) {
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
   const providerChannelCounts = useMemo(() => {
@@ -115,12 +117,15 @@ export function IptvProvidersScreen({
 
       <div className="button-row">
         <button type="button" onClick={selectedProvider ? onUpdateProvider : onCreateProvider}>
-          {selectedProvider ? "Update Provider" : "Create Provider"}
+          {selectedProvider ? "Validate & Save" : "Validate & Save"}
+        </button>
+        <button type="button" onClick={onValidateProvider}>
+          Validate Connection
         </button>
         <button type="button" onClick={() => onSelectProvider("")}>Clear</button>
         {selectedProvider && onTestProviderById ? (
           <button type="button" onClick={() => onTestProviderById(selectedProvider.id)}>
-            Test Connection
+            Test Saved Provider
           </button>
         ) : null}
       </div>
@@ -133,33 +138,53 @@ export function IptvProvidersScreen({
         {providers.length === 0 ? (
           <div className="empty-row">No IPTV providers configured yet.</div>
         ) : (
-          providers.map((provider) => (
-            <article key={provider.id} className="provider-card">
-              <div>
-                <strong>{provider.name}</strong>
-                <span>{provider.type.toUpperCase()}</span>
-              </div>
-              <div>
-                <small>Status: {provider.status}</small>
-                <small>Availability: {provider.availabilityStatus}</small>
-                <small>{providerChannelCounts[provider.id] ?? 0} channels</small>
-              </div>
-              <div className="button-row">
-                <button type="button" onClick={() => onSelectProvider(provider.id)}>
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onSetProviderStatus(provider.id, provider.status === "active" ? "inactive" : "active")}
-                >
-                  {provider.status === "active" ? "Disable" : "Enable"}
-                </button>
-                <button type="button" onClick={() => onDeleteProvider(provider.id)}>
-                  Delete
-                </button>
-              </div>
-            </article>
-          ))
+          providers.map((provider) => {
+            const channelCount = providerChannelCounts[provider.id] ?? 0;
+            const isActive = provider.status === "active";
+            return (
+              <article key={provider.id} className="provider-card provider-hero-card">
+                <div className="provider-card-header">
+                  <div>
+                    <strong>{provider.name}</strong>
+                    <span>{provider.type.toUpperCase()}</span>
+                  </div>
+                  <span className={`provider-status-badge ${isActive ? "active" : "inactive"}`}>
+                    {isActive ? "Active" : "Inactive"}
+                  </span>
+                </div>
+
+                <div className="provider-card-details">
+                  <div>
+                    <small>Total channels</small>
+                    <strong>{channelCount}</strong>
+                  </div>
+                  <div>
+                    <small>Status</small>
+                    <strong>{provider.status}</strong>
+                  </div>
+                  <div>
+                    <small>Availability</small>
+                    <strong>{provider.availabilityStatus}</strong>
+                  </div>
+                </div>
+
+                <div className="provider-card-actions">
+                  <button type="button" onClick={() => onSelectProvider(provider.id)}>
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSetProviderStatus(provider.id, isActive ? "inactive" : "active")}
+                  >
+                    {isActive ? "Deactivate" : "Activate"}
+                  </button>
+                  <button type="button" onClick={() => onDeleteProvider(provider.id)}>
+                    Delete
+                  </button>
+                </div>
+              </article>
+            );
+          })
         )}
       </div>
     </section>

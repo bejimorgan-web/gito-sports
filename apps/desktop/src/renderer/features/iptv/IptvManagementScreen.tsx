@@ -79,9 +79,17 @@ export function IptvManagementScreen({
       return;
     }
 
-    setStatusMessage(selectedProviderId ? "Saving provider..." : "Creating provider...");
+    setStatusMessage("Validating provider connection...");
 
     try {
+      const validationResult = await onTestProvider(providerInput);
+      if (!validationResult.ok) {
+        setStatusMessage(validationResult.message || "Provider validation failed.");
+        return;
+      }
+
+      setStatusMessage(selectedProviderId ? "Saving provider..." : "Creating provider...");
+
       if (selectedProviderId && onUpdateProvider) {
         await onUpdateProvider(selectedProviderId, providerInput);
         setStatusMessage("Provider updated.");
@@ -219,6 +227,7 @@ export function IptvManagementScreen({
           onDeleteProvider={handleDeleteProvider}
           onSetProviderStatus={handleSetProviderStatus}
           onTestProviderById={onTestProviderById}
+          onValidateProvider={handleTestConnection}
         />
 
         <IptvImportScreen

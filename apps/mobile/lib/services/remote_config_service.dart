@@ -15,7 +15,7 @@ class MobileNavigationConfig {
   });
 
   factory MobileNavigationConfig.fromJson(Map<String, dynamic> json) {
-    bool _readEnabled(String key) {
+    bool readEnabled(String key) {
       final value = json[key];
       if (value is bool) {
         return value;
@@ -30,9 +30,9 @@ class MobileNavigationConfig {
     }
 
     return MobileNavigationConfig(
-      liveScores: _readEnabled('liveScores'),
-      sports: _readEnabled('sports'),
-      live: _readEnabled('live'),
+      liveScores: readEnabled('liveScores'),
+      sports: readEnabled('sports'),
+      live: readEnabled('live'),
     );
   }
 

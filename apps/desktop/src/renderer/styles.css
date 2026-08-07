@@ -187,6 +187,93 @@ textarea {
   color: #7c8da0;
 }
 
+.provider-hero-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid #253647;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #111b25 0%, #0b1218 100%);
+}
+
+.provider-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.provider-card-header strong {
+  display: block;
+  color: #edf4ff;
+}
+
+.provider-card-header span {
+  color: #8fa1b3;
+}
+
+.provider-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.provider-status-badge.active {
+  color: #07110c;
+  background: #55d790;
+}
+
+.provider-status-badge.inactive {
+  color: #dce8f3;
+  background: #253647;
+}
+
+.provider-card-details {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.provider-card-details div {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid #22303b;
+  border-radius: 10px;
+  background: rgba(8, 16, 24, 0.7);
+}
+
+.provider-card-details small {
+  color: #8fa1b3;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.provider-card-details strong {
+  color: #edf4ff;
+  font-size: 1rem;
+}
+
+.provider-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.provider-card-actions button {
+  padding: 8px 10px;
+  border: 1px solid #30445a;
+  border-radius: 8px;
+  background: #0d151f;
+  color: #e7edf4;
+  cursor: pointer;
+}
+
 .workspace {
   min-width: 0;
   padding: 32px;
@@ -237,8 +324,10 @@ textarea {
 
 .control-header h2 {
   margin: 0;
-  font-size: 2rem;
+  font-size: 1.25rem;
   letter-spacing: 0;
+  font-weight: 700;
+  color: #edf4ff;
 }
 
 .next-action {
@@ -676,14 +765,18 @@ textarea {
 }
 
 .simplified-priority-strip {
-  grid-template-columns: repeat(3, minmax(160px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.content-type-strip {
+  gap: 10px;
 }
 
 .priority-card {
   display: grid;
-  gap: 8px;
-  min-height: 82px;
-  padding: 14px;
+  gap: 6px;
+  min-height: 72px;
+  padding: 12px 12px;
   border: 1px solid #263543;
   border-radius: 8px;
   background: #101923;
@@ -696,10 +789,13 @@ textarea {
 
 .priority-card span {
   color: #8fa1b3;
+  font-size: 0.8rem;
 }
 
 .priority-card strong {
-  font-size: 1.55rem;
+  font-size: 1rem;
+  line-height: 1.2;
+  color: #ffffff;
 }
 
 .reliability-banner {

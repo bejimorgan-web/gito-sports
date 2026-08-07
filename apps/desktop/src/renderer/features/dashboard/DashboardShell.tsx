@@ -1,20 +1,31 @@
 interface DashboardShellProps {
+  actionableAlertCount: number;
+  backendStatus: "online" | "offline" | "reconnecting";
   failedStreamCount: number;
   liveMatchCount: number;
   pendingApprovalCount: number;
   channelCount: number;
   providerCount: number;
+  systemStatusDetail: string;
+  systemStatusLabel: string;
 }
 
 export function DashboardShell({
+  actionableAlertCount,
+  backendStatus,
   failedStreamCount,
   liveMatchCount,
   pendingApprovalCount,
   channelCount,
-  providerCount
+  providerCount,
+  systemStatusDetail,
+  systemStatusLabel
 }: DashboardShellProps) {
   const metrics = [
     { label: "Live Matches", value: String(liveMatchCount) },
+    { label: "Actionable Alerts", value: String(actionableAlertCount) },
+    { label: "System Status", value: systemStatusLabel, detail: systemStatusDetail },
+    { label: "Backend Status", value: backendStatus === "online" ? "Online" : backendStatus === "reconnecting" ? "Reconnecting" : "Offline" },
     { label: "Pending Approvals", value: String(pendingApprovalCount) },
     { label: "Unassigned Streams", value: String(channelCount) },
     { label: "Failed Streams", value: String(failedStreamCount) },
@@ -33,6 +44,7 @@ export function DashboardShell({
           <article className="metric-panel" key={metric.label}>
             <span>{metric.label}</span>
             <strong>{metric.value}</strong>
+            {metric.detail ? <small>{metric.detail}</small> : null}
           </article>
         ))}
       </div>

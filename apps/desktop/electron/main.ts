@@ -35,7 +35,15 @@ function loadErrorScreen(window: BrowserWindow) {
 }
 
 function sendNavigationSelection(screenKey: string, window: BrowserWindow | null | undefined) {
-  window?.webContents.send("navigate-to-screen", screenKey);
+  if (!window) {
+    return;
+  }
+
+  void window.webContents.executeJavaScript(`
+    window.dispatchEvent(new CustomEvent("gito:navigate", { detail: ${JSON.stringify(screenKey)} }));
+  `).catch((error: unknown) => {
+    console.error("[NAVIGATION EVENT ERROR]", error);
+  });
 }
 
 function buildAppMenu(window: BrowserWindow | null | undefined) {
@@ -64,29 +72,27 @@ function buildAppMenu(window: BrowserWindow | null | undefined) {
         },
         { type: "separator" },
         {
-          label: "Dashboard",
-          click: () => sendNavigationSelection("dashboard", window)
+          label: "Sports",
+          click: () => sendNavigationSelection("sports", window)
+        }
+      ]
+    },
+    {
+      label: "Tools",
+      submenu: [
+        {
+          label: "Live Approvals",
+          click: () => sendNavigationSelection("approvals", window)
         },
         {
           label: "IPTV Management",
           click: () => sendNavigationSelection("iptv", window)
-        },
-        {
-          label: "Broadcast Console",
-          click: () => sendNavigationSelection("matchAssignment", window)
         }
       ]
     },
     {
       label: "Help",
-      submenu: [
-        {
-          label: "About GiTO Live Sports",
-          click: () => {
-            void window?.webContents.executeJavaScript("window.alert('GiTO Live Sports Desktop')");
-          }
-        }
-      ]
+      submenu: []
     }
   ]);
 }
