@@ -352,19 +352,25 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
     [assignment, previewConfirmed, selectedChannel, matchDetailsComplete]
   );
   useEffect(() => {
-    if (!selectedProviderId && selectedChannel?.providerId) {
-      setSelectedProviderId(selectedChannel.providerId);
-    }
-  }, [selectedChannel?.providerId, selectedProviderId]);
-
-  useEffect(() => {
-    if (!selectedProviderId && providers.length > 0) {
-      const preferredProvider = providers.find((provider) => provider.status === "active") ?? providers[0];
-      if (preferredProvider) {
-        setSelectedProviderId(preferredProvider.id);
+    if (!providers.length) {
+      if (selectedProviderId) {
+        setSelectedProviderId("");
       }
+      return;
     }
-  }, [providers, selectedProviderId]);
+
+    if (selectedProviderId && providers.some((provider) => provider.id === selectedProviderId)) {
+      return;
+    }
+
+    const preferredProvider = selectedChannel?.providerId
+      ? providers.find((provider) => provider.id === selectedChannel.providerId)
+      : providers.find((provider) => provider.status === "active") ?? providers[0];
+
+    if (preferredProvider) {
+      setSelectedProviderId(preferredProvider.id);
+    }
+  }, [providers, selectedChannel?.providerId, selectedProviderId]);
 
   useEffect(() => {
     setSelectedGroup("");
@@ -430,15 +436,27 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
   }, [providerDiagnostics, selectedChannel, selectedContentType, selectedProvider, selectedGroup, selectedGroupChannels]);
 
   useEffect(() => {
-    const firstChannel = filteredSelectedGroupChannels[0];
-    if (!firstChannel) {
+    if (!filteredSelectedGroupChannels.length) {
       return;
     }
 
-    if (!selectedChannel || selectedChannel.id !== firstChannel.id) {
-      onSelectChannel(firstChannel);
+    const firstChannel = filteredSelectedGroupChannels[0];
+    const selectedChannelIsVisible = Boolean(selectedChannel && filteredSelectedGroupChannels.some((channel) => channel.id === selectedChannel.id));
+    const providerSelectionChanged = selectedProviderId && selectedChannel?.providerId !== selectedProviderId;
+
+    if (!selectedChannel) {
+      if (firstChannel) {
+        onSelectChannel(firstChannel);
+      }
+      return;
     }
-  }, [filteredSelectedGroupChannels, onSelectChannel, selectedChannel]);
+
+    if (!selectedChannelIsVisible || providerSelectionChanged) {
+      if (firstChannel) {
+        onSelectChannel(firstChannel);
+      }
+    }
+  }, [filteredSelectedGroupChannels, onSelectChannel, selectedChannel, selectedProviderId]);
 
   useEffect(() => {
     if (selectedCompetition && selectedSportId && selectedCompetition.sportId !== selectedSportId) {
