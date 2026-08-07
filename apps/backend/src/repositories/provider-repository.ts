@@ -307,9 +307,15 @@ export function syncProviderChannels(providerId: string, channels: ParsedChannel
   const database = getDatabase();
   const timestamp = now();
 
-  const provider = database
-    .prepare("SELECT sync_mode FROM providers WHERE id = ? AND deleted = 0")
-    .get(providerId) as { sync_mode?: ProviderSyncMode } | undefined;
+  const providerRow = database
+    .prepare("SELECT id, sync_mode FROM providers WHERE id = ? AND deleted = 0")
+    .get(providerId) as { id: string; sync_mode?: ProviderSyncMode } | undefined;
+
+  if (!providerRow) {
+    return [];
+  }
+
+  const provider = providerRow;
 
   const providerMode: ProviderSyncMode = provider?.sync_mode ?? "partial";
 

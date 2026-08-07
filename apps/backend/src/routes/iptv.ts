@@ -153,7 +153,23 @@ iptvRouter.post("/providers", async (request, response) => {
 
   const provider = IPTVService.createProvider(body);
   if (provider) {
-    await persistValidatedProvider(provider.id, validation, body);
+    try {
+      await persistValidatedProvider(provider.id, validation, body);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/foreign key|constraint/i.test(message)) {
+        IPTVService.setProviderStatus(provider.id, "failed");
+        response.status(201).json({
+          data: IPTVService.getProvider(provider.id) ?? provider,
+          meta: {
+            warning: "provider_saved_without_channels",
+            message: "The provider record was saved, but the channel import could not be completed because the database rejected the channel link."
+          }
+        });
+        return;
+      }
+      throw error;
+    }
   }
 
   response.status(201).json({ data: provider ? IPTVService.getProvider(provider.id) ?? provider : provider });
@@ -188,7 +204,23 @@ iptvRouter.put("/providers/:providerId", async (request, response) => {
     return;
   }
 
-  await persistValidatedProvider(updated.id, validation, updated);
+  try {
+    await persistValidatedProvider(updated.id, validation, updated);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/foreign key|constraint/i.test(message)) {
+      IPTVService.setProviderStatus(updated.id, "failed");
+      response.json({
+        data: IPTVService.getProvider(updated.id) ?? updated,
+        meta: {
+          warning: "provider_saved_without_channels",
+          message: "The provider was updated, but the channel import could not be completed because the database rejected the channel link."
+        }
+      });
+      return;
+    }
+    throw error;
+  }
 
   response.json({ data: IPTVService.getProvider(updated.id) ?? updated });
 });
