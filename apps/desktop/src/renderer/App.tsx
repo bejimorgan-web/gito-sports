@@ -381,16 +381,7 @@ export function App() {
       return;
     }
 
-    const provider = await apiClient.createProvider(input);
-
-    if (input.type === "m3u" || input.type === "xtream") {
-      try {
-        await apiClient.testProviderById(provider.id);
-      } catch {
-        // Let the provider remain pending/failed until the operator fixes credentials.
-      }
-    }
-
+    await apiClient.createProvider(input);
     await refreshOperations("full");
   }, [backendStatus, refreshOperations]);
 
@@ -398,15 +389,6 @@ export function App() {
     if (backendStatus !== "online") return;
 
     await apiClient.updateProvider(providerId, input);
-
-    if (input.type === "m3u" || input.type === "xtream") {
-      try {
-        await apiClient.testProviderById(providerId);
-      } catch {
-        // Keep the updated provider flow intact if test fails.
-      }
-    }
-
     await refreshOperations("full");
   }, [backendStatus, refreshOperations]);
 

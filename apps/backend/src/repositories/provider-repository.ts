@@ -602,7 +602,7 @@ export function listProviderChannels(mode: "active" | "includeInactive" | "debug
   } else if (mode === "includeInactive") {
     statusFilter = "c.status != 'archived'";
   } else {
-    statusFilter = "c.status = 'active'";
+    statusFilter = "c.status = 'active' AND p.status = 'active'";
   }
 
   const sql = `SELECT c.* FROM channels c JOIN providers p ON p.id = c.provider_id
@@ -673,6 +673,7 @@ export function listChannelCategories(providerId?: string): string[] {
              AND c.group_name IS NOT NULL
              AND c.status != 'archived'
              AND p.deleted = 0
+             AND p.status = 'active'
            ORDER BY c.group_name`
         )
         .all(providerId) as { group_name: string }[])
@@ -683,6 +684,7 @@ export function listChannelCategories(providerId?: string): string[] {
            WHERE c.group_name IS NOT NULL
              AND c.status != 'archived'
              AND p.deleted = 0
+             AND p.status = 'active'
            ORDER BY c.group_name`
         )
         .all() as { group_name: string }[]);

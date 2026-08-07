@@ -359,16 +359,23 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
       return;
     }
 
-    if (selectedProviderId && providers.some((provider) => provider.id === selectedProviderId)) {
+    const selectedProvider = selectedProviderId
+      ? providers.find((provider) => provider.id === selectedProviderId)
+      : undefined;
+    const selectedProviderIsUsable = Boolean(selectedProvider && selectedProvider.status === "active");
+
+    if (selectedProviderIsUsable) {
       return;
     }
 
     const preferredProvider = selectedChannel?.providerId
-      ? providers.find((provider) => provider.id === selectedChannel.providerId)
-      : providers.find((provider) => provider.status === "active") ?? providers[0];
+      ? providers.find((provider) => provider.id === selectedChannel.providerId && provider.status === "active")
+      : providers.find((provider) => provider.status === "active");
 
-    if (preferredProvider) {
-      setSelectedProviderId(preferredProvider.id);
+    const fallbackProvider = preferredProvider ?? providers[0];
+
+    if (fallbackProvider) {
+      setSelectedProviderId(fallbackProvider.id);
     }
   }, [providers, selectedChannel?.providerId, selectedProviderId]);
 
@@ -885,17 +892,18 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
 
       {!liveMode ? <div className="broadcast-grid">
         <section className="preview-core">
-          <div className="preview-top-layout">
-            <div className="preview-player-card">
-              <StreamPreviewPanel
-                channel={selectedChannel}
-                onHealthChange={onReportHealth}
-                onPreviewReady={onPreviewReady}
-                compact
-              />
-            </div>
+          <div key={`provider-${selectedProviderId || "none"}`} className="provider-switch-surface">
+            <div className="preview-top-layout">
+              <div className="preview-player-card">
+                <StreamPreviewPanel
+                  channel={selectedChannel}
+                  onHealthChange={onReportHealth}
+                  onPreviewReady={onPreviewReady}
+                  compact
+                />
+              </div>
 
-            <aside className="preview-meta-panel console-panel">
+              <aside className="preview-meta-panel console-panel">
               <div className="panel-heading panel-heading-accent">
                 <div>
                   <h3>Channel Guide</h3>
@@ -934,12 +942,12 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
             </aside>
           </div>
 
-          <div className="channel-group-layout">
-            <aside className="group-column console-panel">
-              <div className="panel-heading">
-                <h4>Channel Groups</h4>
-                <span>{selectedProvider?.name ?? "Active provider"}</span>
-              </div>
+            <div className="channel-group-layout">
+              <aside className="group-column console-panel">
+                <div className="panel-heading">
+                  <h4>Channel Groups</h4>
+                  <span>{selectedProvider?.name ?? "Active provider"}</span>
+                </div>
               <input
                 type="text"
                 placeholder="Search groups..."
@@ -995,24 +1003,25 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
                   boxSizing: "border-box"
                 }}
               />
-              <div className="compact-channel-list">
-                {filteredSelectedGroupChannels.map((channel) => (
-                  <button
-                    className={channel.id === selectedChannel?.id ? "selected" : ""}
-                    key={channel.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedProviderId(channel.providerId);
-                      onSelectChannel(channel);
-                    }}
-                  >
-                    <strong>{channel.name}</strong>
-                    <span>{channel.groupName ?? "Uncategorized"}</span>
-                  </button>
-                ))}
-                {filteredSelectedGroupChannels.length === 0 ? <div className="empty-row">{channelSearchQuery.trim() !== "" ? "No matching channels found." : "No channels in this group."}</div> : null}
-              </div>
-            </aside>
+                <div className="compact-channel-list">
+                  {filteredSelectedGroupChannels.map((channel) => (
+                    <button
+                      className={channel.id === selectedChannel?.id ? "selected" : ""}
+                      key={channel.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedProviderId(channel.providerId);
+                        onSelectChannel(channel);
+                      }}
+                    >
+                      <strong>{channel.name}</strong>
+                      <span>{channel.groupName ?? "Uncategorized"}</span>
+                    </button>
+                  ))}
+                  {filteredSelectedGroupChannels.length === 0 ? <div className="empty-row">{channelSearchQuery.trim() !== "" ? "No matching channels found." : "No channels in this group."}</div> : null}
+                </div>
+              </aside>
+            </div>
           </div>
 
           <div className="match-control-layout">
