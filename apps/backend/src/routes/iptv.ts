@@ -2,10 +2,11 @@ import { Router } from "express";
 import type { CreateProviderRequest } from "@gito/shared";
 import { IPTVService } from "../services/iptv-service.js";
 import { parseM3uPlaylist, M3uParseError } from "../services/m3u-parser.js";
-import { fetchXtreamChannels, testXtreamConnection, XtreamParseError } from "../services/xtream-codes.js";
+import { fetchXtreamChannels, fetchWithTimeout, testXtreamConnection, XtreamParseError } from "../services/xtream-codes.js";
 import { validateHttpStreamUrl } from "../services/url-validation.js";
 import { logChannelSyncTrace } from "../services/iptv-trace.js";
 import { detectProviderType } from "../services/provider-type-detector.js";
+import { IptvOperationManager, type IptvOperationType } from "../services/iptv-operation-manager.js";
 
 type ChannelListMode = "active" | "includeInactive" | "debug" | "raw";
 
@@ -28,7 +29,7 @@ async function validateProviderConnection(input: {
   const resolvedType = type && type !== "manual" ? type : "manual";
 
   try {
-    const testResponse = await fetch(baseUrl, { method: "GET" });
+    const testResponse = await fetchWithTimeout(baseUrl, { method: "GET" });
 
     if (!testResponse.ok) {
       return {
@@ -52,23 +53,28 @@ async function validateProviderConnection(input: {
         return {
           ...testResult,
           detectedType: inferredType,
-          channels: [] as any[]
+          channels: [] as any[],
+          stages: [
+            { name: "server_reachable", ok: true, message: "Server reachable." },
+            { name: "credentials", ok: false, message: testResult.message }
+          ]
         };
       }
 
-      const invalidEntries: XtreamParseError[] = [];
-      const channels = await fetchXtreamChannels(baseUrl, username, password, (entry) => invalidEntries.push(entry));
-
       return {
-        ok: channels.length > 0,
+        ok: true,
         statusCode: testResult.statusCode,
-        message: channels.length > 0 ? "Xtream provider connection is valid." : "No channels were returned for this Xtream account.",
+        message: "Xtream server reachable and credentials accepted. Sync channels separately.",
         detectedType: inferredType,
-        channels,
-        channelsParsed: channels.length,
-        channelsRejected: invalidEntries.length,
-        categories: Array.from(new Set(channels.map((channel) => channel.groupName).filter(Boolean) as string[])),
-        rejectedChannels: invalidEntries.slice(0, 10)
+        channels: [] as any[],
+        channelsParsed: 0,
+        channelsRejected: 0,
+        categories: [],
+        stages: [
+          { name: "server_reachable", ok: true, message: "Server reachable." },
+          { name: "credentials", ok: true, message: "Credentials accepted." },
+          { name: "account_metadata", ok: true, message: "Account authentication completed." }
+        ]
       };
     }
 
@@ -278,6 +284,8 @@ iptvRouter.get("/channels", (request, response) => {
   const mode = typeof request.query.mode === "string" ? request.query.mode : undefined;
   const debug = request.query.debug === "true";
   const includeInactive = request.query.includeInactive === "true";
+  const page = typeof request.query.page === "string" ? Number(request.query.page) : undefined;
+  const pageSize = typeof request.query.pageSize === "string" ? Number(request.query.pageSize) : undefined;
 
   const opts: { providerId?: string; q?: string; category?: string } = {};
   if (providerId) opts.providerId = providerId;
@@ -300,7 +308,9 @@ iptvRouter.get("/channels", (request, response) => {
   }
 
   response.json({
-    data: IPTVService.listChannels(opts, channelMode)
+    data: page !== undefined || pageSize !== undefined
+      ? IPTVService.listChannelsPage(opts, page ?? 1, pageSize ?? 100, channelMode === "debug" ? "active" : channelMode)
+      : IPTVService.listChannels(opts, channelMode)
   });
 });
 
@@ -337,6 +347,102 @@ iptvRouter.get("/categories", (request, response) => {
   response.json({
     data: IPTVService.listCategories(providerId)
   });
+});
+
+iptvRouter.post("/operations", async (request, response) => {
+  const body = request.body as {
+    type?: IptvOperationType;
+    providerId?: string;
+    playlist?: string;
+    baseUrl?: string;
+    username?: string;
+    password?: string;
+  };
+  const type = body.type;
+  if (!type || !["xtream_validation", "m3u_validation", "m3u_import", "xtream_channel_sync"].includes(type)) {
+    response.status(400).json({ error: "invalid_iptv_operation_type" });
+    return;
+  }
+
+  if (type === "m3u_import" && !body.playlist) {
+    response.status(400).json({ error: "playlist_required" });
+    return;
+  }
+  if (type === "m3u_validation" && !body.playlist && !body.providerId) {
+    response.status(400).json({ error: "playlist_or_provider_id_required" });
+    return;
+  }
+  if (type === "xtream_channel_sync" && !body.providerId) {
+    response.status(400).json({ error: "provider_id_required" });
+    return;
+  }
+
+  const operation = IptvOperationManager.start(type, async (state, report) => {
+    if (type === "m3u_validation" || type === "m3u_import") {
+      report({ currentStage: "parsing", currentMessage: "Parsing playlist." });
+      let playlist = body.playlist ?? "";
+      if (!playlist && body.providerId) {
+        const provider = IPTVService.getProvider(body.providerId);
+        if (!provider?.baseUrl) throw new Error("provider_not_found");
+        const playlistResponse = await fetchWithTimeout(provider.baseUrl);
+        if (!playlistResponse.ok) throw new Error(`Provider returned HTTP ${playlistResponse.status}.`);
+        playlist = await playlistResponse.text();
+      }
+      const invalidEntries: M3uParseError[] = [];
+      const parsed = parseM3uPlaylist(playlist, (entry) => invalidEntries.push(entry));
+      const valid = parsed.filter((channel) => !validateHttpStreamUrl(channel.url));
+      report({ total: parsed.length, processed: parsed.length, succeeded: valid.length, failed: invalidEntries.length + parsed.length - valid.length, currentStage: type === "m3u_import" ? "saving_channels" : "finalizing", currentMessage: `${parsed.length} playlist entries parsed.` });
+      if (type === "m3u_import" && valid.length > 0 && !state.cancelled) {
+        IPTVService.syncProviderChannels(body.providerId!, valid);
+        report({ processed: valid.length, succeeded: valid.length, currentMessage: `${valid.length} valid channels saved.` });
+      }
+      return;
+    }
+
+    const provider = body.username && body.password && body.baseUrl
+      ? { credential_username: body.username, credential_password: body.password, server_url: body.baseUrl, type: "xtream" }
+      : IPTVService.getProviderCredentials(body.providerId!);
+    if (!provider) throw new Error("provider_not_found");
+    const username = (provider as any).credential_username ?? (provider as any).username;
+    const password = (provider as any).credential_password ?? (provider as any).password;
+    const serverUrl = (provider as any).server_url ?? (provider as any).base_url ?? (provider as any).baseUrl;
+    if (!username || !password || !serverUrl) throw new Error("stored_xtream_credentials_required");
+    report({ currentStage: "authenticating", currentMessage: "Checking Xtream credentials." });
+    const connection = await testXtreamConnection(serverUrl, username, password);
+    if (!connection.ok) throw new Error(connection.message);
+    if (type === "xtream_validation") {
+      report({ currentStage: "completed", currentMessage: "Server reachable and credentials accepted." });
+      return;
+    }
+    report({ currentStage: "discovering_channels", currentMessage: "Loading channel inventory." });
+    const invalidEntries: XtreamParseError[] = [];
+    const parsed = await fetchXtreamChannels(serverUrl, username, password, (entry) => invalidEntries.push(entry));
+    const valid = parsed.filter((channel) => !validateHttpStreamUrl(channel.url));
+    report({ total: parsed.length, processed: parsed.length, succeeded: valid.length, failed: invalidEntries.length, currentStage: "saving_channels", currentMessage: `${parsed.length} channels discovered.` });
+    if (!state.cancelled && valid.length > 0) {
+      IPTVService.syncProviderChannels(body.providerId!, valid);
+      report({ currentMessage: `${valid.length} channels saved.` });
+    }
+  });
+
+  response.status(202).json({ data: operation });
+});
+
+iptvRouter.get("/operations/:operationId", (request, response) => {
+  const operation = IptvOperationManager.get(request.params.operationId);
+  if (!operation) {
+    response.status(404).json({ error: "iptv_operation_not_found" });
+    return;
+  }
+  response.json({ data: operation });
+});
+
+iptvRouter.post("/operations/:operationId/cancel", (request, response) => {
+  if (!IptvOperationManager.cancel(request.params.operationId)) {
+    response.status(409).json({ error: "iptv_operation_not_cancellable" });
+    return;
+  }
+  response.json({ data: IptvOperationManager.get(request.params.operationId) });
 });
 
 iptvRouter.post("/providers/test", async (request: any, response: any) => {

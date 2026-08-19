@@ -120,7 +120,7 @@ function insertAdminUserIfAllowed(database: any, email: string, password: string
  *   }
  * }
  */
-adminRouter.put("/config/mobile", (request, response) => {
+adminRouter.put("/config/mobile", protectedRoute, (request, response) => {
   try {
     const body = request.body as any;
     const navigationUpdate = body?.navigation;

@@ -2,6 +2,9 @@ import type {
   Channel,
   ChannelDebug,
   ChannelListMode,
+  IptvOperation,
+  IptvOperationType,
+  PaginatedChannels,
   Competition,
   CreateCompetitionRequest,
   CreateCountryRequest,
@@ -180,21 +183,34 @@ export const apiClient = {
     return request(`/iptv/providers/${providerId}/test`, { method: "POST" });
   },
   ingestM3u(providerId: string, playlist: string) {
-    return request<{ channelsCreated: number; categories: string[] }>(
-      `/iptv/providers/${providerId}/m3u`,
+    return request<IptvOperation>(
+      "/iptv/operations",
       {
         method: "POST",
-        body: JSON.stringify({ playlist })
+        body: JSON.stringify({ type: "m3u_import", providerId, playlist })
       }
     );
   },
   syncXtream(providerId: string) {
-    return request<{ channelsCreated: number; categories: string[] }>(
-      `/iptv/providers/${providerId}/xtream/sync`,
+    return request<IptvOperation>(
+      "/iptv/operations",
       {
-        method: "POST"
+        method: "POST",
+        body: JSON.stringify({ type: "xtream_channel_sync", providerId })
       }
     );
+  },
+  startIptvOperation(type: IptvOperationType, input: { providerId?: string; playlist?: string; baseUrl?: string; username?: string; password?: string } = {}) {
+    return request<IptvOperation>("/iptv/operations", {
+      method: "POST",
+      body: JSON.stringify({ type, ...input })
+    });
+  },
+  getIptvOperation(operationId: string) {
+    return request<IptvOperation>(`/iptv/operations/${encodeURIComponent(operationId)}`);
+  },
+  cancelIptvOperation(operationId: string) {
+    return request<IptvOperation>(`/iptv/operations/${encodeURIComponent(operationId)}/cancel`, { method: "POST" });
   },
   listChannels(providerId?: string, opts?: { q?: string; category?: string; includeInactive?: boolean; mode?: ChannelListMode }) {
     const params = new URLSearchParams();
@@ -205,6 +221,17 @@ export const apiClient = {
     if (!opts?.mode && opts?.includeInactive) params.set("includeInactive", "true");
     const query = params.toString() ? `?${params.toString()}` : "";
     return request<Channel[] | ChannelDebug[]>(`/iptv/channels${query}`);
+  },
+  listChannelPage(providerId?: string, opts?: { q?: string; category?: string; includeInactive?: boolean; mode?: ChannelListMode; page?: number; pageSize?: number }) {
+    const params = new URLSearchParams();
+    if (providerId) params.set("providerId", providerId);
+    if (opts?.q) params.set("q", opts.q);
+    if (opts?.category) params.set("category", opts.category);
+    if (opts?.mode) params.set("mode", opts.mode);
+    if (!opts?.mode && opts?.includeInactive) params.set("includeInactive", "true");
+    params.set("page", String(opts?.page ?? 1));
+    params.set("pageSize", String(opts?.pageSize ?? 100));
+    return request<PaginatedChannels<Channel>>(`/iptv/channels?${params.toString()}`);
   },
   getProviderDiagnostics(providerId: string) {
     return request<ProviderChannelDiagnostics>(`/iptv/providers/${encodeURIComponent(providerId)}/diagnostics`);
@@ -751,48 +778,10 @@ export const apiClient = {
 
     return body;
   },
-  async updateMobileFeatures(navigation: { liveScores?: boolean; sports?: boolean; live?: boolean }) {
-    let response: Response;
-
-    try {
-      response = await fetch(`${API_BASE_URL}/mobile/features/update`, {
-        method: "POST",
-        cache: "no-store",
-        headers: {
-          "content-type": "application/json"
-        },
-        body: JSON.stringify({ navigation })
-      });
-    } catch (fetchError) {
-      const message = fetchError instanceof Error ? fetchError.message : String(fetchError);
-      throw new Error(`Network request to ${API_BASE_URL}/mobile/features/update POST failed: ${message}`);
-    }
-
-    if (!response.ok) {
-      let message = `Request failed with status ${response.status}`;
-
-      try {
-        const errorBody = (await response.json()) as { message?: string; error?: string };
-        message = errorBody.message ?? errorBody.error ?? message;
-      } catch {
-        // Keep the status message when the backend cannot return JSON.
-      }
-
-      throw new Error(message);
-    }
-
-    const body = (await response.json()) as {
-      data: {
-        navigation: {
-          liveScores: { enabled: boolean; message: string | null };
-          sports: { enabled: boolean; message: string | null };
-          live: { enabled: boolean; message: string | null };
-        };
-      };
-      timestamp: string;
-    };
-
-    return body;
+  async updateMobileFeatures(navigation: { liveScores?: boolean; sports?: boolean; live?: boolean }, accessToken: string) {
+    const updates = Object.entries(navigation).filter((entry): entry is ["liveScores" | "sports" | "live", boolean] => typeof entry[1] === "boolean");
+    await Promise.all(updates.map(([key, enabled]) => this.updateMobileFeature(`navigation.${key}`, enabled, null, accessToken)));
+    return this.getMobileFeatures();
   },
   updateMobileFeature(featureKey: string, enabled: boolean, message: string | null, accessToken: string) {
     return request<{ featureKey: string; enabled: boolean; message: string | null }>(

@@ -6,6 +6,40 @@ export interface ProviderConnectionTest {
   ok: boolean;
   statusCode?: number;
   message: string;
+  detectedType?: ProviderType;
+  channelsAvailable?: number;
+  categories?: string[];
+  stages?: Array<{ name: string; ok: boolean; message: string }>;
+}
+
+export type IptvOperationType = "xtream_validation" | "m3u_validation" | "m3u_import" | "xtream_channel_sync";
+export type IptvOperationStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+
+export interface IptvOperation {
+  id: string;
+  type: IptvOperationType;
+  status: IptvOperationStatus;
+  startedAt: string;
+  completedAt?: string;
+  total?: number;
+  processed: number;
+  succeeded: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  currentStage: string;
+  currentMessage: string;
+  error?: string;
+  cancelled: boolean;
+  createdBy?: string;
+}
+
+export interface PaginatedChannels<T = Channel> {
+  items: T[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
 }
 
 export interface ParsedChannel {

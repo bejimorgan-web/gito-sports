@@ -83,6 +83,9 @@ function renderScreen(
     testProvider: Parameters<typeof IptvManagementScreen>[0]["onTestProvider"];
     testProviderById: (providerId: string) => Promise<any>;
     setProviderStatus: (providerId: string, status: string) => Promise<void>;
+    startIptvOperation: typeof apiClient.startIptvOperation;
+    getIptvOperation: typeof apiClient.getIptvOperation;
+    cancelIptvOperation: typeof apiClient.cancelIptvOperation;
     openMatch: (matchId?: string) => void;
   }
 ) {
@@ -100,6 +103,9 @@ function renderScreen(
           onTestProvider={actions.testProvider}
           onTestProviderById={actions.testProviderById}
           onSetProviderStatus={actions.setProviderStatus}
+          onStartIptvOperation={actions.startIptvOperation}
+          onGetIptvOperation={actions.getIptvOperation}
+          onCancelIptvOperation={actions.cancelIptvOperation}
         />
       );
     case "matchAssignment":
@@ -264,7 +270,6 @@ export function App() {
 
   const clearPreviewState = useCallback(() => {
     setSelectedChannel(undefined);
-    setPreviewedChannelId(undefined);
   }, []);
 
   function applyResolvedState<T>(
@@ -329,17 +334,18 @@ export function App() {
 
       const [providerData, channelData, liveData] = await Promise.all([
         apiClient.listProviders(),
-        apiClient.listChannels(undefined, { includeInactive: true }),
+        apiClient.listChannelPage(undefined, { includeInactive: true, page: 1, pageSize: 100 }),
         apiClient.listLiveMatches()
       ]);
 
       setBackendStatus("online");
       applyResolvedState("iptv:providers", providerData, setProviders, "api-refresh");
-      applyResolvedState("iptv:channels", channelData, setChannels, "api-refresh");
+      const channelPage = Array.isArray(channelData) ? channelData : channelData.items;
+      applyResolvedState("iptv:channels", channelPage, setChannels, "api-refresh");
       applyResolvedState("live:matches", liveData, setLiveMatches, "api-refresh");
 
       const currentSelectedChannel = selectedChannelRef.current;
-      if (!isSelectedChannelStillValid(currentSelectedChannel, channelData, providerData)) {
+      if (!isSelectedChannelStillValid(currentSelectedChannel, channelPage, providerData)) {
         clearPreviewState();
       }
     } catch {
@@ -391,10 +397,8 @@ export function App() {
     if (backendStatus !== "online") {
       return;
     }
-
     const provider = await apiClient.createProvider(input);
     setPreferredProviderId(provider.id);
-    setChannels([]);
     setProviders([]);
     await refreshOperations("full");
     await new Promise((resolve) => window.setTimeout(resolve, 150));
@@ -635,15 +639,15 @@ export function App() {
     setAssignment((current) => (current && current.channel.id !== channel.id ? undefined : current));
   }, []);
 
-const testProviderById = useCallback(async (providerId: string) => {
-      if (backendStatus !== "online") {
-        throw new Error("backend_offline");
-      }
+  const testProviderById = useCallback(async (providerId: string) => {
+    if (backendStatus !== "online") {
+      throw new Error("backend_offline");
+    }
 
-      const result = await apiClient.testProviderById(providerId);
-      await refreshOperations("full");
-      return result;
-    }, [backendStatus, refreshOperations]);
+    const result = await apiClient.testProviderById(providerId);
+    await refreshOperations("full");
+    return result;
+  }, [backendStatus, refreshOperations]);
 
     const clearAssignment = useCallback(() => {
     setAssignment(undefined);
@@ -670,13 +674,16 @@ const testProviderById = useCallback(async (providerId: string) => {
         setChannelCategory,
         setChannelProviderFilter,
         setChannelContentType,
-          openMatch: (matchId?: string) => {
-            setSelectedMatchId(matchId);
-            setActiveScreen("matches");
-          },
+        openMatch: (matchId?: string) => {
+          setSelectedMatchId(matchId);
+          setActiveScreen("matches");
+        },
         syncXtream,
         testProvider: apiClient.testProvider,
-        testProviderById
+        testProviderById,
+        startIptvOperation: apiClient.startIptvOperation,
+        getIptvOperation: apiClient.getIptvOperation,
+        cancelIptvOperation: apiClient.cancelIptvOperation
       }),
       [
         approveStream,
@@ -695,7 +702,7 @@ const testProviderById = useCallback(async (providerId: string) => {
         setChannelCategory,
         setChannelProviderFilter,
         setChannelContentType,
-          setSelectedMatchId,
+        setSelectedMatchId,
         syncXtream,
         setProviderStatus,
         testProviderById
@@ -750,6 +757,7 @@ const testProviderById = useCallback(async (providerId: string) => {
       onNavigate={setActiveScreen}
       activeProvider={selectedChannel ? providers.find((p) => p.id === selectedChannel.providerId) : undefined}
       currentEmail={currentEmail}
+      apiBaseUrl={API_BASE_URL}
       onLogout={handleLogout}
     >
       {renderScreen(

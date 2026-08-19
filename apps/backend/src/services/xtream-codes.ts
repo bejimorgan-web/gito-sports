@@ -41,6 +41,16 @@ interface XtreamStream {
   category_id?: string;
 }
 
+export async function fetchWithTimeout(input: string | URL, init: RequestInit = {}, timeoutMs = 15_000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function buildUrl(baseUrl: string, params: Record<string, string>) {
   const normalizedBase = baseUrl.trim().replace(/\/$/, "");
   const candidateBase = normalizedBase.endsWith("/player_api.php") || normalizedBase.endsWith("/get.php") || normalizedBase.endsWith("/api.php")
@@ -62,7 +72,7 @@ export async function testXtreamConnection(
     const endpointCandidates = buildXtreamEndpointCandidates(baseUrl);
     const responses = await Promise.allSettled(
       endpointCandidates.map((candidate) =>
-        fetch(
+        fetchWithTimeout(
           buildUrl(candidate, {
             username,
             password
@@ -113,7 +123,7 @@ export async function fetchXtreamChannels(
   const endpointCandidates = buildXtreamEndpointCandidates(baseUrl);
   const categoryResponses = await Promise.allSettled(
     endpointCandidates.map((candidate) =>
-      fetch(
+      fetchWithTimeout(
         buildUrl(candidate, {
           username,
           password,
@@ -125,7 +135,7 @@ export async function fetchXtreamChannels(
 
   const streamsResponses = await Promise.allSettled(
     endpointCandidates.map((candidate) =>
-      fetch(
+      fetchWithTimeout(
         buildUrl(candidate, {
           username,
           password,

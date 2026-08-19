@@ -35,6 +35,7 @@ interface IptvProvidersScreenProps {
   onSetProviderStatus: (providerId: string, status: string) => Promise<void>;
   onTestProviderById: ((providerId: string) => Promise<any>) | undefined;
   onValidateProvider?: () => Promise<void>;
+  providerAction?: "idle" | "validating" | "saving";
 }
 
 export function IptvProvidersScreen({
@@ -58,7 +59,8 @@ export function IptvProvidersScreen({
   onDeleteProvider,
   onSetProviderStatus,
   onTestProviderById,
-  onValidateProvider
+  onValidateProvider,
+  providerAction = "idle"
 }: IptvProvidersScreenProps) {
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
   const activeProviders = useMemo(() => providers.filter((provider) => provider.status !== "inactive"), [providers]);
@@ -143,11 +145,11 @@ export function IptvProvidersScreen({
       </div>
 
       <div className="button-row">
-        <button type="button" onClick={selectedProvider ? onUpdateProvider : onCreateProvider}>
-          {selectedProvider ? "Validate & Save" : "Validate & Save"}
+        <button type="button" disabled={providerAction !== "idle"} onClick={selectedProvider ? onUpdateProvider : onCreateProvider}>
+          {providerAction === "saving" ? "Saving…" : providerAction === "validating" ? "Validating…" : "Validate & Save"}
         </button>
-        <button type="button" onClick={onValidateProvider}>
-          Validate Connection
+        <button type="button" disabled={providerAction !== "idle"} onClick={onValidateProvider}>
+          {providerAction === "validating" ? "Validating…" : "Validate Connection"}
         </button>
         <button type="button" onClick={() => onSelectProvider("")}>Clear</button>
         {selectedProvider && onTestProviderById ? (

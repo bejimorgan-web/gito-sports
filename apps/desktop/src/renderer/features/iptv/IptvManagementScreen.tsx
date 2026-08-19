@@ -1,7 +1,8 @@
-﻿import { useState } from "react";
+﻿import { useEffect, useState } from "react";
 
-import type { Channel, CreateProviderRequest, IPTVProvider, ProviderConnectionTest } from "@gito/shared";
+import type { Channel, CreateProviderRequest, IptvOperation, IptvOperationType, IPTVProvider, ProviderConnectionTest } from "@gito/shared";
 import { IptvImportScreen } from "./IptvImportScreen";
+import { IptvOperationProgress } from "./IptvOperationProgress";
 import { IptvProvidersScreen } from "./IptvProvidersScreen";
 
 function getFriendlyErrorMessage(error: unknown) {
@@ -29,6 +30,9 @@ interface IptvManagementScreenProps {
   onTestProvider: (input: CreateProviderRequest) => Promise<ProviderConnectionTest>;
   onTestProviderById?: (providerId: string) => Promise<any>;
   onSetProviderStatus?: (providerId: string, status: string) => Promise<void>;
+  onStartIptvOperation: (type: IptvOperationType, input?: { providerId?: string; playlist?: string; baseUrl?: string; username?: string; password?: string }) => Promise<IptvOperation>;
+  onGetIptvOperation: (operationId: string) => Promise<IptvOperation>;
+  onCancelIptvOperation: (operationId: string) => Promise<IptvOperation>;
 }
 
 export function IptvManagementScreen({
@@ -41,7 +45,10 @@ export function IptvManagementScreen({
   onSyncXtream,
   onTestProvider,
   onTestProviderById,
-  onSetProviderStatus
+  onSetProviderStatus,
+  onStartIptvOperation,
+  onGetIptvOperation,
+  onCancelIptvOperation
 }: IptvManagementScreenProps) {
   const [selectedProviderId, setSelectedProviderId] = useState("");
   const [providerName, setProviderName] = useState("");
@@ -52,6 +59,8 @@ export function IptvManagementScreen({
   const [playlist, setPlaylist] = useState("");
   const [statusMessage, setStatusMessage] = useState("Ready");
   const [importStatus, setImportStatus] = useState("Ready");
+  const [operation, setOperation] = useState<IptvOperation>();
+  const [providerAction, setProviderAction] = useState<"idle" | "validating" | "saving">("idle");
   const providerInput: CreateProviderRequest = {
     name: providerName.trim(),
     baseUrl: baseUrl.trim(),
@@ -59,6 +68,20 @@ export function IptvManagementScreen({
     authType: type === "xtream" ? "basic" : "none",
     ...(type === "xtream" && username ? { username } : {}),
     ...(type === "xtream" && password ? { password } : {})
+  };
+
+  useEffect(() => {
+    if (!operation || operation.status === "completed" || operation.status === "failed" || operation.status === "cancelled") return;
+    const timer = window.setInterval(() => {
+      void onGetIptvOperation(operation.id).then(setOperation).catch(() => undefined);
+    }, 750);
+    return () => window.clearInterval(timer);
+  }, [operation, onGetIptvOperation]);
+
+  const startOperation = async (type: IptvOperationType, input: { providerId?: string; playlist?: string; baseUrl?: string; username?: string; password?: string } = {}) => {
+    const started = await onStartIptvOperation(type, input);
+    setOperation(started);
+    return started;
   };
 
   const handleSelectProvider = (providerId: string) => {
@@ -94,6 +117,7 @@ export function IptvManagementScreen({
     }
 
     setStatusMessage("Validating provider connection...");
+    setProviderAction("validating");
 
     try {
       const validationResult = await onTestProvider(providerInput);
@@ -103,6 +127,7 @@ export function IptvManagementScreen({
       }
 
       setStatusMessage(selectedProviderId ? "Saving provider..." : "Creating provider...");
+      setProviderAction("saving");
 
       if (selectedProviderId && onUpdateProvider) {
         await onUpdateProvider(selectedProviderId, providerInput);
@@ -113,6 +138,8 @@ export function IptvManagementScreen({
       }
     } catch (error) {
       setStatusMessage(getFriendlyErrorMessage(error) || "Provider save failed.");
+    } finally {
+      setProviderAction("idle");
     }
   };
 
@@ -128,9 +155,24 @@ export function IptvManagementScreen({
     }
 
     setStatusMessage("Testing provider connection...");
+    setProviderAction("validating");
 
     try {
-      if (selectedProviderId && onTestProviderById) {
+      if (type === "xtream") {
+        await startOperation("xtream_validation", {
+          ...(selectedProviderId ? { providerId: selectedProviderId } : {}),
+          baseUrl: baseUrl.trim(),
+          username: username.trim(),
+          password
+        });
+        setStatusMessage("Validation started. Follow the progress below.");
+      } else if (type === "m3u") {
+        await startOperation("m3u_validation", {
+          ...(selectedProviderId ? { providerId: selectedProviderId } : {}),
+          ...(playlist.trim() ? { playlist } : {})
+        });
+        setStatusMessage("M3U validation started. No channels will be saved.");
+      } else if (selectedProviderId && onTestProviderById) {
         const result = await onTestProviderById(selectedProviderId);
         setStatusMessage(result?.message ?? "Provider test completed.");
       } else {
@@ -139,6 +181,8 @@ export function IptvManagementScreen({
       }
     } catch (error) {
       setStatusMessage(getFriendlyErrorMessage(error) || "Provider test failed.");
+    } finally {
+      setProviderAction("idle");
     }
   };
 
@@ -156,10 +200,24 @@ export function IptvManagementScreen({
     setImportStatus("Importing M3U playlist...");
 
     try {
-      await onIngestM3u(selectedProviderId, playlist);
-      setImportStatus("Import completed.");
+      await startOperation("m3u_import", { providerId: selectedProviderId, playlist });
+      setImportStatus("Import started. Follow the progress below.");
     } catch (error) {
       setImportStatus(getFriendlyErrorMessage(error) || "Import failed.");
+    }
+  };
+
+  const handleValidateM3u = async () => {
+    if (!selectedProviderId || !playlist.trim()) {
+      setImportStatus("Select a provider and provide an M3U playlist first.");
+      return;
+    }
+
+    try {
+      await startOperation("m3u_validation", { providerId: selectedProviderId, playlist });
+      setImportStatus("M3U validation started. No channels will be saved.");
+    } catch (error) {
+      setImportStatus(getFriendlyErrorMessage(error) || "M3U validation failed.");
     }
   };
 
@@ -172,8 +230,8 @@ export function IptvManagementScreen({
     setImportStatus("Syncing Xtream channels...");
 
     try {
-      await onSyncXtream(selectedProviderId);
-      setImportStatus("Xtream sync completed.");
+      await startOperation("xtream_channel_sync", { providerId: selectedProviderId });
+      setImportStatus("Xtream sync started. Follow the progress below.");
     } catch (error) {
       setImportStatus(getFriendlyErrorMessage(error) || "Xtream sync failed.");
     }
@@ -241,6 +299,7 @@ export function IptvManagementScreen({
           onSetProviderStatus={handleSetProviderStatus}
           onTestProviderById={onTestProviderById}
           onValidateProvider={handleTestConnection}
+          providerAction={providerAction}
         />
 
         <IptvImportScreen
@@ -250,10 +309,13 @@ export function IptvManagementScreen({
           importStatus={importStatus}
           onSelectProvider={handleSelectProvider}
           onChangePlaylist={setPlaylist}
+          onValidateM3u={handleValidateM3u}
           onSyncXtream={handleSyncXtream}
           onImportM3u={handleImportM3u}
         />
       </div>
+
+      {operation ? <IptvOperationProgress operation={operation} onCancel={async () => { await onCancelIptvOperation(operation.id); }} /> : null}
 
       <section className="console-panel">
         <div className="panel-heading">

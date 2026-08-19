@@ -3,6 +3,7 @@ import { EventBus } from "../events/event-bus.js";
 import { IptvProviderService } from "./iptv-provider-service.js";
 import { IptvChannelService } from "./iptv-channel-service.js";
 import type { IptvChannelRow, IptvProviderRow } from "../repositories/iptv-repository.js";
+import { listChannelsPage } from "../repositories/provider-repository.js";
 
 const channelCache = new Map<string, Channel[] | unknown[]>();
 
@@ -84,6 +85,10 @@ export const IPTVService = {
 
   listChannelsDebug(opts?: { providerId?: string; q?: string; category?: string }) {
     return this.getProviderChannels(opts?.providerId, "debug", opts);
+  },
+
+  listChannelsPage(opts?: { providerId?: string; q?: string; category?: string }, page = 1, pageSize = 100, mode: "active" | "includeInactive" | "raw" = "active") {
+    return listChannelsPage(opts, page, pageSize, mode);
   },
 
   getProviderChannelDiagnostics(providerId: string) {

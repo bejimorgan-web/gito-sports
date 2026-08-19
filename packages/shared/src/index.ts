@@ -97,6 +97,10 @@ export type {
 
 export type {
   ProviderConnectionTest,
+  IptvOperation,
+  IptvOperationType,
+  IptvOperationStatus,
+  PaginatedChannels,
   ParsedChannel,
   ProviderIngestionResult,
   MatchAssignmentRequest,

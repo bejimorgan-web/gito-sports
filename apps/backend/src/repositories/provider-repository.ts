@@ -316,6 +316,7 @@ export function syncProviderChannels(providerId: string, channels: ParsedChannel
   }
 
   const provider = providerRow;
+  const persistChannels = database.transaction(() => {
 
   const providerMode: ProviderSyncMode = provider?.sync_mode ?? "partial";
 
@@ -531,6 +532,9 @@ export function syncProviderChannels(providerId: string, channels: ParsedChannel
   });
 
   return results;
+  });
+
+  return persistChannels();
 }
 
 
@@ -618,6 +622,31 @@ export function listChannelsDebug(opts?: { providerId?: string; q?: string; cate
 
 export function listChannels(opts?: { providerId?: string; q?: string; category?: string }): Channel[] {
   return listProviderChannels("active", opts);
+}
+
+export function listChannelsPage(
+  opts?: { providerId?: string; q?: string; category?: string },
+  page = 1,
+  pageSize = 100,
+  mode: "active" | "includeInactive" | "raw" = "active"
+) {
+  const db = getDatabase();
+  const safePage = Math.max(1, Math.floor(page));
+  const safePageSize = Math.min(500, Math.max(1, Math.floor(pageSize)));
+  const { clauses, params } = buildChannelFilterClauses(opts);
+  const baseWhere = clauses.length > 0 ? clauses.join(" AND ") : "1=1";
+  const statusFilter = mode === "raw" ? "1=1" : mode === "includeInactive" ? "c.status != 'archived'" : "c.status = 'active' AND p.status = 'active'";
+  const from = `FROM channels c JOIN providers p ON p.id = c.provider_id WHERE (${baseWhere}) AND ${statusFilter} AND p.deleted = 0`;
+  const totalRow = db.prepare(`SELECT COUNT(*) AS total ${from}`).get(...params) as { total: number };
+  const rows = db.prepare(`SELECT c.* ${from} ORDER BY c.group_name, c.name LIMIT ? OFFSET ?`).all(...params, safePageSize, (safePage - 1) * safePageSize) as ChannelRow[];
+  const total = Number(totalRow?.total ?? 0);
+  return {
+    items: rows.map(mapChannel),
+    page: safePage,
+    pageSize: safePageSize,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / safePageSize))
+  };
 }
 
 export function getProviderChannelDiagnostics(providerId: string) {

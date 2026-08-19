@@ -29,6 +29,7 @@ export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControl
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState("Ready");
   const [toasts, setToasts] = useState<{ id: string; message: string; type: "success" | "error" | "info" }[]>([]);
 
   const pushToast = useCallback((message: string, type: "success" | "error" | "info" = "success") => {
@@ -118,6 +119,7 @@ export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControl
 
   const saveChanges = useCallback(async () => {
     setIsSaving(true);
+    setSaveStatus("Saving mobile configuration…");
 
     try {
       const navigationUpdate = {
@@ -126,10 +128,11 @@ export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControl
         live: features.find((f) => f.key === "navigation.live")?.enabled ?? true
       };
 
-      const response = await apiClient.updateMobileFeatures(navigationUpdate);
+      const response = await apiClient.updateMobileFeatures(navigationUpdate, accessToken);
       console.log("[DESKTOP MOBILE FEATURES SAVED]", response);
 
       pushToast("Mobile navigation feature flags saved successfully.", "success");
+      setSaveStatus("Saved");
 
       // Reload features to ensure we have the latest state from backend
       await loadFeatures();
@@ -137,10 +140,11 @@ export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControl
       const message = saveError instanceof Error ? saveError.message : String(saveError);
       console.error("[DESKTOP MOBILE FEATURES SAVE ERROR]", message);
       pushToast(`Failed to save mobile navigation flags: ${message}`, "error");
+      setSaveStatus("Save failed");
     } finally {
       setIsSaving(false);
     }
-  }, [features, pushToast, loadFeatures]);
+  }, [accessToken, features, pushToast, loadFeatures]);
 
   const hasChanges = useMemo(() => {
     if (features.length !== originalFeatures.length) {
@@ -216,6 +220,7 @@ export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControl
           >
             {isSaving ? "Saving…" : "Save Changes"}
           </button>
+          <span className="status-line"><small>{saveStatus}</small></span>
         </div>
       )}
 

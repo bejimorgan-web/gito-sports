@@ -11,6 +11,7 @@ interface AuthenticatedLayoutProps {
   onNavigate: (key: NavigationKey) => void;
   activeProvider?: IPTVProvider | undefined;
   currentEmail?: string | null;
+  apiBaseUrl: string;
   onLogout?: () => void;
 }
 
@@ -21,6 +22,7 @@ export function AuthenticatedLayout({
   onNavigate,
   activeProvider,
   currentEmail,
+  apiBaseUrl,
   onLogout
 }: AuthenticatedLayoutProps) {
   return (
@@ -50,6 +52,8 @@ export function AuthenticatedLayout({
         <div className="operator-card">
           <span>Signed in as</span>
           <strong>{currentEmail || "Local Operator"}</strong>
+          <small>Backend: {apiBaseUrl.includes("localhost") ? "Local" : "Render"}</small>
+          <small>{apiBaseUrl.replace(/^https?:\/\//, "")}</small>
           {onLogout && (
             <button 
               onClick={onLogout}

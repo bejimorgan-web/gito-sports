@@ -4,6 +4,7 @@ import { Router } from "express";
 import { MatchService } from "../services/match-service.js";
 import { MobileFeatureService, DEFAULT_NAVIGATION_FEATURES, MobileFeatureNavigationRow } from "../services/mobile-feature-service.js";
 import { getDatabase } from "../db/connection.js";
+import { protectedRoute } from "../middleware/protected.js";
 import {
   mobileSports,
   mobileClubs,
@@ -239,7 +240,7 @@ mobileRouter.get("/features/debug", (_request, response) => {
   }
 });
 
-mobileRouter.post("/features/update", (request, response) => {
+mobileRouter.post("/features/update", protectedRoute, (request, response) => {
   try {
     const body = request.body as {
       navigation?: {

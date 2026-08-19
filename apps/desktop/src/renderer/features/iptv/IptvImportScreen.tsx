@@ -7,6 +7,7 @@ interface IptvImportScreenProps {
   importStatus: string;
   onSelectProvider: (providerId: string) => void;
   onChangePlaylist: (value: string) => void;
+  onValidateM3u: () => Promise<void>;
   onSyncXtream: () => Promise<void>;
   onImportM3u: () => Promise<void>;
 }
@@ -18,6 +19,7 @@ export function IptvImportScreen({
   importStatus,
   onSelectProvider,
   onChangePlaylist,
+  onValidateM3u,
   onSyncXtream,
   onImportM3u
 }: IptvImportScreenProps) {
@@ -45,6 +47,9 @@ export function IptvImportScreen({
       <div className="button-row">
         <button type="button" onClick={onSyncXtream} disabled={!selectedProvider || selectedProvider.type !== "xtream"}>
           Sync Xtream
+        </button>
+        <button type="button" onClick={onValidateM3u} disabled={!selectedProvider || selectedProvider.type === "xtream" || !playlist.trim()}>
+          Validate M3U
         </button>
         <button type="button" onClick={onImportM3u} disabled={!selectedProvider || selectedProvider.type === "xtream"}>
           Import M3U
