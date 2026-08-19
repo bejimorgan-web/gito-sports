@@ -187,6 +187,7 @@ CREATE TABLE IF NOT EXISTS teams (
   country_id TEXT,
   name TEXT NOT NULL,
   short_name TEXT,
+  slug TEXT,
   type TEXT NOT NULL DEFAULT 'club',
   logo_url TEXT,
   status TEXT NOT NULL DEFAULT 'active',
@@ -196,6 +197,8 @@ CREATE TABLE IF NOT EXISTS teams (
   FOREIGN KEY (country_id) REFERENCES countries(id)
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_sport_country_slug ON teams(sport_id, country_id, slug);
+
 CREATE TABLE IF NOT EXISTS matches (
   id TEXT PRIMARY KEY,
   competition_id TEXT NOT NULL,
@@ -204,6 +207,8 @@ CREATE TABLE IF NOT EXISTS matches (
   away_team_id TEXT NOT NULL,
   starts_at TEXT NOT NULL,
   venue_name TEXT,
+  external_provider TEXT,
+  external_match_id TEXT,
   status TEXT NOT NULL DEFAULT 'draft' CHECK (
     status IN ('draft', 'scheduled', 'assigned', 'approved', 'published', 'live', 'ended', 'cancelled')
   ),
@@ -214,6 +219,25 @@ CREATE TABLE IF NOT EXISTS matches (
   FOREIGN KEY (home_team_id) REFERENCES teams(id),
   FOREIGN KEY (away_team_id) REFERENCES teams(id)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_matches_external_identity
+  ON matches(external_provider, external_match_id)
+  WHERE external_provider IS NOT NULL AND external_match_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS scheduling_match_links (
+  scheduling_match_id TEXT PRIMARY KEY,
+  match_id TEXT NOT NULL UNIQUE,
+  link_status TEXT NOT NULL DEFAULT 'unresolved' CHECK (link_status IN ('linked', 'ambiguous', 'unresolved', 'rejected')),
+  confidence TEXT NOT NULL CHECK (confidence IN ('high', 'medium', 'low')),
+  linked_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (scheduling_match_id) REFERENCES scheduling_matches(id),
+  FOREIGN KEY (match_id) REFERENCES matches(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduling_match_links_match ON scheduling_match_links(match_id);
+CREATE INDEX IF NOT EXISTS idx_scheduling_match_links_status ON scheduling_match_links(link_status);
 
 -- Phase 3: competition_teams linking table and scheduling matches
 CREATE TABLE IF NOT EXISTS competition_teams (
@@ -226,18 +250,42 @@ CREATE TABLE IF NOT EXISTS competition_teams (
   UNIQUE (competition_id, team_id)
 );
 
+CREATE TABLE IF NOT EXISTS competition_season_teams (
+  id TEXT PRIMARY KEY,
+  competition_id TEXT NOT NULL,
+  season_id TEXT NOT NULL,
+  team_id TEXT NOT NULL,
+  membership_status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (competition_id) REFERENCES competitions(id),
+  FOREIGN KEY (season_id) REFERENCES seasons(id),
+  FOREIGN KEY (team_id) REFERENCES teams(id),
+  UNIQUE (competition_id, season_id, team_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_competition_season_teams_competition ON competition_season_teams(competition_id);
+CREATE INDEX IF NOT EXISTS idx_competition_season_teams_season ON competition_season_teams(season_id);
+CREATE INDEX IF NOT EXISTS idx_competition_season_teams_team ON competition_season_teams(team_id);
+CREATE INDEX IF NOT EXISTS idx_competition_season_teams_competition_season ON competition_season_teams(competition_id, season_id);
+
 CREATE TABLE IF NOT EXISTS scheduling_matches (
   id TEXT PRIMARY KEY,
   competition_id TEXT NOT NULL,
+  season_id TEXT,
   home_team_id TEXT NOT NULL,
   away_team_id TEXT NOT NULL,
   country_id TEXT,
   sport_id TEXT,
   kickoff_time TEXT NOT NULL,
+  venue_name TEXT,
+  external_provider TEXT,
+  external_match_id TEXT,
   status TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled','live','ended')),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (competition_id) REFERENCES competitions(id),
+  FOREIGN KEY (season_id) REFERENCES seasons(id),
   FOREIGN KEY (home_team_id) REFERENCES teams(id),
   FOREIGN KEY (away_team_id) REFERENCES teams(id),
   FOREIGN KEY (country_id) REFERENCES countries(id),

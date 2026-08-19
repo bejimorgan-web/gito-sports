@@ -1,5 +1,35 @@
 import type { ParsedChannel, ProviderConnectionTest } from "@gito/shared";
 
+export function buildXtreamEndpointCandidates(baseUrl: string) {
+  const normalizedBase = baseUrl.trim();
+  if (!normalizedBase) {
+    return [];
+  }
+
+  const trimmed = normalizedBase.replace(/\/$/, "");
+  const candidates = new Set<string>();
+
+  if (!trimmed) {
+    return [];
+  }
+
+  candidates.add(trimmed);
+  candidates.add(`${trimmed}/player_api.php`);
+  candidates.add(`${trimmed}/api.php`);
+  candidates.add(`${trimmed}/get.php`);
+  candidates.add(`${trimmed}/xmltv.php`);
+
+  if (/player_api\.php$/i.test(trimmed)) {
+    candidates.add(trimmed);
+  }
+
+  if (/get\.php$/i.test(trimmed)) {
+    candidates.add(trimmed);
+  }
+
+  return Array.from(candidates);
+}
+
 interface XtreamCategory {
   category_id: string;
   category_name: string;
@@ -12,7 +42,11 @@ interface XtreamStream {
 }
 
 function buildUrl(baseUrl: string, params: Record<string, string>) {
-  const url = new URL("player_api.php", baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`);
+  const normalizedBase = baseUrl.trim().replace(/\/$/, "");
+  const candidateBase = normalizedBase.endsWith("/player_api.php") || normalizedBase.endsWith("/get.php") || normalizedBase.endsWith("/api.php")
+    ? normalizedBase
+    : `${normalizedBase}/player_api.php`;
+  const url = new URL(candidateBase);
 
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
 
@@ -25,17 +59,37 @@ export async function testXtreamConnection(
   password: string
 ): Promise<ProviderConnectionTest> {
   try {
-    const response = await fetch(
-      buildUrl(baseUrl, {
-        username,
-        password
-      })
+    const endpointCandidates = buildXtreamEndpointCandidates(baseUrl);
+    const responses = await Promise.allSettled(
+      endpointCandidates.map((candidate) =>
+        fetch(
+          buildUrl(candidate, {
+            username,
+            password
+          })
+        )
+      )
     );
 
+    const successful = responses.find(
+      (response): response is PromiseFulfilledResult<Response> => response.status === "fulfilled" && response.value.ok
+    );
+
+    if (successful) {
+      return {
+        ok: true,
+        statusCode: successful.value.status,
+        message: "Xtream provider responded."
+      };
+    }
+
+    const lastFailure = responses[responses.length - 1];
+    const fallbackStatus = lastFailure?.status === "fulfilled" ? lastFailure.value.status : undefined;
+
     return {
-      ok: response.ok,
-      statusCode: response.status,
-      message: response.ok ? "Xtream provider responded." : "Xtream provider rejected the request."
+      ok: false,
+      statusCode: fallbackStatus,
+      message: "Xtream provider rejected the request."
     };
   } catch (error) {
     return {
@@ -56,27 +110,54 @@ export async function fetchXtreamChannels(
   password: string,
   onInvalidStream?: (entry: XtreamParseError) => void
 ): Promise<ParsedChannel[]> {
-  const categoriesResponse = await fetch(
-    buildUrl(baseUrl, {
-      username,
-      password,
-      action: "get_live_categories"
-    })
-  );
-  const streamsResponse = await fetch(
-    buildUrl(baseUrl, {
-      username,
-      password,
-      action: "get_live_streams"
-    })
+  const endpointCandidates = buildXtreamEndpointCandidates(baseUrl);
+  const categoryResponses = await Promise.allSettled(
+    endpointCandidates.map((candidate) =>
+      fetch(
+        buildUrl(candidate, {
+          username,
+          password,
+          action: "get_live_categories"
+        })
+      )
+    )
   );
 
-  if (!categoriesResponse.ok || !streamsResponse.ok) {
+  const streamsResponses = await Promise.allSettled(
+    endpointCandidates.map((candidate) =>
+      fetch(
+        buildUrl(candidate, {
+          username,
+          password,
+          action: "get_live_streams"
+        })
+      )
+    )
+  );
+
+  const categoriesResponse = categoryResponses.find((result) => result.status === "fulfilled" && result.value.ok);
+  const streamsResponse = streamsResponses.find((result) => result.status === "fulfilled" && result.value.ok);
+
+  if (!categoriesResponse || !streamsResponse) {
     throw new Error("Xtream channel extraction failed.");
   }
 
-  const categories = (await categoriesResponse.json()) as XtreamCategory[];
-  const streams = (await streamsResponse.json()) as XtreamStream[];
+  const resolvedCategoriesResponse = categoriesResponse.status === "fulfilled" ? categoriesResponse.value : null;
+  const resolvedStreamsResponse = streamsResponse.status === "fulfilled" ? streamsResponse.value : null;
+
+  if (!resolvedCategoriesResponse || !resolvedStreamsResponse) {
+    throw new Error("Xtream channel extraction failed.");
+  }
+
+  const categoriesResponseData = resolvedCategoriesResponse;
+  const streamsResponseData = resolvedStreamsResponse;
+
+  if (!categoriesResponseData.ok || !streamsResponseData.ok) {
+    throw new Error("Xtream channel extraction failed.");
+  }
+
+  const categories = (await categoriesResponseData.json()) as XtreamCategory[];
+  const streams = (await streamsResponseData.json()) as XtreamStream[];
   const categoryNames = new Map(categories.map((category) => [category.category_id, category.category_name]));
   const streamBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
 

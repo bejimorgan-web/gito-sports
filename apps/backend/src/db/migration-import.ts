@@ -15,6 +15,7 @@ export const IMPORT_ORDER = [
   "competition_teams",
   "matches",
   "scheduling_matches",
+  "scheduling_match_links",
   "match_streams",
   "streams",
   "operator_users",

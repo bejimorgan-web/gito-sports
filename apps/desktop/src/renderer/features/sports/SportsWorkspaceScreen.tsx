@@ -19,6 +19,7 @@ import { isValidLogoSource, LogoUrlField } from "../../components/LogoUrlField";
 import { resolveAssetUrl } from "../../components/asset-url";
 import { Modal } from "../../components/Modal";
 import { Toast } from "../../components/Toast";
+import { SeasonMembershipPanel } from "./SeasonMembershipPanel";
 
 const competitionScopes: CompetitionScope[] = ["domestic", "continental", "international", "friendly", "custom"];
 const competitionTypes: CompetitionType[] = ["league", "cup", "tournament", "friendly", "custom"];
@@ -117,6 +118,7 @@ export function SportsWorkspaceScreen() {
 
   const [teamName, setTeamName] = useState("");
   const [teamShortName, setTeamShortName] = useState("");
+  const [teamSlug, setTeamSlug] = useState("");
   const [teamLogoUrl, setTeamLogoUrl] = useState("");
   const [teamType, setTeamType] = useState<TeamType>("club");
   const [teamCountryId, setTeamCountryId] = useState("");
@@ -271,6 +273,7 @@ export function SportsWorkspaceScreen() {
     if (team) {
       setTeamName(team.name);
       setTeamShortName(team.shortName ?? "");
+      setTeamSlug(team.slug ?? "");
       setTeamLogoUrl(team.logoUrl ?? "");
       setTeamType(team.type);
       setTeamCountryId(team.countryId ?? "");
@@ -279,6 +282,7 @@ export function SportsWorkspaceScreen() {
     } else {
       setTeamName("");
       setTeamShortName("");
+      setTeamSlug("");
       setTeamLogoUrl("");
       setTeamType("club");
       setTeamCountryId("");
@@ -499,6 +503,7 @@ export function SportsWorkspaceScreen() {
       name: teamName,
       type: teamType,
       ...(teamShortName ? { shortName: teamShortName } : {}),
+      ...(teamSlug ? { slug: teamSlug } : {}),
       ...(teamCountryId ? { countryId: teamCountryId } : {}),
       ...(teamLogoUrl ? { logoUrl: teamLogoUrl } : {})
     };
@@ -693,6 +698,8 @@ export function SportsWorkspaceScreen() {
             </article>
           </section>
 
+          <SeasonMembershipPanel teams={teams} competitions={competitions} selectedSportId={selectedSport.id} />
+
           <section className="console-panel sports-workspace-grid">
             <article className="entity-panel">
               <div className="panel-heading">
@@ -883,6 +890,10 @@ export function SportsWorkspaceScreen() {
               <label>
                 Short Name
                 <input value={teamShortName} onChange={(event) => setTeamShortName(event.target.value)} />
+              </label>
+              <label>
+                Slug
+                <input value={teamSlug} onChange={(event) => setTeamSlug(event.target.value)} placeholder="club-slug" />
               </label>
               <label>
                 Team Type

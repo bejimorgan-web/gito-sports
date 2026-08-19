@@ -7,6 +7,10 @@ export type {
   Sport,
   Country,
   Season,
+  CreateSeasonRequest,
+  UpdateSeasonRequest,
+  CompetitionSeasonTeam,
+  ClubDetail,
   Competition,
   Team,
   Match,
@@ -24,6 +28,11 @@ export type {
   UpdateTeamRequest,
   CreateMatchRequest,
   UpdateMatchRequest
+  ,FixtureLinkStatus
+  ,FixtureConfidence
+  ,FixtureReconciliationCandidate
+  ,FixtureReconciliationDecision
+  ,FixtureReconciliationPreview
 } from "./sports.js";
 
 export type {
@@ -32,6 +41,47 @@ export type {
 } from "./lifecycle.js";
 
 export { canTransitionMatch, canTransitionStream } from "./lifecycle.js";
+
+// NEWS
+export type {
+  NewsArticle,
+  NewsArticleAuditEntry,
+  NewsArticleCategory,
+  NewsArticleCategoryInput,
+  NewsClassificationSuggestion,
+  NewsClassificationStatus,
+  NewsClassificationSource,
+  NewsArticleCategoryType,
+  NewsArticleLink,
+  NewsArticleMedia,
+  NewsArticleStatus,
+  NewsContentAvailability,
+  NewsContentOrigin,
+  NewsFetchStatus,
+  NewsMediaType,
+  NewsQueryOptions,
+  NewsSource,
+  NewsSourceType,
+  CreateNewsArticleRequest,
+  UpdateNewsArticleRequest,
+  CreateNewsSourceRequest,
+  UpdateNewsSourceRequest,
+  CollectNewsSourceRequest,
+  NewsRightsAuditStatus,
+  NewsRightsEvidenceType,
+  NewsSourceRightsEvidenceOrigin,
+  NewsSourceRightsAudit,
+  NewsSourceRightsEvidence,
+  NewsSourceRightsPermission,
+  NewsResearchSourceType,
+  NewsResearchFactStatus,
+  NewsResearchConfidence,
+  NewsResearchStatus,
+  NewsResearchSource,
+  NewsResearchFact,
+  NewsResearchConflict,
+  NewsResearchResult
+} from "./news.js";
 
 // STREAMS
 export type {
@@ -60,3 +110,11 @@ export type {
   StreamHealthReport,
   OperationalLogEntry
 } from "./operations.js";
+
+export type {
+  MobileClub,
+  MobileSeason,
+  MobileStream,
+  MobileFixture,
+  MobileClubDetail
+} from "./mobile.js";

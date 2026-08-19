@@ -6,11 +6,13 @@ import { DatabaseSync, allowSqliteInstantiation } from "./sqlite.js";
 
 import { env, runtimeConfig } from "../config/env.js";
 import { listBackups } from "../services/database-backup-service.js";
-import { readInitialSchema } from "./schema.js";
+import { readInitialSchema, readNewsSchema } from "./schema.js";
 import { rehydrateSyncStateOnStartup } from "../system/startup.js";
 import { startBackupService } from "../services/database-backup-service.js";
 import { scheduleBackgroundJob } from "../background/backgroundJobRunner.js";
 import { importMigrationFile, isDatabaseCatalogEmpty, isMigrationImported } from "./migration-import.js";
+import { NewsCollectionScheduler } from "../services/news-collection-scheduler.js";
+import { NewsService } from "../services/news-service.js";
 
 let database: DatabaseSync | null = null;
 const EXPECTED_SCHEMA_VERSION = 1;
@@ -96,7 +98,7 @@ export function getDatabase(): DatabaseSync {
   // restore the latest valid backup before opening the database. This avoids
   // creating a fresh empty DB that would discard previous data.
   try {
-    const autoRestore = (process.env.AUTO_RESTORE_BACKUP ?? "false").toLowerCase() === "true";
+    const autoRestore = runtimeConfig.autoRestoreBackup;
     const dbExists = fs.existsSync(resolvedDatabasePath);
     const dbStat = dbExists ? fs.statSync(resolvedDatabasePath) : null;
     const dbEmpty = !dbExists || (dbStat && dbStat.size === 0);
@@ -109,7 +111,7 @@ export function getDatabase(): DatabaseSync {
           const backupPath = path.join(runtimeConfig.backupDir, b.filename);
           // Synchronously validate backup via PRAGMA integrity_check
           try {
-            const checkDb = allowSqliteInstantiation(() => new DatabaseSync(`file:${backupPath}?mode=ro`));
+            const checkDb = allowSqliteInstantiation(() => new DatabaseSync(backupPath, { readonly: true }));
             try {
               const row = checkDb.prepare("PRAGMA integrity_check").get() as { integrity_check?: string } | undefined;
               const integrity = String(row?.integrity_check ?? "unknown");
@@ -161,9 +163,8 @@ export function getDatabase(): DatabaseSync {
     }
   }
 
-  // Open DB. If read-only mode requested, use URI mode=ro to prevent writes.
-  const openPath = runtimeConfig.dbReadOnlyMode ? `file:${resolvedDatabasePath}?mode=ro` : resolvedDatabasePath;
-  database = allowSqliteInstantiation(() => new DatabaseSync(openPath));
+  // Open DB. If read-only mode requested, use better-sqlite3's readonly option to prevent writes.
+  database = allowSqliteInstantiation(() => new DatabaseSync(resolvedDatabasePath, runtimeConfig.dbReadOnlyMode ? { readonly: true } : undefined));
 
   try {
     database.exec("PRAGMA foreign_keys = ON;");
@@ -197,6 +198,18 @@ export function getDatabase(): DatabaseSync {
     }
   } catch (err) {
     console.error("[startup] error checking DB file after open", err);
+  }
+
+  try {
+    const needsNewsSchema = !hasTable(database, "news_articles") || !hasTable(database, "news_sources");
+    if (needsNewsSchema) {
+      database.exec(readNewsSchema());
+      console.log("[startup] applied news schema extensions");
+    }
+    ensureNewsSchemaColumns(database);
+  } catch (err) {
+    console.error("[startup] failed to apply news schema", err);
+    throw err;
   }
 
   migrateExistingOperationalState(database);
@@ -241,21 +254,33 @@ export function getDatabase(): DatabaseSync {
   // Validate startup and ensure DB is healthy. If validation throws, propagate up.
   validateDatabaseStartup(database, resolvedDatabasePath);
 
-  // Rehydrate operational state and start background services
+  // Rehydrate operational state and start background services.
+  // News integration tests opt out so their process has no recurring handles.
   try {
     rehydrateSyncStateOnStartup();
   } catch (err) {
     console.error("[startup] rehydrate failed", err);
   }
 
-  try {
-    startBackupService();
-  } catch (err) {
-    console.error("[startup] failed to start backup service", err);
-  }
+  if (!runtimeConfig.newsTestMode) {
+    try {
+      const newsService = new NewsService();
+      const scheduler = new NewsCollectionScheduler(newsService, database);
+      void scheduler.initialize();
+      scheduleBackgroundJob("collect-news-sources", 5 * 60 * 1000, () => scheduler.runDueCollections());
+    } catch (err) {
+      console.error("[startup] failed to initialize news collection scheduler", err);
+    }
 
-  // Example periodic rehydration job: refresh provider availability every 5 minutes
-  scheduleBackgroundJob("rehydrate-providers", 5 * 60 * 1000, () => rehydrateSyncStateOnStartup());
+    try {
+      startBackupService();
+    } catch (err) {
+      console.error("[startup] failed to start backup service", err);
+    }
+
+    // Example periodic rehydration job: refresh provider availability every 5 minutes
+    scheduleBackgroundJob("rehydrate-providers", 5 * 60 * 1000, () => rehydrateSyncStateOnStartup());
+  }
 
   return database;
 }
@@ -278,6 +303,328 @@ function hasTable(database: DatabaseSync, tableName: string): boolean {
     .get(tableName) as { name: string } | undefined;
 
   return Boolean(row);
+}
+
+function ensureNewsSchemaColumns(database: DatabaseSync) {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS news_generated_rss_sources (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, source_url TEXT NOT NULL, feed_token TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_fetched_at TEXT, status TEXT NOT NULL DEFAULT 'created',
+      discovered_article_count INTEGER NOT NULL DEFAULT 0, error_message TEXT, enabled INTEGER NOT NULL DEFAULT 1
+      , crawler_tier TEXT NOT NULL DEFAULT 'http', failure_classification TEXT
+    );
+    CREATE TABLE IF NOT EXISTS news_generated_rss_articles (
+      id TEXT PRIMARY KEY, generated_feed_id TEXT NOT NULL, external_id TEXT NOT NULL, canonical_url TEXT NOT NULL,
+      title TEXT NOT NULL, summary TEXT, article_url TEXT NOT NULL, published_at TEXT, discovered_at TEXT NOT NULL,
+      content_hash TEXT NOT NULL, source_name TEXT NOT NULL, source_url TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'discovered',
+      FOREIGN KEY (generated_feed_id) REFERENCES news_generated_rss_sources(id) ON DELETE CASCADE,
+      UNIQUE(generated_feed_id, external_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_news_generated_rss_articles_feed ON news_generated_rss_articles(generated_feed_id);
+  `);
+  if (hasTable(database, "news_generated_rss_sources")) {
+    for (const [columnName, columnType] of [["crawler_tier", "TEXT NOT NULL DEFAULT 'http'"], ["failure_classification", "TEXT"]] as const) {
+      if (!hasColumn(database, "news_generated_rss_sources", columnName)) {
+        database.exec(`ALTER TABLE news_generated_rss_sources ADD COLUMN ${columnName} ${columnType}`);
+      }
+    }
+  }
+  if (hasTable(database, "news_sources")) {
+    const sourceColumns = [
+      ["last_collected_at", "TEXT"],
+      ["last_collection_status", "TEXT"],
+      ["last_collection_message", "TEXT"],
+      ["collection_interval_minutes", "INTEGER NOT NULL DEFAULT 60"],
+      ["last_collection_attempt_at", "TEXT"],
+      ["last_collection_succeeded_at", "TEXT"],
+      ["last_collection_error", "TEXT"],
+      ["last_collection_discovered_count", "INTEGER"],
+      ["last_collection_new_count", "INTEGER"],
+      ["last_collection_duplicate_count", "INTEGER"],
+      ["rights_status", "TEXT DEFAULT 'unknown'"],
+      ["rights_last_checked_at", "TEXT"],
+      ["rights_review_notes", "TEXT"],
+      ["rights_administrator_decision", "TEXT"],
+      ["rights_decision_at", "TEXT"],
+      ["rights_audit_summary", "TEXT"]
+    ] as const;
+
+    for (const [columnName, columnType] of sourceColumns) {
+      if (!hasColumn(database, "news_sources", columnName)) {
+        database.exec(`ALTER TABLE news_sources ADD COLUMN ${columnName} ${columnType}`);
+      }
+    }
+  }
+
+  if (hasTable(database, "news_articles")) {
+    const articleColumns = [
+      ["country_id", "TEXT"],
+      ["author", "TEXT"],
+      ["categories_json", "TEXT"],
+      ["tags_json", "TEXT"],
+      ["content_availability", "TEXT"],
+      ["content_origin", "TEXT"],
+      ["fetched_body", "TEXT"],
+      ["fetched_at", "TEXT"],
+      ["fetch_status", "TEXT"],
+      ["fetch_error", "TEXT"],
+      ["external_id", "TEXT"]
+    ] as const;
+
+    for (const [columnName, columnType] of articleColumns) {
+      if (!hasColumn(database, "news_articles", columnName)) {
+        database.exec(`ALTER TABLE news_articles ADD COLUMN ${columnName} ${columnType}`);
+      }
+    }
+
+    database.exec(`
+      UPDATE news_articles
+      SET content_availability = CASE
+        WHEN body IS NULL AND summary IS NULL THEN 'no_content'
+        WHEN body IS NOT NULL AND summary IS NOT NULL AND body <> summary THEN 'full_feed_content'
+        ELSE 'summary_only'
+      END,
+      content_origin = CASE
+        WHEN content_origin IS NULL AND body IS NOT NULL AND summary IS NOT NULL AND body <> summary THEN 'rss_full'
+        WHEN content_origin IS NULL AND summary IS NOT NULL THEN 'summary'
+        WHEN content_origin IS NULL THEN 'manual'
+        ELSE content_origin
+      END,
+      fetch_status = COALESCE(fetch_status, 'idle')
+      WHERE content_availability IS NULL OR content_origin IS NULL OR fetch_status IS NULL
+    `);
+
+    if (!hasTable(database, "news_source_rights_audits")) {
+      database.exec(`
+        CREATE TABLE news_source_rights_audits (
+          id TEXT PRIMARY KEY,
+          source_id TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'unknown' CHECK (status IN ('unknown', 'full_republication_permitted', 'republication_permitted_with_conditions', 'limited_use_only', 'republication_not_permitted', 'review_required')),
+          summary TEXT,
+          review_notes TEXT,
+          administrator_decision TEXT,
+          checked_at TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (source_id) REFERENCES news_sources(id) ON DELETE CASCADE
+        );
+      `);
+    }
+
+    if (!hasTable(database, "news_source_rights_evidence")) {
+      database.exec(`
+        CREATE TABLE news_source_rights_evidence (
+          id TEXT PRIMARY KEY,
+          audit_id TEXT NOT NULL,
+          evidence_url TEXT NOT NULL,
+          page_title TEXT,
+          evidence_type TEXT NOT NULL CHECK (evidence_type IN ('rss_terms', 'terms_of_use', 'copyright_policy', 'republication_policy', 'syndication', 'licensing', 'other')),
+          evidence_domain TEXT,
+          evidence_origin TEXT,
+          matched_rule TEXT,
+          snippet TEXT,
+          checked_at TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (audit_id) REFERENCES news_source_rights_audits(id) ON DELETE CASCADE
+        );
+      `);
+    }
+
+    if (!hasTable(database, "news_source_rights_permissions")) {
+      database.exec(`
+        CREATE TABLE news_source_rights_permissions (
+          id TEXT PRIMARY KEY,
+          audit_id TEXT NOT NULL,
+          permission TEXT NOT NULL CHECK (permission IN ('full_article_republication', 'headline', 'summary_excerpt', 'original_link_reference', 'commercial_use', 'modification', 'attribution', 'image_reuse', 'video_reuse', 'ai_assisted_original_story')),
+          allowed INTEGER NOT NULL DEFAULT 0,
+          notes TEXT,
+          evidence_url TEXT,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (audit_id) REFERENCES news_source_rights_audits(id) ON DELETE CASCADE
+        );
+      `);
+    }
+
+    if (hasTable(database, "news_source_rights_evidence")) {
+      if (!hasColumn(database, "news_source_rights_evidence", "evidence_domain")) {
+        database.exec("ALTER TABLE news_source_rights_evidence ADD COLUMN evidence_domain TEXT");
+      }
+      if (!hasColumn(database, "news_source_rights_evidence", "evidence_origin")) {
+        database.exec("ALTER TABLE news_source_rights_evidence ADD COLUMN evidence_origin TEXT");
+      }
+      if (!hasColumn(database, "news_source_rights_evidence", "matched_rule")) {
+        database.exec("ALTER TABLE news_source_rights_evidence ADD COLUMN matched_rule TEXT");
+      }
+    }
+
+    if (!hasColumn(database, "news_articles", "external_id")) {
+      database.exec("ALTER TABLE news_articles ADD COLUMN external_id TEXT");
+    }
+
+    if (!hasTable(database, "news_article_categories")) {
+      database.exec(`
+        CREATE TABLE news_article_categories (
+          id TEXT PRIMARY KEY,
+          article_id TEXT NOT NULL,
+          category_type TEXT NOT NULL CHECK (category_type IN ('sport', 'country', 'team', 'competition', 'match')),
+          entity_id TEXT NOT NULL,
+          confidence INTEGER NOT NULL DEFAULT 100,
+          reason TEXT,
+          classification_source TEXT NOT NULL DEFAULT 'editorial',
+          classification_status TEXT NOT NULL DEFAULT 'approved' CHECK (classification_status IN ('suggested', 'approved', 'rejected')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (article_id) REFERENCES news_articles(id) ON DELETE CASCADE,
+          UNIQUE(article_id, category_type, entity_id)
+        );
+      `);
+      database.exec(`
+        CREATE INDEX idx_news_article_categories_article ON news_article_categories(article_id);
+        CREATE INDEX idx_news_article_categories_type ON news_article_categories(category_type);
+        CREATE INDEX idx_news_article_categories_entity ON news_article_categories(entity_id);
+        CREATE INDEX idx_news_article_categories_approved_entity ON news_article_categories(category_type, entity_id, classification_status);
+      `);
+    }
+
+    for (const [columnName, columnType] of [
+      ["confidence", "INTEGER NOT NULL DEFAULT 100"],
+      ["reason", "TEXT"],
+      ["classification_source", "TEXT NOT NULL DEFAULT 'editorial'"],
+      ["classification_status", "TEXT NOT NULL DEFAULT 'approved'"]
+    ] as const) {
+      if (!hasColumn(database, "news_article_categories", columnName)) {
+        database.exec(`ALTER TABLE news_article_categories ADD COLUMN ${columnName} ${columnType}`);
+      }
+    }
+    database.exec("CREATE INDEX IF NOT EXISTS idx_news_article_categories_approved_entity ON news_article_categories(category_type, entity_id, classification_status);");
+
+    if (!hasTable(database, "news_article_research_results")) {
+      database.exec(`
+        CREATE TABLE news_article_research_results (
+          id TEXT PRIMARY KEY,
+          article_id TEXT NOT NULL,
+          query TEXT NOT NULL,
+          research_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (article_id) REFERENCES news_articles(id) ON DELETE CASCADE,
+          UNIQUE(article_id)
+        );
+      `);
+      database.exec(`
+        CREATE INDEX idx_news_article_research_results_article ON news_article_research_results(article_id);
+      `);
+    }
+
+    const categoryPairs = [
+      ["sport_id", "sport"],
+      ["country_id", "country"],
+      ["team_id", "team"],
+      ["competition_id", "competition"],
+      ["match_id", "match"]
+    ] as const;
+
+    for (const [columnName, categoryType] of categoryPairs) {
+      if (!hasColumn(database, "news_articles", columnName)) {
+        continue;
+      }
+
+      database.exec(`
+        INSERT OR IGNORE INTO news_article_categories (id, article_id, category_type, entity_id, created_at, updated_at)
+        SELECT lower(hex(randomblob(16))), a.id, '${categoryType}', a.${columnName}, a.created_at, a.updated_at
+        FROM news_articles a
+        WHERE a.${columnName} IS NOT NULL
+      `);
+    }
+
+    ensureNewsSourceDeleteBehavior(database);
+  }
+}
+
+function ensureNewsSourceDeleteBehavior(database: DatabaseSync) {
+  const foreignKeys = database.prepare("PRAGMA foreign_key_list(news_articles)").all() as Array<{ from: string; on_delete: string }>;
+  const sourceForeignKey = foreignKeys.find((foreignKey) => foreignKey.from === "source_id");
+  if (!sourceForeignKey || sourceForeignKey.on_delete.toUpperCase() === "SET NULL") {
+    return;
+  }
+
+  database.exec("PRAGMA foreign_keys = OFF;");
+  try {
+    database.exec("BEGIN TRANSACTION;");
+    database.exec(`
+      CREATE TABLE news_articles_new (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        slug TEXT NOT NULL UNIQUE,
+        summary TEXT,
+        body TEXT,
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'review', 'published', 'archived')),
+        sport_id TEXT,
+        competition_id TEXT,
+        team_id TEXT,
+        country_id TEXT,
+        match_id TEXT,
+        source_id TEXT,
+        source_name TEXT,
+        source_url TEXT,
+        author TEXT,
+        categories_json TEXT,
+        tags_json TEXT,
+        content_availability TEXT,
+        content_origin TEXT,
+        fetched_body TEXT,
+        fetched_at TEXT,
+        fetch_status TEXT,
+        fetch_error TEXT,
+        created_by TEXT,
+        published_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        external_id TEXT,
+        FOREIGN KEY (sport_id) REFERENCES sports(id),
+        FOREIGN KEY (competition_id) REFERENCES competitions(id),
+        FOREIGN KEY (team_id) REFERENCES teams(id),
+        FOREIGN KEY (country_id) REFERENCES countries(id),
+        FOREIGN KEY (match_id) REFERENCES matches(id),
+        FOREIGN KEY (source_id) REFERENCES news_sources(id) ON DELETE SET NULL,
+        FOREIGN KEY (created_by) REFERENCES operator_users(id)
+      );
+    `);
+    database.exec(`
+      INSERT INTO news_articles_new (
+        id, title, slug, summary, body, status, sport_id, competition_id, team_id, country_id, match_id,
+        source_id, source_name, source_url, author, categories_json, tags_json, content_availability,
+        content_origin, fetched_body, fetched_at, fetch_status, fetch_error, created_by, published_at,
+        created_at, updated_at, external_id
+      )
+      SELECT id, title, slug, summary, body, status, sport_id, competition_id, team_id, country_id, match_id,
+        source_id, source_name, source_url, author, categories_json, tags_json, content_availability,
+        content_origin, fetched_body, fetched_at, fetch_status, fetch_error, created_by, published_at,
+        created_at, updated_at, external_id
+      FROM news_articles;
+    `);
+    database.exec("DROP TABLE news_articles;");
+    database.exec("ALTER TABLE news_articles_new RENAME TO news_articles;");
+    database.exec(`
+      CREATE INDEX IF NOT EXISTS idx_news_articles_status ON news_articles(status);
+      CREATE INDEX IF NOT EXISTS idx_news_articles_sport ON news_articles(sport_id);
+      CREATE INDEX IF NOT EXISTS idx_news_articles_competition ON news_articles(competition_id);
+      CREATE INDEX IF NOT EXISTS idx_news_articles_team ON news_articles(team_id);
+      CREATE INDEX IF NOT EXISTS idx_news_articles_match ON news_articles(match_id);
+      CREATE INDEX IF NOT EXISTS idx_news_articles_created_at ON news_articles(created_at);
+      CREATE INDEX IF NOT EXISTS idx_news_articles_published_at ON news_articles(published_at);
+    `);
+    database.exec("COMMIT;");
+  } catch (error) {
+    try {
+      database.exec("ROLLBACK;");
+    } catch {
+      // Preserve the original migration error.
+    }
+    throw error;
+  } finally {
+    database.exec("PRAGMA foreign_keys = ON;");
+  }
 }
 
 function createPasswordHash(password: string) {
@@ -553,6 +900,92 @@ function migrateExistingOperationalState(database: DatabaseSync) {
   if (!hasColumn(database, "countries", "updated_at")) {
     database.exec("ALTER TABLE countries ADD COLUMN updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP;");
   }
+
+  if (!hasColumn(database, "teams", "slug")) {
+    database.exec("ALTER TABLE teams ADD COLUMN slug TEXT;");
+  }
+
+  if (!hasColumn(database, "matches", "external_provider")) {
+    database.exec("ALTER TABLE matches ADD COLUMN external_provider TEXT;");
+  }
+
+  if (!hasColumn(database, "matches", "external_match_id")) {
+    database.exec("ALTER TABLE matches ADD COLUMN external_match_id TEXT;");
+  }
+
+  if (!hasColumn(database, "scheduling_matches", "season_id")) {
+    database.exec("ALTER TABLE scheduling_matches ADD COLUMN season_id TEXT;");
+  }
+
+  if (!hasColumn(database, "scheduling_matches", "venue_name")) {
+    database.exec("ALTER TABLE scheduling_matches ADD COLUMN venue_name TEXT;");
+  }
+
+  if (!hasColumn(database, "scheduling_matches", "external_provider")) {
+    database.exec("ALTER TABLE scheduling_matches ADD COLUMN external_provider TEXT;");
+  }
+
+  if (!hasColumn(database, "scheduling_matches", "external_match_id")) {
+    database.exec("ALTER TABLE scheduling_matches ADD COLUMN external_match_id TEXT;");
+  }
+
+  database.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_matches_external_identity
+      ON matches(external_provider, external_match_id)
+      WHERE external_provider IS NOT NULL AND external_match_id IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS scheduling_match_links (
+      scheduling_match_id TEXT PRIMARY KEY,
+      match_id TEXT NOT NULL UNIQUE,
+      link_status TEXT NOT NULL DEFAULT 'unresolved' CHECK (link_status IN ('linked', 'ambiguous', 'unresolved', 'rejected')),
+      confidence TEXT NOT NULL CHECK (confidence IN ('high', 'medium', 'low')),
+      linked_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (scheduling_match_id) REFERENCES scheduling_matches(id),
+      FOREIGN KEY (match_id) REFERENCES matches(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_scheduling_match_links_match ON scheduling_match_links(match_id);
+    CREATE INDEX IF NOT EXISTS idx_scheduling_match_links_status ON scheduling_match_links(link_status);
+  `);
+
+  const teamsWithoutSlugs = database.prepare("SELECT id, sport_id, country_id, name FROM teams WHERE slug IS NULL OR slug = ''").all() as Array<{
+    id: string;
+    sport_id: string | null;
+    country_id: string | null;
+    name: string;
+  }>;
+  for (const team of teamsWithoutSlugs) {
+    const baseSlug = team.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "team";
+    let slug = baseSlug;
+    let suffix = 1;
+    while (database.prepare("SELECT 1 FROM teams WHERE sport_id IS ? AND country_id IS ? AND slug = ? AND id != ?").get(team.sport_id, team.country_id, slug, team.id)) {
+      suffix += 1;
+      slug = `${baseSlug}-${suffix}`;
+    }
+    database.prepare("UPDATE teams SET slug = ? WHERE id = ?").run(slug, team.id);
+  }
+  database.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_sport_country_slug ON teams(sport_id, country_id, slug);");
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS competition_season_teams (
+      id TEXT PRIMARY KEY,
+      competition_id TEXT NOT NULL,
+      season_id TEXT NOT NULL,
+      team_id TEXT NOT NULL,
+      membership_status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (competition_id) REFERENCES competitions(id),
+      FOREIGN KEY (season_id) REFERENCES seasons(id),
+      FOREIGN KEY (team_id) REFERENCES teams(id),
+      UNIQUE (competition_id, season_id, team_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_competition_season_teams_competition ON competition_season_teams(competition_id);
+    CREATE INDEX IF NOT EXISTS idx_competition_season_teams_season ON competition_season_teams(season_id);
+    CREATE INDEX IF NOT EXISTS idx_competition_season_teams_team ON competition_season_teams(team_id);
+    CREATE INDEX IF NOT EXISTS idx_competition_season_teams_competition_season ON competition_season_teams(competition_id, season_id);
+  `);
 
   if (!hasTable(database, "mobile_analytics_events")) {
     database.exec(`CREATE TABLE IF NOT EXISTS mobile_analytics_events (

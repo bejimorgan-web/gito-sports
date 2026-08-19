@@ -1,0 +1,124 @@
+import 'dart:convert';
+import 'dart:io';
+
+import '../app_config.dart';
+import '../models/mobile_models.dart';
+
+class MobileApiException implements Exception {
+  const MobileApiException(this.message, this.statusCode);
+  final String message;
+  final int statusCode;
+  @override
+  String toString() => message;
+}
+
+class MobileApiService {
+  const MobileApiService({this.baseUrl = apiBaseUrl});
+  final String baseUrl;
+
+  Future<dynamic> _get(String path) async {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 6);
+    try {
+      final request = await client.getUrl(Uri.parse('$baseUrl$path'));
+      request.headers.set(HttpHeaders.cacheControlHeader, 'no-store');
+      final response =
+          await request.close().timeout(const Duration(seconds: 10));
+      final body = await response.transform(utf8.decoder).join();
+      dynamic decoded;
+      try {
+        decoded = jsonDecode(body);
+      } catch (_) {
+        decoded = null;
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw MobileApiException(
+            decoded is Map
+                ? '${decoded['error'] ?? 'Request failed'}'
+                : 'Request failed',
+            response.statusCode);
+      }
+      return decoded is Map && decoded.containsKey('data')
+          ? decoded['data']
+          : decoded;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<List<MobileSport>> getSports() async =>
+      ((await _get('/mobile/sports')) as List)
+          .whereType<Map>()
+          .map((item) => MobileSport.fromJson(Map<String, dynamic>.from(item)))
+          .toList();
+  Future<List<MobileClub>> getClubs() async =>
+      ((await _get('/mobile/clubs')) as List)
+          .whereType<Map>()
+          .map((item) => MobileClub.fromJson(Map<String, dynamic>.from(item)))
+          .toList();
+  Future<MobileClubDetail> getClub(String clubId) async =>
+      MobileClubDetail.fromJson(
+          Map<String, dynamic>.from(await _get('/mobile/clubs/$clubId')));
+  Future<List<MobileNewsArticle>> getClubNews(String clubId) async =>
+      _news('/mobile/clubs/$clubId/news');
+  Future<List<MobileFixture>> getClubFixtures(String clubId) async =>
+      _fixtures('/mobile/clubs/$clubId/fixtures');
+  Future<List<MobileFixture>> getClubResults(String clubId) async =>
+      _fixtures('/mobile/clubs/$clubId/results');
+  Future<List<MobileFixture>> getClubLive(String clubId) async =>
+      _fixtures('/mobile/clubs/$clubId/live');
+  Future<List<MobileNewsArticle>> getNews(
+      {String? teamId,
+      String? competitionId,
+      String? sportId,
+      String? countryId,
+      String? matchId}) async {
+    final query = <String, String>{
+      if (teamId != null) 'teamId': teamId,
+      if (competitionId != null) 'competitionId': competitionId,
+      if (sportId != null) 'sportId': sportId,
+      if (countryId != null) 'countryId': countryId,
+      if (matchId != null) 'matchId': matchId
+    };
+    return _news(
+        '/mobile/news${query.isEmpty ? '' : '?${Uri(queryParameters: query).query}'}');
+  }
+
+  Future<MobileFixture> getFixture(String fixtureId) async =>
+      MobileFixture.fromJson(
+          Map<String, dynamic>.from(await _get('/mobile/fixtures/$fixtureId')));
+  Future<List<MobileNewsArticle>> getCompetitionNews(
+          String competitionId) async =>
+      _news('/mobile/competitions/$competitionId/news');
+  Future<List<MobileFixture>> getCompetitionFixtures(
+          String competitionId) async =>
+      _fixtures('/mobile/competitions/$competitionId/fixtures');
+  Future<List<MobileSeason>> getCompetitionSeasons(
+          String competitionId) async =>
+      ((await _get('/mobile/competitions/$competitionId/seasons')) as List)
+          .whereType<Map>()
+          .map((item) => MobileSeason.fromJson(Map<String, dynamic>.from(item)))
+          .toList();
+  Future<MobileSeason> getSeason(String seasonId) async =>
+      MobileSeason.fromJson(
+          Map<String, dynamic>.from(await _get('/mobile/seasons/$seasonId')));
+  Future<List<MobileFixture>> getSeasonFixtures(String seasonId) async =>
+      _fixtures('/mobile/seasons/$seasonId/fixtures');
+  Future<List<MobileClub>> getSeasonTeams(String seasonId) async =>
+      ((await _get('/mobile/seasons/$seasonId/teams')) as List)
+          .whereType<Map>()
+          .map((item) => MobileClub.fromJson(Map<String, dynamic>.from(item)))
+          .toList();
+
+  Future<List<MobileNewsArticle>> _news(String path) async =>
+      ((await _get(path)) as List)
+          .whereType<Map>()
+          .map((item) =>
+              MobileNewsArticle.fromJson(Map<String, dynamic>.from(item)))
+          .toList();
+  Future<List<MobileFixture>> _fixtures(String path) async =>
+      ((await _get(path)) as List)
+          .whereType<Map>()
+          .map(
+              (item) => MobileFixture.fromJson(Map<String, dynamic>.from(item)))
+          .toList();
+}

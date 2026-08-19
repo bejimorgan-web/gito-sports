@@ -4,6 +4,20 @@ import type { Channel, CreateProviderRequest, IPTVProvider, ProviderConnectionTe
 import { IptvImportScreen } from "./IptvImportScreen";
 import { IptvProvidersScreen } from "./IptvProvidersScreen";
 
+function getFriendlyErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (/status 502|bad gateway|502/i.test(message)) {
+    return "The provider service is currently rejecting the request. Please verify the URL and credentials, then try again.";
+  }
+
+  if (/failed to fetch|network|fetch/i.test(message)) {
+    return "The backend could not reach the provider endpoint. Please verify the URL and connectivity and try again.";
+  }
+
+  return message;
+}
+
 interface IptvManagementScreenProps {
   channels: Channel[];
   providers: IPTVProvider[];
@@ -32,7 +46,7 @@ export function IptvManagementScreen({
   const [selectedProviderId, setSelectedProviderId] = useState("");
   const [providerName, setProviderName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
-  const [type, setType] = useState<CreateProviderRequest["type"]>("m3u");
+  const [type, setType] = useState<CreateProviderRequest["type"]>("manual");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [playlist, setPlaylist] = useState("");
@@ -62,7 +76,7 @@ export function IptvManagementScreen({
     } else {
       setProviderName("");
       setBaseUrl("");
-      setType("m3u");
+      setType("manual");
       setUsername("");
       setPassword("");
     }
@@ -96,10 +110,9 @@ export function IptvManagementScreen({
       } else {
         await onCreateProvider(providerInput);
         setStatusMessage("Provider created.");
-        setSelectedProviderId("");
       }
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : "Provider save failed.");
+      setStatusMessage(getFriendlyErrorMessage(error) || "Provider save failed.");
     }
   };
 
@@ -125,7 +138,7 @@ export function IptvManagementScreen({
         setStatusMessage(result.message);
       }
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : "Provider test failed.");
+      setStatusMessage(getFriendlyErrorMessage(error) || "Provider test failed.");
     }
   };
 
@@ -146,7 +159,7 @@ export function IptvManagementScreen({
       await onIngestM3u(selectedProviderId, playlist);
       setImportStatus("Import completed.");
     } catch (error) {
-      setImportStatus(error instanceof Error ? error.message : "Import failed.");
+      setImportStatus(getFriendlyErrorMessage(error) || "Import failed.");
     }
   };
 
@@ -162,7 +175,7 @@ export function IptvManagementScreen({
       await onSyncXtream(selectedProviderId);
       setImportStatus("Xtream sync completed.");
     } catch (error) {
-      setImportStatus(error instanceof Error ? error.message : "Xtream sync failed.");
+      setImportStatus(getFriendlyErrorMessage(error) || "Xtream sync failed.");
     }
   };
 
@@ -180,7 +193,7 @@ export function IptvManagementScreen({
         handleSelectProvider("");
       }
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : "Delete failed.");
+      setStatusMessage(getFriendlyErrorMessage(error) || "Delete failed.");
     }
   };
 
@@ -193,7 +206,7 @@ export function IptvManagementScreen({
       await onSetProviderStatus(providerId, nextStatus);
       setStatusMessage("Provider status updated.");
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : "Unable to update provider status.");
+      setStatusMessage(getFriendlyErrorMessage(error) || "Unable to update provider status.");
     }
   };
 

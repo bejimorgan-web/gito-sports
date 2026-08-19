@@ -12,8 +12,32 @@ function readAttribute(line: string, name: string): string | undefined {
 }
 
 function readDisplayName(line: string): string {
-  const commaIndex = line.lastIndexOf(",");
-  return commaIndex >= 0 ? line.slice(commaIndex + 1).trim() : "Unnamed Channel";
+  const separator = line.indexOf(",");
+  if (separator < 0) {
+    return "Unnamed Channel";
+  }
+
+  const remainder = line.slice(separator + 1).trim();
+  const inlineUrlMatch = remainder.match(/(?:https?|rtmp|rtsp|udp|srt):\/\/\S+/i);
+
+  if (inlineUrlMatch) {
+    const beforeUrl = remainder.slice(0, inlineUrlMatch.index).trim();
+    return beforeUrl.replace(/,$/, "") || "Unnamed Channel";
+  }
+
+  return remainder.replace(/,$/, "") || "Unnamed Channel";
+}
+
+function readInlineUrl(line: string): string | undefined {
+  const separator = line.indexOf(",");
+  if (separator < 0) {
+    return undefined;
+  }
+
+  const remainder = line.slice(separator + 1).trim();
+  const inlineUrlMatch = remainder.match(/(?:https?|rtmp|rtsp|udp|srt):\/\/\S+/i);
+
+  return inlineUrlMatch?.[0];
 }
 
 export function parseM3uPlaylist(content: string, onInvalidEntry?: (entry: M3uParseError) => void): ParsedChannel[] {
@@ -34,11 +58,11 @@ export function parseM3uPlaylist(content: string, onInvalidEntry?: (entry: M3uPa
     // The URL may not be immediately on the next line (some playlists include
     // comments or meta-lines). Scan forward a few lines to find the first
     // non-comment, non-empty line that appears to be the stream URL.
-    let url: string | undefined;
+    let url = readInlineUrl(line);
     for (let j = index + 1; j < Math.min(lines.length, index + 6); j += 1) {
       const candidate = lines[j];
       if (candidate && !candidate.startsWith("#") && candidate.length > 0) {
-        url = candidate;
+        url ??= candidate;
         break;
       }
     }

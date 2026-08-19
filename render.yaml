@@ -1,11 +1,40 @@
 services:
-  - type: web_service
+  - type: web
     name: gito-backend
-    env: node
-    rootDir: apps/backend
-    buildCommand: npm install && npm run build
-    startCommand: npm start
+    runtime: node
+    plan: starter
+    buildCommand: npm install && npm run build -w packages/shared && npm run build -w apps/backend && npx playwright install --with-deps chromium
+    startCommand: node apps/backend/dist/server.js
+    healthCheckPath: /health
     autoDeploy: true
+    # For persistent storage in production, uncomment the disk section below
+    # and update DATABASE_PATH to /var/data/gito.sqlite in envVars
+    # disk:
+    #   name: gito-data
+    #   mountPath: /var/data
+    #   sizeGB: 10
     envVars:
       - key: NODE_ENV
         value: production
+      # First deployment uses ephemeral /tmp; add persistent disk and change to /var/data/gito.sqlite for production
+      - key: DATABASE_PATH
+        value: /tmp/gito.sqlite
+      # Backups are ephemeral on first deployment; point to /var/data/backups when persistent disk is enabled
+      - key: BACKUP_DIR
+        value: /tmp/backups
+      - key: AI_CLASSIFICATION_ENABLED
+        value: "false"
+      - key: JWT_SECRET
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: CORS_ORIGINS
+        value: https://gito-sports.onrender.com
+      - key: FOOTBALL_DATA_API_KEY
+        sync: false
+      - key: API_FOOTBALL_KEY
+        sync: false
+      - key: SENTRY_DSN
+        sync: false

@@ -12,14 +12,18 @@ const nodeEnv = process.env.NODE_ENV ?? "development";
 const port = Number(process.env.PORT ?? 4100);
 
 const canonicalDatabasePath = path.resolve(workspaceRoot, "data", "gito.sqlite");
+const canonicalBackupDir = path.resolve(workspaceRoot, "data", "backups");
 
 // For Render compatibility prefer explicit DATABASE_PATH or the platform writable
 // directory `/tmp/gito.sqlite`. Fall back to workspace `data/gito.sqlite` for
 // local development when DATABASE_PATH is not provided.
-const resolvedDatabasePath = process.env.DATABASE_PATH
-  ? path.resolve(process.env.DATABASE_PATH)
-  : process.env.NODE_ENV === "production"
-  ? "/tmp/gito.sqlite"
+const configuredDatabasePath = process.env.DATABASE_PATH?.trim();
+if (nodeEnv === "production" && !configuredDatabasePath) {
+  throw new Error("DATABASE_PATH must be explicitly configured in production; use the mounted persistent disk path.");
+}
+
+const resolvedDatabasePath = configuredDatabasePath
+  ? path.resolve(configuredDatabasePath)
   : canonicalDatabasePath;
 
 const databasePath = resolvedDatabasePath;
@@ -48,7 +52,14 @@ const normalizedMigrationImportFile = process.env.MIGRATION_IMPORT_FILE
       return path.join(workspaceRoot, "migration-export.json");
     })();
 const autoImportMigration = (process.env.AUTO_IMPORT_MIGRATION ?? "false").toLowerCase() === "true";
+const newsTestMode = (process.env.GITO_NEWS_TEST_MODE ?? "false").toLowerCase() === "true";
 const migrationImportToken = process.env.MIGRATION_IMPORT_TOKEN ?? null;
+const aiApiKey = process.env.AI_API_KEY ?? "";
+const aiProvider = process.env.AI_PROVIDER ?? "openai-compatible";
+const aiModel = process.env.AI_MODEL ?? "gpt-4o-mini";
+const aiBaseUrl = process.env.AI_BASE_URL ?? "https://api.openai.com/v1/chat/completions";
+const aiClassificationEnabled = (process.env.AI_CLASSIFICATION_ENABLED ?? "false").toLowerCase() === "true";
+const aiClassificationTimeoutMs = Number(process.env.AI_CLASSIFICATION_TIMEOUT_MS ?? 10000);
 
 if (process.env.DATABASE_PATH && !path.isAbsolute(process.env.DATABASE_PATH)) {
   throw new Error(
@@ -65,8 +76,13 @@ const dbReadOnlyMode = (process.env.DB_READONLY_MODE ?? "false").toLowerCase() =
 // Backup configuration
 const maxBackups = Number(process.env.MAX_BACKUPS ?? 20);
 const maxAgeDays = Number(process.env.MAX_AGE_DAYS ?? 7);
-const backupDir = process.env.BACKUP_DIR ?? "/tmp/backups";
+const backupDir = process.env.BACKUP_DIR
+  ? path.resolve(process.env.BACKUP_DIR)
+  : nodeEnv === "production"
+  ? path.resolve(path.dirname(resolvedDatabasePath), "backups")
+  : canonicalBackupDir;
 const backupIntervalMs = Number(process.env.BACKUP_INTERVAL_MS ?? 15 * 60 * 1000);
+const autoRestoreBackup = (process.env.AUTO_RESTORE_BACKUP ?? "true").toLowerCase() === "true";
 const errorReportingEnabled = (process.env.ERROR_REPORTING_ENABLED ?? "true").toLowerCase() === "true";
 const sentryDsn = process.env.SENTRY_DSN ?? "";
 
@@ -105,6 +121,10 @@ export const env = {
   adminBootstrapToken,
   migrationImportFile: normalizedMigrationImportFile,
   migrationImportToken,
+  aiApiKey,
+  aiProvider,
+  aiModel,
+  aiBaseUrl,
 } as const;
 
 export const runtimeConfig = {
@@ -113,7 +133,11 @@ export const runtimeConfig = {
   maxAgeDays,
   backupDir,
   backupIntervalMs,
+  autoRestoreBackup,
   autoImportMigration,
+  newsTestMode,
   errorReportingEnabled,
   sentryDsn,
+  aiClassificationEnabled,
+  aiClassificationTimeoutMs: Number.isFinite(aiClassificationTimeoutMs) && aiClassificationTimeoutMs > 0 ? Math.min(aiClassificationTimeoutMs, 30000) : 10000,
 };

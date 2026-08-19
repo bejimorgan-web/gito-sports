@@ -50,6 +50,19 @@ export interface Season {
   status: EntityStatus;
 }
 
+export interface CreateSeasonRequest {
+  name: string;
+  startsAt?: string | null;
+  endsAt?: string | null;
+}
+
+export interface UpdateSeasonRequest {
+  name?: string;
+  startsAt?: string | null;
+  endsAt?: string | null;
+  status?: EntityStatus;
+}
+
 export interface Competition {
   id: EntityId;
   sportId: EntityId;
@@ -73,11 +86,29 @@ export interface Team {
   countryId?: EntityId;
   name: string;
   shortName?: string;
+  slug?: string;
   type: TeamType;
   logoUrl?: string;
   status: EntityStatus;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CompetitionSeasonTeam {
+  id: EntityId;
+  competitionId: EntityId;
+  seasonId: EntityId;
+  teamId: EntityId;
+  membershipStatus: EntityStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ClubDetail extends Team {
+  country?: Country;
+  sport?: Sport;
+  competitions: Competition[];
+  seasons: Season[];
 }
 
 export interface Match {
@@ -88,9 +119,35 @@ export interface Match {
   awayTeamId: EntityId;
   startsAt: string;
   venueName?: string;
+  externalProvider?: string;
+  externalMatchId?: string;
   status: MatchStatus;
   createdAt: string;
   updatedAt: string;
+}
+
+export type FixtureLinkStatus = "linked" | "ambiguous" | "unresolved" | "rejected";
+export type FixtureConfidence = "high" | "medium" | "low";
+
+export interface FixtureReconciliationCandidate {
+  matchId: EntityId;
+  confidence: FixtureConfidence;
+  reasons: string[];
+}
+
+export interface FixtureReconciliationDecision {
+  schedulingMatchId: EntityId;
+  candidateMatchIds: EntityId[];
+  selectedMatchId?: EntityId;
+  confidence: FixtureConfidence;
+  linkStatus: FixtureLinkStatus;
+  reasons: string[];
+  candidates: FixtureReconciliationCandidate[];
+}
+
+export interface FixtureReconciliationPreview {
+  decisions: FixtureReconciliationDecision[];
+  summary: { total: number; highConfidence: number; mediumConfidence: number; lowConfidence: number; linked: number; unresolved: number; ambiguous: number };
 }
 
 export interface CreateSportRequest {
@@ -153,6 +210,7 @@ export interface CreateTeamRequest {
   countryId?: EntityId;
   name: string;
   shortName?: string;
+  slug?: string;
   type: TeamType;
   logoUrl?: string;
 }
@@ -162,6 +220,7 @@ export interface UpdateTeamRequest {
   countryId?: EntityId;
   name?: string;
   shortName?: string;
+  slug?: string;
   type?: TeamType;
   logoUrl?: string;
   status?: EntityStatus;

@@ -11,7 +11,10 @@ export type NavigationKey =
   | "sports"
   | "approvals"
   | "matches"
-  | "mobileFeatures";
+  | "mobileFeatures"
+  | "news"
+  | "clubs";
+  
 
 export interface NavigationItem {
   key: NavigationKey;
@@ -24,6 +27,16 @@ export const navigationItems: NavigationItem[] = [
     key: "dashboard",
     label: "Dashboard",
     description: "Live operations overview"
+  },
+  {
+    key: "news",
+    label: "News",
+    description: "Editorial workspace for articles and sources"
+  },
+  {
+    key: "clubs",
+    label: "Clubs & Fixtures",
+    description: "Manage canonical clubs, seasons, and fixtures"
   },
   {
     key: "matchAssignment",

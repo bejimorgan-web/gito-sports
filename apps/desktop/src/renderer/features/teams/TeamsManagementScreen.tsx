@@ -16,6 +16,7 @@ export function TeamsManagementScreen() {
   const [countryId, setCountryId] = useState("");
   const [name, setName] = useState("");
   const [shortName, setShortName] = useState("");
+  const [slug, setSlug] = useState("");
   const [type, setType] = useState<TeamType>("club");
   const [logoUrl, setLogoUrl] = useState("");
   const [status, setStatus] = useState("Ready");
@@ -51,6 +52,7 @@ export function TeamsManagementScreen() {
     setCountryId("");
     setName("");
     setShortName("");
+    setSlug("");
     setType("club");
     setLogoUrl("");
     setStatus("Ready");
@@ -62,6 +64,7 @@ export function TeamsManagementScreen() {
     setCountryId(team.countryId ?? "");
     setName(team.name);
     setShortName(team.shortName ?? "");
+    setSlug(team.slug ?? "");
     setType(team.type);
     setLogoUrl(team.logoUrl ?? "");
     setStatus("Editing team");
@@ -89,6 +92,7 @@ export function TeamsManagementScreen() {
           sportId,
           name,
           type,
+          ...(slug ? { slug } : {}),
           ...(countryId ? { countryId } : {}),
           ...(shortName ? { shortName } : {}),
           ...(logoUrl ? { logoUrl } : {})
@@ -100,6 +104,7 @@ export function TeamsManagementScreen() {
           sportId,
           name,
           type,
+          ...(slug ? { slug } : {}),
           ...(countryId ? { countryId } : {}),
           ...(shortName ? { shortName } : {}),
           ...(logoUrl ? { logoUrl } : {})
@@ -169,6 +174,10 @@ export function TeamsManagementScreen() {
           <label>
             Short Name
             <input value={shortName} onChange={(event) => setShortName(event.target.value)} />
+          </label>
+          <label>
+            Slug
+            <input value={slug} onChange={(event) => setSlug(event.target.value)} placeholder="club-slug" />
           </label>
           <label>
             Sport

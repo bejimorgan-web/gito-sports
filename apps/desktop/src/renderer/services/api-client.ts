@@ -8,6 +8,11 @@ import type {
   CreateProviderRequest,
   CreateSportRequest,
   CreateTeamRequest,
+  CreateSeasonRequest,
+  UpdateSeasonRequest,
+  ClubDetail,
+  Season,
+  CompetitionSeasonTeam,
   Country,
   IPTVProvider,
   MatchAssignmentRequest,
@@ -22,13 +27,20 @@ import type {
 
 // Prefer the standardized `VITE_API_URL` but keep backwards compatibility
 // with the older `VITE_GITO_API_BASE_URL` name.
-let API_BASE_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? (import.meta.env.VITE_GITO_API_BASE_URL as string | undefined);
+const runtimeEnv = typeof import.meta !== "undefined" && typeof (import.meta as any).env !== "undefined"
+  ? (import.meta as any).env as Record<string, string | boolean | undefined>
+  : process.env as Record<string, string | undefined>;
+
+const configuredApiBaseUrl = (runtimeEnv?.VITE_API_URL as string | undefined) ?? (runtimeEnv?.VITE_GITO_API_BASE_URL as string | undefined);
 const DEV_API_BASE_URL = ["http://", "localhost", ":4100"].join("");
+const isDevelopmentMode = String(runtimeEnv?.MODE) === "development" || runtimeEnv?.DEV === true || runtimeEnv?.DEV === "true";
+
+let API_BASE_URL = configuredApiBaseUrl?.trim() || "";
 
 if (!API_BASE_URL) {
-  API_BASE_URL = (import.meta as any).env?.MODE === "production"
-    ? "https://gito-sports.onrender.com"
-    : DEV_API_BASE_URL;
+  API_BASE_URL = isDevelopmentMode ? DEV_API_BASE_URL : "https://gito-sports.onrender.com";
+} else if (isDevelopmentMode && /gito-sports\.onrender\.com/i.test(API_BASE_URL)) {
+  API_BASE_URL = DEV_API_BASE_URL;
 }
 
 API_BASE_URL = API_BASE_URL.replace(/\/$/, "");
@@ -37,7 +49,7 @@ console.log('[api-client] API_BASE_URL=', API_BASE_URL);
 
 export { API_BASE_URL };
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
     ...((init?.headers as Record<string, string>) ?? {})
   };
@@ -75,8 +87,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     return undefined as T;
   }
 
-  const body = (await response.json()) as { data: T };
-  return body.data;
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    const body = await response.json();
+    if (body && typeof body === "object" && "data" in body && body.data !== undefined) {
+      return body.data as T;
+    }
+    return body as T;
+  }
+
+  return (await response.text()) as T;
 }
 
 function buildApiPath(path: string, query?: Record<string, string | undefined>) {
@@ -197,6 +217,209 @@ export const apiClient = {
     return request<unknown>(`/iptv/providers/${providerId}/status`, {
       method: "POST",
       body: JSON.stringify({ status })
+    });
+  },
+  listNewsArticles() {
+    return request<Array<import("@gito/shared").NewsArticle>>("/news/articles");
+  },
+  createNewsArticle(input: import("@gito/shared").CreateNewsArticleRequest, accessToken: string) {
+    return request<import("@gito/shared").NewsArticle>("/news/articles", {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(input)
+    });
+  },
+  updateNewsArticle(articleId: string, input: import("@gito/shared").UpdateNewsArticleRequest, accessToken: string) {
+    return request<import("@gito/shared").NewsArticle>(`/news/articles/${articleId}`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(input)
+    });
+  },
+  publishNewsArticle(articleId: string, accessToken: string) {
+    return request<import("@gito/shared").NewsArticle>(`/news/articles/${articleId}/publish`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+  },
+  archiveNewsArticle(articleId: string, accessToken: string) {
+    return request<import("@gito/shared").NewsArticle>(`/news/articles/${articleId}/archive`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+  },
+  generateGiTONewsDraft(articleId: string, accessToken: string) {
+    return request<import("@gito/shared").NewsArticle>(`/news/articles/${articleId}/generate-gito-draft`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+  },
+  researchNewsArticle(articleId: string, accessToken: string) {
+    return request<import("@gito/shared").NewsResearchResult>(`/news/articles/${articleId}/research`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+  },
+  getNewsResearchResult(articleId: string, accessToken: string) {
+    return request<import("@gito/shared").NewsResearchResult>(`/news/articles/${articleId}/research`, {
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+  },
+  getNewsClassification(articleId: string, accessToken: string) {
+    return request<{ approved: import("@gito/shared").NewsArticleCategory[]; suggestions: import("@gito/shared").NewsArticleCategory[] }>(`/news/articles/${articleId}/classification`, { headers: { authorization: `Bearer ${accessToken}` } });
+  },
+  rerunNewsClassification(articleId: string, accessToken: string) {
+    return request<{ approved: import("@gito/shared").NewsArticleCategory[]; suggestions: import("@gito/shared").NewsArticleCategory[] }>(`/news/articles/${articleId}/classification/rerun`, { method: "POST", headers: { authorization: `Bearer ${accessToken}` } });
+  },
+  aiClassifyNewsArticle(articleId: string, accessToken: string) {
+    return request<{ approved: import("@gito/shared").NewsArticleCategory[]; suggestions: import("@gito/shared").NewsArticleCategory[] }>(`/news/articles/${articleId}/classification/ai`, { method: "POST", headers: { authorization: `Bearer ${accessToken}` } });
+  },
+  approveNewsClassification(articleId: string, categoryId: string, accessToken: string) {
+    return request<import("@gito/shared").NewsArticleCategory>(`/news/articles/${articleId}/classification/${categoryId}/approve`, { method: "POST", headers: { authorization: `Bearer ${accessToken}` } });
+  },
+  rejectNewsClassification(articleId: string, categoryId: string, accessToken: string) {
+    return request<import("@gito/shared").NewsArticleCategory>(`/news/articles/${articleId}/classification/${categoryId}/reject`, { method: "POST", headers: { authorization: `Bearer ${accessToken}` } });
+  },
+  approveNewsClassifications(articleId: string, categoryIds: string[], accessToken: string) {
+    return request<import("@gito/shared").NewsArticleCategory[]>(`/news/articles/${articleId}/classification/approve`, { method: "POST", headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ categoryIds }) });
+  },
+  addManualNewsClassification(articleId: string, categoryType: string, entityId: string, accessToken: string) {
+    return request<import("@gito/shared").NewsArticleCategory>(`/news/articles/${articleId}/classification/manual`, { method: "POST", headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ categoryType, entityId }) });
+  },
+  removeNewsClassification(articleId: string, categoryId: string, accessToken: string) {
+    return request<void>(`/news/articles/${articleId}/classification/${categoryId}`, { method: "DELETE", headers: { authorization: `Bearer ${accessToken}` } });
+  },
+  listNewsRssSources(accessToken: string) {
+    return request<Array<import("@gito/shared").NewsSource>>("/news/rss-sources", {
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+  },
+  createNewsRssSource(name: string, feedUrl: string, accessToken: string) {
+    return request<import("@gito/shared").NewsSource>("/news/rss-sources", {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ name, feedUrl })
+    });
+  },
+  deleteNewsRssSource(sourceId: string, accessToken: string) {
+    return request<void>(`/news/rss-sources/${sourceId}`, { method: "DELETE", headers: { authorization: `Bearer ${accessToken}` } });
+  },
+  fetchNewsRssSource(sourceId: string, accessToken: string) {
+    return request<{ sourceId: string; fetchedItems: number; importedItems: number; skippedDuplicates: number; failedItems: number }>(`/news/rss-sources/${sourceId}/fetch`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+  },
+  listGeneratedNewsRssFeeds(accessToken: string) {
+    return request<Array<any>>("/news/generated-rss-sources", { headers: { authorization: `Bearer ${accessToken}` } });
+  },
+  createGeneratedNewsRssFeed(name: string, sourceUrl: string, accessToken: string) {
+    return request<any>("/news/generated-rss-sources", { method: "POST", headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ name, sourceUrl }) });
+  },
+  refreshGeneratedNewsRssFeed(feedId: string, accessToken: string) {
+    return request<any>(`/news/generated-rss-sources/${feedId}/refresh`, { method: "POST", headers: { authorization: `Bearer ${accessToken}` } });
+  },
+  listGeneratedNewsRssArticles(feedId: string, accessToken: string) {
+    return request<Array<any>>(`/news/generated-rss-sources/${feedId}/articles`, { headers: { authorization: `Bearer ${accessToken}` } });
+  },
+  deleteGeneratedNewsRssFeed(feedId: string, accessToken: string) {
+    return request<void>(`/news/generated-rss-sources/${feedId}`, { method: "DELETE", headers: { authorization: `Bearer ${accessToken}` } });
+  },
+  generateGiTOOriginalStory(articleId: string, researchResult: import("@gito/shared").NewsResearchResult, accessToken: string) {
+    return request<import("@gito/shared").NewsArticle>(`/news/articles/${articleId}/generate-original`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ researchResult })
+    });
+  },
+  deleteNewsArticle(articleId: string, accessToken: string) {
+    return request<void>(`/news/articles/${articleId}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+  },
+  bulkDeleteNewsArticles(articleIds: string[], accessToken: string) {
+    return request<{ deletedCount: number }>("/news/articles/bulk-delete", {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ ids: articleIds })
+    });
+  },
+  listNewsSources() {
+    return request<Array<import("@gito/shared").NewsSource>>("/news/sources");
+  },
+  createNewsSource(input: import("@gito/shared").CreateNewsSourceRequest, accessToken: string) {
+    return request<import("@gito/shared").NewsSource>("/news/sources", {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(input)
+    });
+  },
+  updateNewsSource(sourceId: string, input: import("@gito/shared").UpdateNewsSourceRequest, accessToken: string) {
+    return request<import("@gito/shared").NewsSource>(`/news/sources/${sourceId}`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(input)
+    });
+  },
+  deleteNewsSource(sourceId: string, accessToken: string) {
+    return request<void>(`/news/sources/${sourceId}`, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+  },
+  collectNewsSource(sourceId: string, accessToken: string) {
+    return request<{ source: import("@gito/shared").NewsSource; imported: number; skipped: number }>(`/news/sources/${sourceId}/collect`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+  },
+  auditNewsSourcePublishingRights(sourceId: string, accessToken: string) {
+    return request<{
+      id: string;
+      sourceId: string;
+      status: string;
+      summary: string | null;
+      reviewNotes: string | null;
+      administratorDecision: string | null;
+      checkedAt: string;
+      createdAt: string;
+      updatedAt: string;
+      evidence: Array<{ id: string; evidenceUrl: string; pageTitle?: string | null; evidenceType: string; snippet?: string | null; checkedAt: string; createdAt: string }>;
+      permissions: Array<{ id: string; permission: string; allowed: boolean; notes?: string | null; evidenceUrl?: string | null; createdAt: string }>;
+    }>(`/news/sources/${sourceId}/audit-rights`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+  },
+  fetchNewsArticleContent(articleId: string, accessToken: string) {
+    return request<{
+      success: boolean;
+      article: import("@gito/shared").NewsArticle | null;
+      body: string | null;
+      summary: string | null;
+      contentOrigin: import("@gito/shared").NewsArticle["contentOrigin"];
+      fetchedAt: string | null;
+      fetchStatus: import("@gito/shared").NewsArticle["fetchStatus"];
+      fetchError: string | null;
+      message: string;
+    }>(`/news/articles/${articleId}/fetch-content`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+  },
+  addNewsArticleMedia(articleId: string, url: string, mediaType: "image" | "video" | "embed" = "image", accessToken: string) {
+    return request<unknown>(`/news/articles/${articleId}/media`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ url, mediaType, altText: "" })
+    });
+  },
+  addNewsArticleLink(articleId: string, url: string, label: string | undefined, accessToken: string) {
+    return request<unknown>(`/news/articles/${articleId}/links`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ url, label })
     });
   },
   listSports() {
@@ -344,6 +567,33 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
+  listClubs() {
+    return request<Team[]>('/clubs');
+  },
+  getClub(clubId: string) {
+    return request<{ data: ClubDetail }>(`/clubs/${clubId}`);
+  },
+  createSeason(competitionId: string, input: CreateSeasonRequest) {
+    return request<Season>(`/competitions/${competitionId}/seasons`, { method: 'POST', body: JSON.stringify(input) });
+  },
+  listSeasons(competitionId: string) {
+    return request<Season[]>(`/competitions/${competitionId}/seasons`);
+  },
+  getSeason(seasonId: string) {
+    return request<Season>(`/seasons/${seasonId}`);
+  },
+  updateSeason(seasonId: string, input: UpdateSeasonRequest) {
+    return request<Season>(`/seasons/${seasonId}`, { method: 'PUT', body: JSON.stringify(input) });
+  },
+  listSeasonTeams(competitionId: string, seasonId: string) {
+    return request<Array<CompetitionSeasonTeam & { team?: Team }>>(`/competitions/${competitionId}/seasons/${seasonId}/teams`);
+  },
+  addSeasonTeam(competitionId: string, seasonId: string, teamId: string) {
+    return request<CompetitionSeasonTeam>(`/competitions/${competitionId}/seasons/${seasonId}/teams`, { method: 'POST', body: JSON.stringify({ teamId }) });
+  },
+  removeSeasonTeam(competitionId: string, seasonId: string, teamId: string) {
+    return request<void>(`/competitions/${competitionId}/seasons/${seasonId}/teams/${teamId}`, { method: 'DELETE' });
+  },
   deleteTeam(teamId: string) {
     return request<void>(`/teams/${teamId}`, { method: 'DELETE' });
   },
@@ -351,6 +601,12 @@ export const apiClient = {
   listMatches(opts?: { competitionId?: string }) {
     const query = opts?.competitionId ? `?competitionId=${encodeURIComponent(opts.competitionId)}` : "";
     return request<PublishedLiveMatch[] | any[]>(`/matches${query}`);
+  },
+  previewFixtureReconciliation(accessToken: string) {
+    return request<any>("/api/admin/fixture-reconciliation/preview", { method: "POST", headers: { authorization: `Bearer ${accessToken}` } });
+  },
+  applyFixtureReconciliation(accessToken: string) {
+    return request<any>("/api/admin/fixture-reconciliation/apply", { method: "POST", headers: { authorization: `Bearer ${accessToken}` } });
   },
   getMatch(matchId: string) {
     return request<any>(`/matches/${matchId}`);
@@ -369,6 +625,33 @@ export const apiClient = {
   },
   deleteMatch(matchId: string) {
     return request<void>(`/matches/${matchId}`, { method: 'DELETE' });
+  },
+  listFixtures(opts?: { competitionId?: string; seasonId?: string }) {
+    const params = new URLSearchParams();
+    if (opts?.competitionId) params.set('competitionId', opts.competitionId);
+    if (opts?.seasonId) params.set('seasonId', opts.seasonId);
+    return request<any[]>(`/fixtures${params.toString() ? `?${params.toString()}` : ''}`);
+  },
+  listFixtureStreams(fixtureId: string) {
+    return request<any[]>(`/fixtures/${fixtureId}/streams`);
+  },
+  assignFixtureStream(fixtureId: string, channelId: string, accessToken: string) {
+    return request<any>(`/fixtures/${fixtureId}/streams`, { method: "POST", headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ channelId }) });
+  },
+  updateFixtureStream(fixtureId: string, streamId: string, input: { channelId?: string; protocol?: string }, accessToken: string) {
+    return request<any>(`/fixtures/${fixtureId}/streams/${streamId}`, { method: "PUT", headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
+  },
+  deleteFixtureStream(fixtureId: string, streamId: string, accessToken: string) {
+    return request<void>(`/fixtures/${fixtureId}/streams/${streamId}`, { method: "DELETE", headers: { authorization: `Bearer ${accessToken}` } });
+  },
+  getFixture(fixtureId: string) {
+    return request<any>(`/fixtures/${fixtureId}`);
+  },
+  createFixture(input: any, accessToken: string) {
+    return request<any>('/fixtures', { method: 'POST', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
+  },
+  updateFixture(fixtureId: string, input: any, accessToken: string) {
+    return request<any>(`/fixtures/${fixtureId}`, { method: 'PUT', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
   },
   assignStream(input: MatchAssignmentRequest) {
     return request<MatchAssignmentResult>("/matches/assign-stream", {

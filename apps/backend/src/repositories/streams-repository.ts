@@ -1,4 +1,5 @@
 import type { Stream } from "@gito/shared";
+import crypto from "node:crypto";
 
 import { getDatabase } from "../db/connection.js";
 
@@ -59,4 +60,53 @@ export function getStreamById(streamId: string): Stream | undefined {
     .get(streamId) as Record<string, string | number | null> | undefined;
 
   return row ? mapStream(row) : undefined;
+}
+
+function assertCanonicalFixture(fixtureId: string) {
+  const row = getDatabase().prepare("SELECT id FROM matches WHERE id = ?").get(fixtureId);
+  if (!row) throw new Error("fixture_not_found");
+}
+
+function getValidChannel(channelId: string) {
+  const row = getDatabase().prepare(`
+    SELECT c.id, c.provider_id, c.status, p.id AS provider_id_check, p.deleted
+    FROM channels c JOIN providers p ON p.id = c.provider_id
+    WHERE c.id = ?
+  `).get(channelId) as { id: string; provider_id: string; status: string; provider_id_check: string; deleted: number } | undefined;
+  if (!row || row.status === "archived" || row.deleted === 1) throw new Error("channel_not_found");
+  if (!row.provider_id_check) throw new Error("provider_not_found");
+  return row;
+}
+
+export function createCanonicalStream(fixtureId: string, channelId: string, protocol: Stream["protocol"] = "hls"): Stream {
+  assertCanonicalFixture(fixtureId);
+  const channel = getValidChannel(channelId);
+  const database = getDatabase();
+  const duplicate = database.prepare("SELECT id FROM streams WHERE match_id = ? AND channel_id = ?").get(fixtureId, channel.id);
+  if (duplicate) throw new Error("stream_already_assigned");
+  const timestamp = new Date().toISOString();
+  const streamId = crypto.randomUUID();
+  database.prepare(`
+    INSERT INTO streams (id, match_id, channel_id, protocol, status, approval_status, health_status, failure_count, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 'assigned', 'assigned', 'unknown', 0, ?, ?)
+  `).run(streamId, fixtureId, channel.id, protocol, timestamp, timestamp);
+  return getStreamById(streamId)!;
+}
+
+export function updateCanonicalStream(fixtureId: string, streamId: string, input: { channelId?: string; protocol?: Stream["protocol"] }): Stream | undefined {
+  assertCanonicalFixture(fixtureId);
+  const database = getDatabase();
+  const existing = database.prepare("SELECT * FROM streams WHERE id = ? AND match_id = ?").get(streamId, fixtureId) as any;
+  if (!existing) return undefined;
+  const channelId = input.channelId ?? existing.channel_id;
+  const channel = getValidChannel(channelId);
+  const duplicate = database.prepare("SELECT id FROM streams WHERE match_id = ? AND channel_id = ? AND id != ?").get(fixtureId, channel.id, streamId);
+  if (duplicate) throw new Error("stream_already_assigned");
+  database.prepare("UPDATE streams SET channel_id = ?, protocol = ?, updated_at = ? WHERE id = ? AND match_id = ?").run(channel.id, input.protocol ?? existing.protocol, new Date().toISOString(), streamId, fixtureId);
+  return getStreamById(streamId);
+}
+
+export function deleteCanonicalStream(fixtureId: string, streamId: string): boolean {
+  assertCanonicalFixture(fixtureId);
+  return getDatabase().prepare("DELETE FROM streams WHERE id = ? AND match_id = ?").run(streamId, fixtureId).changes > 0;
 }

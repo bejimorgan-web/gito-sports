@@ -6,9 +6,10 @@ import StreamStatusPanel from "./StreamStatusPanel";
 
 interface MatchSchedulerScreenProps {
   selectedMatchId?: string | undefined;
+  accessToken?: string;
 }
 
-export function MatchSchedulerScreen({ selectedMatchId: externalSelectedMatchId }: MatchSchedulerScreenProps) {
+export function MatchSchedulerScreen({ selectedMatchId: externalSelectedMatchId, accessToken = "" }: MatchSchedulerScreenProps) {
   const [competitions, setCompetitions] = useState<Competition[]>([]);
   const [sports, setSports] = useState<Sport[]>([]);
   const [countries, setCountries] = useState<Country[]>([]);
@@ -22,6 +23,8 @@ export function MatchSchedulerScreen({ selectedMatchId: externalSelectedMatchId 
   const [matches, setMatches] = useState<any[]>([]);
   const [status, setStatus] = useState("Ready");
   const [selectedMatchId, setSelectedMatchId] = useState<string | undefined>(externalSelectedMatchId);
+  const [reconciliation, setReconciliation] = useState<any | null>(null);
+  const [reconciliationStatus, setReconciliationStatus] = useState("Not inspected");
 
   const load = async () => {
     try {
@@ -98,6 +101,31 @@ export function MatchSchedulerScreen({ selectedMatchId: externalSelectedMatchId 
       void load();
     } catch (err) {
       setStatus(err instanceof Error ? err.message : "Create failed");
+    }
+  };
+
+  const previewReconciliation = async () => {
+    if (!accessToken) {
+      setReconciliationStatus("Sign in as an administrator to inspect legacy fixture identity.");
+      return;
+    }
+    try {
+      const result = await apiClient.previewFixtureReconciliation(accessToken);
+      setReconciliation(result.data);
+      setReconciliationStatus("Preview loaded. No links were changed.");
+    } catch (error) {
+      setReconciliationStatus(error instanceof Error ? error.message : "Unable to load reconciliation preview.");
+    }
+  };
+
+  const applyReconciliation = async () => {
+    if (!accessToken) return;
+    try {
+      const result = await apiClient.applyFixtureReconciliation(accessToken);
+      setReconciliation(result.data.preview);
+      setReconciliationStatus(`${result.data.applied.length} high-confidence link(s) applied; ${result.data.skipped.length} skipped.`);
+    } catch (error) {
+      setReconciliationStatus(error instanceof Error ? error.message : "Unable to apply reconciliation.");
     }
   };
 
@@ -233,6 +261,25 @@ export function MatchSchedulerScreen({ selectedMatchId: externalSelectedMatchId 
                 </tbody>
               </table>
             </div>
+          </section>
+
+          <section className="console-panel" style={{ marginTop: 16 }}>
+            <div className="panel-heading">
+              <h3>Fixture identity</h3>
+              <span className="status-pill">{reconciliationStatus}</span>
+            </div>
+            <div className="button-row">
+              <button type="button" onClick={() => void previewReconciliation()}>Preview legacy links</button>
+              {reconciliation?.summary?.highConfidence > 0 ? <button type="button" onClick={() => void applyReconciliation()}>Apply high-confidence links</button> : null}
+            </div>
+            {reconciliation?.decisions?.length === 0 ? <p className="field-note">No legacy scheduled fixtures require reconciliation.</p> : null}
+            {reconciliation?.decisions?.map((decision: any) => (
+              <article className="entity-list-item" key={decision.schedulingMatchId}>
+                <strong>{decision.schedulingMatchId}</strong>
+                <span>{decision.linkStatus} · {decision.confidence}</span>
+                <small>{decision.reasons.join("; ")}</small>
+              </article>
+            ))}
           </section>
         </div>
 

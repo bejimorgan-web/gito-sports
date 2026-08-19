@@ -16,13 +16,16 @@ import { systemRouter } from "./routes/system.js";
 import { iptvRouter } from "./routes/iptv.js";
 import { liveMatchesRouter } from "./routes/live-matches.js";
 import { matchesRouter } from "./routes/matches.js";
+import { fixturesRouter } from "./routes/fixtures.js";
 import { mobileRouter } from "./routes/mobile.js";
 import { operationsRouter } from "./routes/operations.js";
 import { scoresRouter } from "./routes/scores.js";
 import { sportsRouter } from "./routes/sports.js";
 import { countriesRouter } from "./routes/countries.js";
 import { competitionsRouter } from "./routes/competitions.js";
+import { competitionSeasonsRouter, seasonsRouter } from "./routes/seasons.js";
 import { teamsRouter } from "./routes/teams.js";
+import { clubsRouter } from "./routes/clubs.js";
 import { streamsRouter } from "./routes/streams.js";
 import { uploadsRouter } from "./routes/uploads.js";
 import { eventsRouter } from "./routes/events.js";
@@ -32,6 +35,8 @@ import { footballRouter } from "./routes/football.js";
 import { analyticsRouter } from "./routes/analytics.js";
 import { configRouter } from "./routes/config.js";
 import { runtimeConfig } from "./config/env.js";
+import { newsRouter } from "./routes/news.js";
+import { fixtureReconciliationRouter } from "./routes/fixture-reconciliation.js";
 
 export function createApp() {
   const app = express();
@@ -169,18 +174,24 @@ export function createApp() {
   app.use("/config", configRouter);
   app.use("/countries", countriesRouter);
   app.use("/competitions", competitionsRouter);
+  app.use("/competitions/:competitionId/seasons", competitionSeasonsRouter);
+  app.use("/seasons", seasonsRouter);
   app.use("/teams", teamsRouter);
+  app.use("/clubs", clubsRouter);
   app.use("/matches", matchesRouter);
+  app.use("/fixtures", fixturesRouter);
   app.use("/live-matches", liveMatchesRouter);
   app.use("/mobile", readinessGuard, mobileRouter);
   app.use("/analytics", readinessGuard, analyticsRouter);
   app.use("/mobile/analytics", readinessGuard, analyticsRouter);
   app.use("/operations", operationsRouter);
   app.use("/scores", scoresRouter);
+  app.use("/news", newsRouter);
   app.use("/api/football", readinessGuard, footballRouter);
   app.use("/iptv", iptvRouter);
   app.use("/streams", streamsRouter);
   app.use('/api/admin/migration', migrationRouter);
+  app.use('/api/admin/fixture-reconciliation', fixtureReconciliationRouter);
 
   if (runtimeConfig.errorReportingEnabled && runtimeConfig.sentryDsn) {
     Sentry.setupExpressErrorHandler(app);

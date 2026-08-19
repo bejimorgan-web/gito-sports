@@ -10,6 +10,16 @@ export const initialSchemaPath = path.join(
   "initial-schema.sql"
 );
 
+export const newsSchemaPath = path.join(
+  currentDirectory,
+  "schema",
+  "news-schema.sql"
+);
+
 export function readInitialSchema(): string {
   return fs.readFileSync(initialSchemaPath, "utf8");
+}
+
+export function readNewsSchema(): string {
+  return fs.readFileSync(newsSchemaPath, "utf8");
 }

@@ -7,7 +7,8 @@ export function validateHttpStreamUrl(value: string): string | null {
     return "stream_url_malformed";
   }
 
-  if (!["http:", "https:"].includes(parsed.protocol)) {
+  const supportedProtocols = new Set(["http:", "https:", "rtmp:", "rtsp:", "udp:", "srt:"]);
+  if (!supportedProtocols.has(parsed.protocol)) {
     return "stream_url_protocol_unsupported";
   }
 

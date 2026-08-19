@@ -21,6 +21,7 @@ import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
 import 'services/ad_manager.dart';
+import 'screens/mobile_catalog_screens.dart';
 
 const appLogoUrl =
     'https://cdn.iconscout.com/icon/free/png-256/free-sports-4457831-3693644.png';
@@ -751,7 +752,7 @@ class _LiveHomeScreenState extends State<LiveHomeScreen> {
   Timer? _refreshTimer;
   int _activeTab = 0;
   bool _firstLoad = true;
-  
+
   // Remote config for navigation
   MobileNavigationConfig? _navConfig;
   bool _configLoaded = false;
@@ -767,7 +768,7 @@ class _LiveHomeScreenState extends State<LiveHomeScreen> {
     _refreshTimer =
         Timer.periodic(const Duration(seconds: 5), (_) => _refreshFeed());
   }
-  
+
   Future<void> _loadRemoteConfig() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -900,17 +901,18 @@ class _LiveHomeScreenState extends State<LiveHomeScreen> {
   @override
   Widget build(BuildContext context) {
     // Get the navigation config (default to all enabled if not loaded)
-    final config = _navConfig ?? MobileNavigationConfig(
-      liveScores: true,
-      sports: true,
-      live: true,
-    );
-    
+    final config = _navConfig ??
+        MobileNavigationConfig(
+          liveScores: true,
+          sports: true,
+          live: true,
+        );
+
     // Build available screens based on config
     final availableScreens = <Widget>[];
     final availableDestinations = <NavigationDestination>[];
     final screenLabels = <String>[];
-    
+
     // Live Scores tab
     if (config.liveScores) {
       availableScreens.add(const LiveScoresScreen());
@@ -922,7 +924,7 @@ class _LiveHomeScreenState extends State<LiveHomeScreen> {
       );
       screenLabels.add('Live Scores');
     }
-    
+
     // Sports tab
     if (config.sports) {
       availableScreens.add(SportsScreen(matches: List.unmodifiable(_matches)));
@@ -934,7 +936,7 @@ class _LiveHomeScreenState extends State<LiveHomeScreen> {
       );
       screenLabels.add('Sports');
     }
-    
+
     // Live tab
     if (config.live) {
       availableScreens.add(
@@ -953,7 +955,25 @@ class _LiveHomeScreenState extends State<LiveHomeScreen> {
       );
       screenLabels.add('Live');
     }
-    
+
+    availableScreens.add(const ClubsScreen());
+    availableDestinations.add(
+      const NavigationDestination(
+        icon: Icon(Icons.groups_rounded),
+        label: 'Clubs',
+      ),
+    );
+    screenLabels.add('Clubs');
+
+    availableScreens.add(const GlobalNewsScreen());
+    availableDestinations.add(
+      const NavigationDestination(
+        icon: Icon(Icons.article_rounded),
+        label: 'News',
+      ),
+    );
+    screenLabels.add('News');
+
     final bool maintenanceMode = availableScreens.isEmpty;
     if (maintenanceMode) {
       availableScreens.add(
@@ -1107,7 +1127,8 @@ class _LiveScoresScreenState extends State<LiveScoresScreen> {
               if (!_firstLoad && _connectionState != FeedConnectionState.online)
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
                     child: ElevatedButton(
                       onPressed: _refreshScores,
                       child: const Text('Retry live scores'),
@@ -2692,7 +2713,8 @@ class _PlaybackScreenState extends State<PlaybackScreen>
 
     if (value.hasError && !_hasLoggedStreamError) {
       _hasLoggedStreamError = true;
-      final errorDescription = value.errorDescription?.toString() ?? 'Unknown playback error';
+      final errorDescription =
+          value.errorDescription?.toString() ?? 'Unknown playback error';
       _logStreamError(errorDescription);
       if (mounted) {
         setState(() {
@@ -2714,7 +2736,8 @@ class _PlaybackScreenState extends State<PlaybackScreen>
       final qualityLabel = '${size.width.toInt()}x${size.height.toInt()}';
       if (_lastVideoSize == null) {
         _lastVideoSize = size;
-      } else if (_lastVideoSize!.width != size.width || _lastVideoSize!.height != size.height) {
+      } else if (_lastVideoSize!.width != size.width ||
+          _lastVideoSize!.height != size.height) {
         _lastVideoSize = size;
         _logQualityChange(qualityLabel);
       }

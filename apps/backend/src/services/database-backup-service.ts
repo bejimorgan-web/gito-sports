@@ -46,8 +46,7 @@ function getBackupFilePath(filename: string): string {
 
 function openDatabaseConnection(readOnly = false): DatabaseSync {
   const dbPath = env.absoluteDatabasePath;
-  const openPath = readOnly ? `file:${dbPath}?mode=ro` : dbPath;
-  return allowSqliteInstantiation(() => new DatabaseSync(openPath));
+  return allowSqliteInstantiation(() => new DatabaseSync(dbPath, readOnly ? { readonly: true } : undefined));
 }
 
 function queryIntegrity(database: DatabaseSync): string {
@@ -149,7 +148,7 @@ export async function validateBackup(filename: string): Promise<{ valid: boolean
     throw new Error("Backup file is missing or empty.");
   }
 
-  const db = allowSqliteInstantiation(() => new DatabaseSync(`file:${backupPath}?mode=ro`));
+  const db = allowSqliteInstantiation(() => new DatabaseSync(backupPath, { readonly: true }));
   try {
     const integrity = queryIntegrity(db);
     return {

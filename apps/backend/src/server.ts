@@ -91,7 +91,7 @@ if (runtimeConfig.errorReportingEnabled && runtimeConfig.sentryDsn) {
   const app = createApp();
   markInitialReadiness();
 
-  const port = Number(process.env.PORT ?? 3000);
+  const port = env.port;
   app.listen(port, "0.0.0.0", async () => {
     console.log(`GiTO backend listening on port ${port}`);
 

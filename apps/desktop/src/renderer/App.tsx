@@ -17,6 +17,9 @@ import { UsersAnalyticsScreen } from "./features/analytics/UsersAnalyticsScreen"
 import { MatchesAnalyticsScreen } from "./features/analytics/MatchesAnalyticsScreen";
 import { AdsAnalyticsScreen } from "./features/analytics/AdsAnalyticsScreen";
 import { MobileFeatureControlScreen } from "./features/mobile/MobileFeatureControlScreen";
+import { NewsWorkspaceScreen } from "./features/news/NewsWorkspaceScreen";
+import { ClubManagementScreen } from "./features/clubs/ClubManagementScreen";
+import { FixtureWorkspaceScreen } from "./features/clubs/FixtureWorkspaceScreen";
 import { AuthenticatedLayout } from "./layouts/AuthenticatedLayout";
 import { LoginScreen } from "./screens/LoginScreen";
 import { apiClient, API_BASE_URL } from "./services/api-client";
@@ -54,6 +57,7 @@ function renderScreen(
     selectedMatchId?: string | undefined;
     providers: ProviderList;
     selectedChannel: Channel | undefined;
+    preferredProviderId: string | undefined;
     liveMode: boolean;
     channelSearch: string;
     channelCategory: string;
@@ -108,6 +112,7 @@ function renderScreen(
           previewedChannelId={state.previewedChannelId}
           providers={state.providers}
           selectedChannel={state.selectedChannel}
+          preferredProviderId={state.preferredProviderId}
           liveMode={state.liveMode}
           onApprove={actions.approveStream}
           onAssignMatch={actions.assignMatch}
@@ -132,7 +137,7 @@ function renderScreen(
     case "sports":
       return <SportsWorkspaceScreen />;
     case "matches":
-      return <MatchSchedulerScreen selectedMatchId={state.selectedMatchId} />;
+      return <MatchSchedulerScreen selectedMatchId={state.selectedMatchId} accessToken={state.accessToken} />;
     case "approvals":
       return (
         <LiveMatchApprovalScreen
@@ -158,6 +163,10 @@ function renderScreen(
       return <AdsAnalyticsScreen />;
     case "mobileFeatures":
       return <MobileFeatureControlScreen accessToken={state.accessToken} />;
+    case "news":
+      return <NewsWorkspaceScreen accessToken={state.accessToken} />;
+    case "clubs":
+      return <><ClubManagementScreen accessToken={state.accessToken} /><FixtureWorkspaceScreen accessToken={state.accessToken} /></>;
     case "dashboard":
       return (
         <DashboardShell
@@ -182,6 +191,7 @@ function renderScreen(
           previewedChannelId={state.previewedChannelId}
           providers={state.providers}
           selectedChannel={state.selectedChannel}
+          preferredProviderId={state.preferredProviderId}
           liveMode={state.liveMode}
           onApprove={actions.approveStream}
           onAssignMatch={actions.assignMatch}
@@ -212,6 +222,7 @@ export function App() {
   const [providers, setProviders] = useState<ProviderList>([]);
   const [previewedChannelId, setPreviewedChannelId] = useState<string>();
   const [selectedChannel, setSelectedChannel] = useState<Channel>();
+  const [preferredProviderId, setPreferredProviderId] = useState<string | undefined>(undefined);
   const [selectedMatchId, setSelectedMatchId] = useState<string | undefined>(undefined);
   const [liveMode, setLiveMode] = useState(false);
   const [channelSearch, setChannelSearch] = useState("");
@@ -318,7 +329,7 @@ export function App() {
 
       const [providerData, channelData, liveData] = await Promise.all([
         apiClient.listProviders(),
-        apiClient.listChannels(),
+        apiClient.listChannels(undefined, { includeInactive: true }),
         apiClient.listLiveMatches()
       ]);
 
@@ -381,7 +392,12 @@ export function App() {
       return;
     }
 
-    await apiClient.createProvider(input);
+    const provider = await apiClient.createProvider(input);
+    setPreferredProviderId(provider.id);
+    setChannels([]);
+    setProviders([]);
+    await refreshOperations("full");
+    await new Promise((resolve) => window.setTimeout(resolve, 150));
     await refreshOperations("full");
   }, [backendStatus, refreshOperations]);
 
@@ -389,6 +405,11 @@ export function App() {
     if (backendStatus !== "online") return;
 
     await apiClient.updateProvider(providerId, input);
+    setPreferredProviderId(providerId);
+    setChannels([]);
+    setProviders([]);
+    await refreshOperations("full");
+    await new Promise((resolve) => window.setTimeout(resolve, 150));
     await refreshOperations("full");
   }, [backendStatus, refreshOperations]);
 
@@ -427,6 +448,13 @@ export function App() {
     if (backendStatus !== "online") return;
 
     await apiClient.setProviderStatus(providerId, status);
+    if (status === "active") {
+      setPreferredProviderId(providerId);
+    }
+    setChannels([]);
+    setProviders([]);
+    await refreshOperations("full");
+    await new Promise((resolve) => window.setTimeout(resolve, 150));
     await refreshOperations("full");
   }, [backendStatus, refreshOperations]);
 
@@ -602,6 +630,7 @@ export function App() {
 
   const selectChannel = useCallback((channel: Channel) => {
     setSelectedChannel(channel);
+    setPreferredProviderId(channel.providerId);
     setPreviewedChannelId(undefined);
     setAssignment((current) => (current && current.channel.id !== channel.id ? undefined : current));
   }, []);
@@ -683,6 +712,7 @@ const testProviderById = useCallback(async (providerId: string) => {
       previewedChannelId,
       providers,
       selectedChannel,
+      preferredProviderId,
       liveMode,
       channelSearch,
       channelCategory,

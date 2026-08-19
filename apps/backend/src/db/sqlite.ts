@@ -22,14 +22,15 @@ export function allowSqliteInstantiation<T>(callback: () => T): T {
 export class DatabaseSync {
   private db: Database;
 
-  constructor(path: string) {
+  constructor(path: string, options?: { readonly?: boolean }) {
     if (!allowDirectInstantiation) {
       throw new Error(
         "Direct sqlite DatabaseSync instantiation is forbidden outside apps/backend/src/db/connection.ts"
       );
     }
 
-    this.db = new Database(path);
+    const DatabaseCtor = Database as unknown as new (filePath: string, options?: { readonly?: boolean }) => Database;
+    this.db = new DatabaseCtor(path, options ? { readonly: options.readonly ?? false } : undefined);
   }
 
   // --- OPTIONAL SAFE WRAPPERS (add what you need) ---
