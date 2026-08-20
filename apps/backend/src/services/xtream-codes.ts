@@ -1,23 +1,56 @@
 import type { ParsedChannel, ProviderConnectionTest } from "@gito/shared";
 
-export function buildXtreamEndpointCandidates(baseUrl: string) {
-  const normalizedBase = baseUrl.trim();
-  if (!normalizedBase) {
-    return [];
+/**
+ * Normalize an Xtream server URL to standard form.
+ * Handles:
+ * - http://host:port
+ * - https://host:port
+ * - http://host:port/player_api.php (strips redundant path)
+ * - Validates protocol is HTTP or HTTPS
+ * - Strips trailing slashes
+ */
+export function normalizeXtreamUrl(baseUrl: string): { url: string; error?: string } {
+  const trimmed = baseUrl.trim();
+  if (!trimmed) {
+    return { url: "", error: "URL cannot be empty." };
   }
 
-  const trimmed = normalizedBase.replace(/\/$/, "");
-  const candidates = new Set<string>();
+  // Simple protocol check - must start with http:// or https://
+  if (!/^https?:\/\//i.test(trimmed)) {
+    return { url: "", error: "Enter a valid HTTP/HTTPS Xtream server URL." };
+  }
 
+  try {
+    const url = new URL(trimmed);
+
+    // Validate protocol
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return { url: "", error: "Enter a valid HTTP/HTTPS Xtream server URL." };
+    }
+
+    // Preserve legitimate installation subpaths, but remove a supplied API filename.
+    const pathname = url.pathname
+      .replace(/\/(?:player_api|api|get)\.php$/i, "")
+      .replace(/\/+$/, "");
+    const baseWithoutPath = `${url.origin}${pathname}`;
+
+    return { url: baseWithoutPath };
+  } catch {
+    return { url: "", error: "Enter a valid HTTP/HTTPS Xtream server URL." };
+  }
+}
+
+export function buildXtreamEndpointCandidates(baseUrl: string) {
+  const trimmed = baseUrl.trim().replace(/\/$/, "");
   if (!trimmed) {
     return [];
   }
 
+  const candidates = new Set<string>();
   candidates.add(trimmed);
   candidates.add(`${trimmed}/player_api.php`);
   candidates.add(`${trimmed}/api.php`);
   candidates.add(`${trimmed}/get.php`);
-  candidates.add(`${trimmed}/xmltv.php`);
 
   if (/player_api\.php$/i.test(trimmed)) {
     candidates.add(trimmed);
@@ -68,8 +101,28 @@ export async function testXtreamConnection(
   username: string,
   password: string
 ): Promise<ProviderConnectionTest> {
+  // First validate and normalize the URL
+  const urlResult = normalizeXtreamUrl(baseUrl);
+  if (urlResult.error) {
+    return {
+      ok: false,
+      message: urlResult.error,
+      statusCode: 400
+    };
+  }
+
+  const normalizedUrl = urlResult.url;
+
   try {
-    const endpointCandidates = buildXtreamEndpointCandidates(baseUrl);
+    const endpointCandidates = buildXtreamEndpointCandidates(normalizedUrl);
+    if (endpointCandidates.length === 0) {
+      return {
+        ok: false,
+        message: "Could not build valid Xtream endpoints.",
+        statusCode: 400
+      };
+    }
+
     const responses = await Promise.allSettled(
       endpointCandidates.map((candidate) =>
         fetchWithTimeout(
@@ -81,30 +134,126 @@ export async function testXtreamConnection(
       )
     );
 
-    const successful = responses.find(
-      (response): response is PromiseFulfilledResult<Response> => response.status === "fulfilled" && response.value.ok
-    );
+    // Look for successful response
+    let malformedResponse = false;
+    for (const response of responses) {
+      if (response.status !== "fulfilled" || !response.value.ok) {
+        continue;
+      }
 
-    if (successful) {
+      try {
+        const payload = await response.value.clone().json();
+        if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+          return {
+            ok: true,
+            statusCode: response.value.status,
+            message: "Connected — credentials accepted."
+          };
+        }
+        malformedResponse = true;
+      } catch {
+        malformedResponse = true;
+      }
+    }
+
+    // Classify the failure by examining responses
+    let authFailureCount = 0;
+    let networkFailureCount = 0;
+    let timeoutFailureCount = 0;
+    let lastStatusCode: number | undefined;
+
+    for (const response of responses) {
+      if (response.status === "fulfilled") {
+        const status = response.value.status;
+        lastStatusCode = status;
+
+        if (status === 401 || status === 403) {
+          authFailureCount++;
+        }
+      } else if (response.status === "rejected") {
+        const reason = response.reason;
+        const errorMessage = String(reason);
+
+        if (errorMessage.includes("AbortError") || errorMessage.includes("timeout")) {
+          timeoutFailureCount++;
+        } else if (
+          errorMessage.includes("ENOTFOUND") ||
+          errorMessage.includes("ECONNREFUSED") ||
+          errorMessage.includes("Failed host lookup") ||
+          errorMessage.includes("network")
+        ) {
+          networkFailureCount++;
+        }
+      }
+    }
+
+    // Return classified error
+    if (timeoutFailureCount > 0) {
       return {
-        ok: true,
-        statusCode: successful.value.status,
-        message: "Xtream provider responded."
+        ok: false,
+        statusCode: 408,
+        message: "The provider did not respond within the allowed time."
       };
     }
 
-    const lastFailure = responses[responses.length - 1];
-    const fallbackStatus = lastFailure?.status === "fulfilled" ? lastFailure.value.status : undefined;
+    if (networkFailureCount > 0 || responses.every((r) => r.status === "rejected")) {
+      return {
+        ok: false,
+        statusCode: 503,
+        message: "GiTO could not reach the provider server."
+      };
+    }
+
+    if (authFailureCount > 0 || lastStatusCode === 401 || lastStatusCode === 403) {
+      return {
+        ok: false,
+        statusCode: lastStatusCode ?? 401,
+        message: "Username or password was rejected by the provider."
+      };
+    }
+
+    if (malformedResponse) {
+      return {
+        ok: false,
+        statusCode: lastStatusCode ?? 502,
+        message: "Xtream provider returned an invalid response."
+      };
+    }
+
+    // Generic provider error
+    return {
+      ok: false,
+      statusCode: lastStatusCode ?? 500,
+      message: "Xtream provider returned an error."
+    };
+  } catch (error) {
+    // Network or system error
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    if (errorMessage.includes("AbortError") || errorMessage.includes("timeout")) {
+      return {
+        ok: false,
+        statusCode: 408,
+        message: "The provider did not respond within the allowed time."
+      };
+    }
+
+    if (
+      errorMessage.includes("ENOTFOUND") ||
+      errorMessage.includes("ECONNREFUSED") ||
+      errorMessage.includes("Failed host lookup")
+    ) {
+      return {
+        ok: false,
+        statusCode: 503,
+        message: "GiTO could not reach the provider server."
+      };
+    }
 
     return {
       ok: false,
-      statusCode: fallbackStatus,
-      message: "Xtream provider rejected the request."
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      message: error instanceof Error ? error.message : "Provider connection failed."
+      statusCode: 500,
+      message: "GiTO could not validate this provider."
     };
   }
 }

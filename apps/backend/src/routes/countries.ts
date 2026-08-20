@@ -45,20 +45,39 @@ countriesRouter.post("/", (request, response) => {
     return;
   }
 
-  const country = createCountry(body);
-  response.status(201).json({ data: normalizeCountry(request, country) });
+  try {
+    const country = createCountry(body);
+    response.status(201).json({ data: normalizeCountry(request, country) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const code = (error as { code?: string })?.code ?? "country_error";
+    response.status(code === "country_already_exists" ? 409 : 400).json({
+      error: code,
+      message
+    });
+  }
 });
 
 countriesRouter.put("/:countryId", (request, response) => {
   const body = request.body as UpdateCountryRequest;
-  const updated = updateCountry(request.params.countryId, body);
 
-  if (!updated) {
-    response.status(404).json({ error: "country_not_found" });
-    return;
+  try {
+    const updated = updateCountry(request.params.countryId, body);
+
+    if (!updated) {
+      response.status(404).json({ error: "country_not_found" });
+      return;
+    }
+
+    response.json({ data: normalizeCountry(request, updated) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const code = (error as { code?: string })?.code ?? "country_error";
+    response.status(code === "country_already_exists" ? 409 : 400).json({
+      error: code,
+      message
+    });
   }
-
-  response.json({ data: normalizeCountry(request, updated) });
 });
 
 countriesRouter.delete("/:countryId", (request, response) => {

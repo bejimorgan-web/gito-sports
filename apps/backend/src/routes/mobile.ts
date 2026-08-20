@@ -13,6 +13,7 @@ import {
   mobileClubNews,
   mobileCompetitionFixtures,
   mobileCompetitionNews,
+  mobileNewsArticle,
   mobileCompetitionSeasons,
   mobileFixture,
   mobileNews,
@@ -123,6 +124,15 @@ mobileRouter.get("/news", (request, response) => {
       ...(typeof request.query.matchId === "string" ? { matchId: request.query.matchId } : {})
     }) });
   } catch { response.status(400).json({ error: "invalid_mobile_news_request" }); }
+});
+
+mobileRouter.get("/news/:articleId", (request, response) => {
+  const article = mobileNewsArticle(String(request.params.articleId ?? ""));
+  if (!article) {
+    response.status(404).json({ error: "news_article_not_found" });
+    return;
+  }
+  response.json({ data: article });
 });
 
 mobileRouter.get("/fixtures/:fixtureId", (request, response) => {

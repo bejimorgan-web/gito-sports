@@ -2,7 +2,7 @@ import { Router } from "express";
 import type { CreateProviderRequest } from "@gito/shared";
 import { IPTVService } from "../services/iptv-service.js";
 import { parseM3uPlaylist, M3uParseError } from "../services/m3u-parser.js";
-import { fetchXtreamChannels, fetchWithTimeout, testXtreamConnection, XtreamParseError } from "../services/xtream-codes.js";
+import { fetchXtreamChannels, fetchWithTimeout, testXtreamConnection, XtreamParseError, normalizeXtreamUrl } from "../services/xtream-codes.js";
 import { validateHttpStreamUrl } from "../services/url-validation.js";
 import { logChannelSyncTrace } from "../services/iptv-trace.js";
 import { detectProviderType } from "../services/provider-type-detector.js";
@@ -29,6 +29,35 @@ async function validateProviderConnection(input: {
   const resolvedType = type && type !== "manual" ? type : "manual";
 
   try {
+    // For Xtream, normalize and validate URL first
+    if (resolvedType === "xtream") {
+      const urlResult = normalizeXtreamUrl(baseUrl);
+      if (urlResult.error) {
+        // Could be Xtream, show the validation error
+        return { ok: false, message: urlResult.error };
+      }
+
+      if (!username || !password) {
+        return { ok: false, message: "Xtream providers require both username and password." };
+      }
+
+      // Test Xtream connection with normalized URL
+      const testResult = await testXtreamConnection(urlResult.url, username, password);
+      return {
+        ...testResult,
+        detectedType: "xtream",
+        channels: [] as any[],
+        channelsParsed: 0,
+        channelsRejected: 0,
+        categories: [],
+        stages: [
+          { name: "url_validation", ok: !testResult.ok ? false : true, message: testResult.ok ? "URL valid." : urlResult.error ?? testResult.message },
+          { name: "server_reachable", ok: testResult.statusCode !== undefined && testResult.statusCode < 500 && testResult.statusCode !== 401 && testResult.statusCode !== 403, message: testResult.ok ? "Server reachable." : "Server unreachable." },
+          { name: "credentials", ok: testResult.ok, message: testResult.message }
+        ]
+      };
+    }
+
     const testResponse = await fetchWithTimeout(baseUrl, { method: "GET" });
 
     if (!testResponse.ok) {
@@ -64,7 +93,7 @@ async function validateProviderConnection(input: {
       return {
         ok: true,
         statusCode: testResult.statusCode,
-        message: "Xtream server reachable and credentials accepted. Sync channels separately.",
+        message: "Connected — credentials accepted. Sync channels separately.",
         detectedType: inferredType,
         channels: [] as any[],
         channelsParsed: 0,

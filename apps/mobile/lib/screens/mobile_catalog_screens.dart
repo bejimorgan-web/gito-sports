@@ -123,7 +123,8 @@ class _ClubDetailScreenState extends State<ClubDetailScreen> {
                               : 'No fixtures scheduled.',
                       builder: (context, value) => tab == 0
                           ? _NewsList(
-                              articles: value as List<MobileNewsArticle>)
+                              articles: value as List<MobileNewsArticle>,
+                              api: widget.api)
                           : _FixtureList(
                               fixtures: value as List<MobileFixture>,
                               api: widget.api)))
@@ -141,7 +142,81 @@ class GlobalNewsScreen extends StatelessWidget {
           future: api.getNews(),
           emptyText: 'No news available.',
           builder: (context, articles) => RefreshIndicator(
-              onRefresh: api.getNews, child: _NewsList(articles: articles))));
+              onRefresh: api.getNews,
+              child: _NewsList(articles: articles, api: api))));
+      }
+
+class NewsDetailScreen extends StatefulWidget {
+  const NewsDetailScreen(
+      {required this.articleId,
+      super.key,
+      this.api = const MobileApiService()});
+  final String articleId;
+  final MobileApiService api;
+
+  @override
+  State<NewsDetailScreen> createState() => _NewsDetailScreenState();
+}
+
+class _NewsDetailScreenState extends State<NewsDetailScreen> {
+  late Future<MobileNewsArticle> future;
+
+  @override
+  void initState() {
+    super.initState();
+    future = widget.api.getNewsArticle(widget.articleId);
+  }
+
+  void retry() => setState(() => future = widget.api.getNewsArticle(widget.articleId));
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('News')),
+        body: FutureBuilder<MobileNewsArticle>(
+          future: future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return Center(
+                  child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                    const Text('News article could not be loaded.'),
+                    const SizedBox(height: 12),
+                    FilledButton(onPressed: retry, child: const Text('Retry'))
+                  ]));
+            }
+            final article = snapshot.data;
+            if (article == null || article.title.isEmpty) {
+              return const Center(child: Text('News article could not be loaded.'));
+            }
+            return ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  _NewsImage(url: article.imageUrl, height: 220),
+                  const SizedBox(height: 16),
+                  Text(article.title,
+                      style: Theme.of(context).textTheme.headlineSmall),
+                  const SizedBox(height: 8),
+                  Text('${article.sourceName ?? 'GiTO News'} · ${article.publishedAt ?? 'Date unavailable'}'),
+                  if (article.summary?.isNotEmpty == true) ...[
+                    const SizedBox(height: 16),
+                    Text(article.summary!,
+                        style: Theme.of(context).textTheme.titleMedium)
+                  ],
+                  if (article.body?.isNotEmpty == true) ...[
+                    const SizedBox(height: 16),
+                    Text(article.body!, style: Theme.of(context).textTheme.bodyLarge)
+                  ] else ...[
+                    const SizedBox(height: 16),
+                    const Text('Article content is unavailable.')
+                  ]
+                ]);
+          },
+        ),
+      );
 }
 
 class FixtureDetailScreen extends StatelessWidget {
@@ -171,17 +246,73 @@ class FixtureDetailScreen extends StatelessWidget {
 }
 
 class _NewsList extends StatelessWidget {
-  const _NewsList({required this.articles});
+  const _NewsList({required this.articles, required this.api});
   final List<MobileNewsArticle> articles;
+  final MobileApiService api;
   @override
   Widget build(BuildContext context) => ListView.builder(
       itemCount: articles.length,
       itemBuilder: (context, index) {
         final article = articles[index];
-        return ListTile(
-            title: Text(article.title),
-            subtitle: Text(article.summary ?? article.sourceName ?? ''));
+        return Card(
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                  builder: (_) => NewsDetailScreen(articleId: article.id, api: api))),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _NewsImage(url: article.imageUrl, height: 180, width: double.infinity),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          article.title,
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '${article.sourceName ?? 'GiTO News'} · ${article.publishedAt ?? 'Date unavailable'}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        if (article.summary?.isNotEmpty == true) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            article.summary!,
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          )
+                        ]
+                      ],
+                    ),
+                  )
+                ],
+              ),
+            ));
       });
+}
+
+class _NewsImage extends StatelessWidget {
+  const _NewsImage({required this.url, this.height = 160, this.width});
+  final String? url;
+  final double height;
+  final double? width;
+
+  @override
+  Widget build(BuildContext context) {
+    final placeholder = Container(
+        height: height,
+        width: width,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        alignment: Alignment.center,
+        child: const Icon(Icons.article_outlined));
+    if (url == null || url!.isEmpty) return placeholder;
+    return Image.network(url!, height: height, width: width, fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => placeholder,
+        loadingBuilder: (context, child, progress) =>
+            progress == null ? child : placeholder);
+  }
 }
 
 class _FixtureList extends StatelessWidget {

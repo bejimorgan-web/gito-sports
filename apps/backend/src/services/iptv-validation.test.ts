@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { validateHttpStreamUrl } from "./url-validation.js";
 import { parseM3uPlaylist } from "./m3u-parser.js";
-import { buildXtreamEndpointCandidates } from "./xtream-codes.js";
+import { buildXtreamEndpointCandidates, normalizeXtreamUrl, testXtreamConnection } from "./xtream-codes.js";
 import { detectProviderType } from "./provider-type-detector.js";
 
 test("accepts common non-http stream protocols", () => {
@@ -25,6 +25,45 @@ test("builds xtream endpoint candidates from common provider URL shapes", () => 
 
   const fromApiPath = buildXtreamEndpointCandidates("https://example.com/xtream");
   assert.ok(fromApiPath.some((url) => url.includes("/api.php")));
+});
+
+test("normalizes legitimate Xtream URLs and rejects unsafe input", () => {
+  assert.equal(normalizeXtreamUrl("http://example.com:8080/").url, "http://example.com:8080");
+  assert.equal(normalizeXtreamUrl("https://example.com/player_api.php").url, "https://example.com");
+  assert.equal(normalizeXtreamUrl("https://example.com/xtream/").url, "https://example.com/xtream");
+  assert.match(normalizeXtreamUrl("ftp://example.com").error ?? "", /HTTP\/HTTPS/);
+  assert.match(normalizeXtreamUrl("not a url").error ?? "", /HTTP\/HTTPS/);
+});
+
+test("classifies Xtream authentication, network, timeout, and malformed responses", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => new Response(JSON.stringify({ user_info: { auth: 1 } }), { status: 200 });
+    assert.equal((await testXtreamConnection("https://example.com", "user", "pass")).ok, true);
+
+    globalThis.fetch = async () => new Response("", { status: 401 });
+    const authResult = await testXtreamConnection("https://example.com", "user", "wrong");
+    assert.equal(authResult.statusCode, 401);
+    assert.match(authResult.message, /Username or password/);
+
+    globalThis.fetch = async () => {
+      throw new Error("ENOTFOUND provider.example");
+    };
+    const networkResult = await testXtreamConnection("https://provider.example", "user", "pass");
+    assert.equal(networkResult.statusCode, 503);
+
+    globalThis.fetch = async () => {
+      throw new DOMException("The operation was aborted", "AbortError");
+    };
+    const timeoutResult = await testXtreamConnection("https://slow.example", "user", "pass");
+    assert.equal(timeoutResult.statusCode, 408);
+
+    globalThis.fetch = async () => new Response("not json", { status: 200 });
+    const malformedResult = await testXtreamConnection("https://bad.example", "user", "pass");
+    assert.match(malformedResult.message, /invalid response/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("parses m3u entries that include the stream URL inline", () => {

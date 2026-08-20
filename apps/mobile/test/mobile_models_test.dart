@@ -114,4 +114,35 @@ void main() {
     expect(detail.seasons.single.id, 'season-1');
     expect(detail.nextFixture?.id, 'match-1');
   });
+
+  test('parses News media, body, and source metadata', () {
+    final article = MobileNewsArticle.fromJson({
+      'id': 'article-1',
+      'title': 'Match report',
+      'summary': 'A concise summary',
+      'body': 'The full article body.',
+      'status': 'published',
+      'sourceName': 'GiTO News',
+      'sourceUrl': 'https://example.com/article-1',
+      'publishedAt': '2026-08-20T12:00:00Z',
+      'imageUrl': 'https://example.com/images/article-1.jpg',
+    });
+
+    expect(article.id, 'article-1');
+    expect(article.imageUrl, 'https://example.com/images/article-1.jpg');
+    expect(article.body, 'The full article body.');
+    expect(article.sourceName, 'GiTO News');
+  });
+
+  test('accepts missing News media and body', () {
+    final article = MobileNewsArticle.fromJson({
+      'id': 'article-2',
+      'title': 'Headline only',
+      'status': 'published',
+      'media': [],
+    });
+
+    expect(article.imageUrl, isNull);
+    expect(article.body, isNull);
+  });
 }

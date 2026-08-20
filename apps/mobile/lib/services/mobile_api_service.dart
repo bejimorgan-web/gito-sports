@@ -83,6 +83,10 @@ class MobileApiService {
         '/mobile/news${query.isEmpty ? '' : '?${Uri(queryParameters: query).query}'}');
   }
 
+  Future<MobileNewsArticle> getNewsArticle(String articleId) async =>
+      MobileNewsArticle.fromJson(
+          Map<String, dynamic>.from(await _get('/mobile/news/$articleId')));
+
   Future<MobileFixture> getFixture(String fixtureId) async =>
       MobileFixture.fromJson(
           Map<String, dynamic>.from(await _get('/mobile/fixtures/$fixtureId')));

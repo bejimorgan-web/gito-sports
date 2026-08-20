@@ -121,8 +121,77 @@ export function mobileFixture(fixtureId: string) {
   return { ...mapMobileFixture(fixture), news };
 }
 
+function safeAbsoluteUrl(value: string | null | undefined, baseUrl?: string): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value, baseUrl);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function safeArticleBody(value: string | null | undefined): string | null {
+  if (!value) return null;
+  return value
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p\s*>/gi, "\n\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim() || null;
+}
+
+function toMobileNewsArticle(article: any, includeBody = false) {
+  const media = Array.isArray(article.media)
+    ? article.media
+        .filter((item: any) => item?.mediaType === "image" || item?.media_type === "image")
+        .sort((a: any, b: any) => Number(a.sortOrder ?? a.sort_order ?? 0) - Number(b.sortOrder ?? b.sort_order ?? 0))
+        .map((item: any) => ({
+          url: safeAbsoluteUrl(item.url, article.sourceUrl ?? undefined),
+          altText: item.altText ?? item.alt_text ?? null
+        }))
+        .filter((item: any) => item.url)
+    : [];
+
+  return {
+    id: article.id,
+    title: article.title,
+    summary: article.summary ?? null,
+    ...(includeBody ? { body: safeArticleBody(article.body ?? article.fetchedBody) } : {}),
+    status: "published",
+    sourceName: article.sourceName ?? article.source?.name ?? null,
+    sourceUrl: safeAbsoluteUrl(article.sourceUrl),
+    publishedAt: article.publishedAt ?? null,
+    imageUrl: media[0]?.url ?? null,
+    media,
+    categories: (article.categories ?? []).map((category: any) => ({
+      type: category.categoryType,
+      entityId: category.entityId
+    })),
+    sport: article.sport ?? null,
+    competition: article.competition ?? null,
+    team: article.team ?? null,
+    country: article.country ?? null,
+    match: article.match ?? null
+  };
+}
+
 export function mobileNews(filters: { teamId?: string; competitionId?: string; sportId?: string; countryId?: string; matchId?: string; limit?: number; offset?: number }) {
-  return new NewsRepository().listArticles({ status: "published", teamId: filters.teamId, competitionId: filters.competitionId, sportId: filters.sportId, countryId: filters.countryId, matchId: filters.matchId, limit: filters.limit ?? 50, offset: filters.offset ?? 0 });
+  return new NewsRepository()
+    .listArticles({ status: "published", teamId: filters.teamId, competitionId: filters.competitionId, sportId: filters.sportId, countryId: filters.countryId, matchId: filters.matchId, limit: filters.limit ?? 50, offset: filters.offset ?? 0 })
+    .map((article) => toMobileNewsArticle(article));
+}
+
+export function mobileNewsArticle(articleId: string) {
+  const article = new NewsRepository().getArticleById(articleId);
+  if (!article || article.status !== "published") return undefined;
+  return toMobileNewsArticle(article, true);
 }
 
 export function mobileCompetitionSeasons(competitionId: string) {

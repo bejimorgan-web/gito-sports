@@ -161,10 +161,10 @@ class MobileNewsArticle {
               json['source']?['name']?.toString(),
           sourceUrl: json['sourceUrl']?.toString(),
           publishedAt: json['publishedAt']?.toString(),
-          imageUrl:
-              (json['media'] is List && (json['media'] as List).isNotEmpty)
+          imageUrl: json['imageUrl']?.toString() ??
+              ((json['media'] is List && (json['media'] as List).isNotEmpty)
                   ? ((json['media'] as List).first as Map)['url']?.toString()
-                  : null);
+                  : null));
 }
 
 class MobileFixture {
