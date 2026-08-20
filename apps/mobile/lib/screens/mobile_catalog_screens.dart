@@ -206,7 +206,10 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
                     Text(article.summary!,
                         style: Theme.of(context).textTheme.titleMedium)
                   ],
-                  if (article.body?.isNotEmpty == true) ...[
+                  if (article.bodyBlocks.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    ...article.bodyBlocks.where((block) => block.enabled).map((block) => _NewsBodyBlockView(block: block)),
+                  ] else if (article.body?.isNotEmpty == true) ...[
                     const SizedBox(height: 16),
                     Text(article.body!, style: Theme.of(context).textTheme.bodyLarge)
                   ] else ...[
@@ -217,6 +220,49 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
           },
         ),
       );
+
+}
+
+class _NewsBodyBlockView extends StatelessWidget {
+  const _NewsBodyBlockView({required this.block});
+  final MobileNewsBodyBlock block;
+
+  @override
+  Widget build(BuildContext context) {
+    final caption = block.caption?.isNotEmpty == true
+        ? Padding(padding: const EdgeInsets.only(top: 6), child: Text(block.caption!, style: Theme.of(context).textTheme.bodySmall))
+        : const SizedBox.shrink();
+    if (block.type == 'paragraph') {
+      return Padding(padding: const EdgeInsets.only(bottom: 14), child: Text(block.text ?? '', style: Theme.of(context).textTheme.bodyLarge));
+    }
+    if (block.type == 'image' && block.url?.isNotEmpty == true) {
+      return Padding(padding: const EdgeInsets.only(bottom: 14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(block.url!, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const _NewsInlineFallback(label: 'Image unavailable'))),
+        caption
+      ]));
+    }
+    if (block.type == 'video' && block.url?.isNotEmpty == true) {
+      return Padding(padding: const EdgeInsets.only(bottom: 14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const _NewsInlineFallback(label: 'Video available from source'),
+        SelectableText(block.url!),
+        caption
+      ]));
+    }
+    if (block.type == 'social' && block.url?.isNotEmpty == true) {
+      return Padding(padding: const EdgeInsets.only(bottom: 14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        ListTile(contentPadding: EdgeInsets.zero, leading: const Icon(Icons.public), title: Text('View on ${block.platform ?? 'social media'}'), subtitle: Text(block.url!)),
+        caption
+      ]));
+    }
+    return const _NewsInlineFallback(label: 'Media unavailable');
+  }
+}
+
+class _NewsInlineFallback extends StatelessWidget {
+  const _NewsInlineFallback({required this.label});
+  final String label;
+  @override
+  Widget build(BuildContext context) => Container(width: double.infinity, padding: const EdgeInsets.all(20), color: Theme.of(context).colorScheme.surfaceContainerHighest, child: Text(label));
 }
 
 class FixtureDetailScreen extends StatelessWidget {

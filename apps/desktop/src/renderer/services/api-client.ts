@@ -455,9 +455,10 @@ export const apiClient = {
   getSport(sportId: string) {
     return request<Sport>(`/sports/${sportId}`);
   },
-  createSport(input: CreateSportRequest) {
+  createSport(input: CreateSportRequest, accessToken: string) {
     return request<Sport>('/sports', {
       method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}` },
       body: JSON.stringify(input)
     });
   },
@@ -507,14 +508,15 @@ export const apiClient = {
       window.clearTimeout(timeoutId);
     }
   },
-  updateSport(sportId: string, input: Partial<CreateSportRequest>) {
+  updateSport(sportId: string, input: Partial<CreateSportRequest>, accessToken: string) {
     return request<Sport>(`/sports/${sportId}`, {
       method: 'PUT',
+      headers: { authorization: `Bearer ${accessToken}` },
       body: JSON.stringify(input)
     });
   },
-  deleteSport(sportId: string) {
-    return request<void>(`/sports/${sportId}`, { method: 'DELETE' });
+  deleteSport(sportId: string, accessToken: string) {
+    return request<void>(`/sports/${sportId}`, { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } });
   },
   listCountries(mode?: 'legacy' | 'catalog') {
     const path = buildApiPath('/countries', { mode });
@@ -524,20 +526,22 @@ export const apiClient = {
     const path = buildApiPath(`/countries/${countryId}`, { mode });
     return request<Country>(path);
   },
-  createCountry(input: CreateCountryRequest) {
+  createCountry(input: CreateCountryRequest, accessToken: string) {
     return request<Country>('/countries', {
       method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}` },
       body: JSON.stringify(input)
     });
   },
-  updateCountry(countryId: string, input: Partial<CreateCountryRequest>) {
+  updateCountry(countryId: string, input: Partial<CreateCountryRequest>, accessToken: string) {
     return request<Country>(`/countries/${countryId}`, {
       method: 'PUT',
+      headers: { authorization: `Bearer ${accessToken}` },
       body: JSON.stringify(input)
     });
   },
-  deleteCountry(countryId: string) {
-    return request<void>(`/countries/${countryId}`, { method: 'DELETE' });
+  deleteCountry(countryId: string, accessToken: string) {
+    return request<void>(`/countries/${countryId}`, { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } });
   },
   listCompetitions(mode?: 'legacy' | 'catalog') {
     const path = buildApiPath('/competitions', { mode });
@@ -547,32 +551,35 @@ export const apiClient = {
     const path = buildApiPath(`/competitions/${competitionId}`, { mode });
     return request<Competition>(path);
   },
-  createCompetition(input: CreateCompetitionRequest) {
+  createCompetition(input: CreateCompetitionRequest, accessToken: string) {
     return request<Competition>('/competitions', {
       method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}` },
       body: JSON.stringify(input)
     });
   },
-  updateCompetition(competitionId: string, input: Partial<CreateCompetitionRequest>) {
+  updateCompetition(competitionId: string, input: Partial<CreateCompetitionRequest>, accessToken: string) {
     return request<Competition>(`/competitions/${competitionId}`, {
       method: 'PUT',
+      headers: { authorization: `Bearer ${accessToken}` },
       body: JSON.stringify(input)
     });
   },
-  deleteCompetition(competitionId: string) {
-    return request<void>(`/competitions/${competitionId}`, { method: 'DELETE' });
+  deleteCompetition(competitionId: string, accessToken: string) {
+    return request<void>(`/competitions/${competitionId}`, { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } });
   },
-  addTeamToCompetition(competitionId: string, teamId: string) {
+  addTeamToCompetition(competitionId: string, teamId: string, accessToken: string) {
     return request(`/competitions/${competitionId}/teams`, {
       method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}` },
       body: JSON.stringify({ teamId })
     });
   },
   listCompetitionTeams(competitionId: string) {
     return request<Team[]>(`/competitions/${competitionId}/teams`);
   },
-  removeTeamFromCompetition(competitionId: string, teamId: string) {
-    return request<void>(`/competitions/${competitionId}/teams/${teamId}`, { method: 'DELETE' });
+  removeTeamFromCompetition(competitionId: string, teamId: string, accessToken: string) {
+    return request<void>(`/competitions/${competitionId}/teams/${teamId}`, { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } });
   },
   listTeams(mode?: 'legacy' | 'catalog') {
     const path = buildApiPath('/teams', { mode });
@@ -582,15 +589,17 @@ export const apiClient = {
     const path = buildApiPath(`/teams/${teamId}`, { mode });
     return request<Team>(path);
   },
-  createTeam(input: CreateTeamRequest) {
+  createTeam(input: CreateTeamRequest, accessToken: string) {
     return request<Team>('/teams', {
       method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}` },
       body: JSON.stringify(input)
     });
   },
-  updateTeam(teamId: string, input: Partial<CreateTeamRequest>) {
+  updateTeam(teamId: string, input: Partial<CreateTeamRequest>, accessToken: string) {
     return request<Team>(`/teams/${teamId}`, {
       method: 'PUT',
+      headers: { authorization: `Bearer ${accessToken}` },
       body: JSON.stringify(input)
     });
   },
@@ -600,8 +609,8 @@ export const apiClient = {
   getClub(clubId: string) {
     return request<{ data: ClubDetail }>(`/clubs/${clubId}`);
   },
-  createSeason(competitionId: string, input: CreateSeasonRequest) {
-    return request<Season>(`/competitions/${competitionId}/seasons`, { method: 'POST', body: JSON.stringify(input) });
+  createSeason(competitionId: string, input: CreateSeasonRequest, accessToken: string) {
+    return request<Season>(`/competitions/${competitionId}/seasons`, { method: 'POST', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
   },
   listSeasons(competitionId: string) {
     return request<Season[]>(`/competitions/${competitionId}/seasons`);
@@ -609,20 +618,20 @@ export const apiClient = {
   getSeason(seasonId: string) {
     return request<Season>(`/seasons/${seasonId}`);
   },
-  updateSeason(seasonId: string, input: UpdateSeasonRequest) {
-    return request<Season>(`/seasons/${seasonId}`, { method: 'PUT', body: JSON.stringify(input) });
+  updateSeason(seasonId: string, input: UpdateSeasonRequest, accessToken: string) {
+    return request<Season>(`/seasons/${seasonId}`, { method: 'PUT', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
   },
   listSeasonTeams(competitionId: string, seasonId: string) {
     return request<Array<CompetitionSeasonTeam & { team?: Team }>>(`/competitions/${competitionId}/seasons/${seasonId}/teams`);
   },
-  addSeasonTeam(competitionId: string, seasonId: string, teamId: string) {
-    return request<CompetitionSeasonTeam>(`/competitions/${competitionId}/seasons/${seasonId}/teams`, { method: 'POST', body: JSON.stringify({ teamId }) });
+  addSeasonTeam(competitionId: string, seasonId: string, teamId: string, accessToken: string) {
+    return request<CompetitionSeasonTeam>(`/competitions/${competitionId}/seasons/${seasonId}/teams`, { method: 'POST', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ teamId }) });
   },
-  removeSeasonTeam(competitionId: string, seasonId: string, teamId: string) {
-    return request<void>(`/competitions/${competitionId}/seasons/${seasonId}/teams/${teamId}`, { method: 'DELETE' });
+  removeSeasonTeam(competitionId: string, seasonId: string, teamId: string, accessToken: string) {
+    return request<void>(`/competitions/${competitionId}/seasons/${seasonId}/teams/${teamId}`, { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } });
   },
-  deleteTeam(teamId: string) {
-    return request<void>(`/teams/${teamId}`, { method: 'DELETE' });
+  deleteTeam(teamId: string, accessToken: string) {
+    return request<void>(`/teams/${teamId}`, { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } });
   },
   // Matches scheduling API
   listMatches(opts?: { competitionId?: string }) {

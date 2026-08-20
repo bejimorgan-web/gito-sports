@@ -4,6 +4,7 @@ import { NewsRepository } from "../repositories/news-repository.js";
 import { NewsResearchService } from "./news-research-service.js";
 import { NewsClassificationService } from "./news-classification-service.js";
 import { AiClassificationUnavailableError, defaultAiNewsClassificationService } from "./ai-news-classification-service.js";
+import { fetchPublicTextDocument } from "./news-rss-service.js";
 
 export type FetchArticleContentResult = {
   success: boolean;
@@ -426,7 +427,7 @@ export class NewsService {
 
   private stripSourceBoilerplate(value: string): string {
     return value
-      .replace(/^\s*(?:According to|Coverage indicates|The report draws on|The main story is about|Latest|Breaking|In a thrilling match)\s+/i, "")
+      .replace(/^\s*(?:According to|Coverage indicates|The report draws on|The main story is about|Latest|Breaking|In a thrilling match),?\s+/i, "")
       .replace(/^\s+/, "")
       .trim();
   }
@@ -900,17 +901,11 @@ export class NewsService {
     }
 
     try {
-      const response = await fetch(existing.sourceUrl, {
-        headers: {
-          "User-Agent": "GiTO-News/1.0 (+News-Editor)"
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error(`http_${response.status}`);
+      const document = await fetchPublicTextDocument(existing.sourceUrl, "text/html, application/xhtml+xml;q=0.9");
+      const html = document.text;
+      if (/just a moment|checking your browser|cf-chl-|challenge-platform|captcha|access denied|automated access/i.test(html)) {
+        throw new Error("automated_access_blocked");
       }
-
-      const html = await response.text();
       const extracted = this.extractArticleContentFromHtml(html);
       const fetchedBody = extracted.body ?? extracted.summary ?? null;
 
@@ -949,7 +944,7 @@ export class NewsService {
         message: "Full article content fetched successfully."
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : "fetch_failed";
+      const message = this.classifyArticleFetchError(error);
       const timestamp = new Date().toISOString();
       const updated = this.repository.updateArticle(articleId, {
         contentOrigin: existing.contentOrigin ?? "summary",
@@ -972,6 +967,20 @@ export class NewsService {
         message: `Could not fetch article content: ${message}`
       };
     }
+  }
+
+  private classifyArticleFetchError(error: unknown): string {
+    const raw = error instanceof Error ? error.message.toLowerCase() : "";
+    if (raw.includes("invalid") || raw.includes("scheme_not_allowed") || raw.includes("credentials_not_allowed")) return "invalid_source_url";
+    if (raw.includes("private_network")) return "source_private_network_blocked";
+    if (raw.includes("abort") || raw.includes("timeout") || raw.includes("timed out")) return "source_timeout";
+    if (raw.includes("redirect_limit")) return "redirect_limit_exceeded";
+    if (raw.includes("content_type_not_supported")) return "unsupported_page";
+    if (raw.includes("no_article_content_found")) return "content_not_found";
+    if (raw.includes("automated_access") || raw.includes("captcha") || raw.includes("cloudflare") || raw.includes("blocked")) return "automated_access_blocked";
+    if (raw.includes("fetch_failed_401") || raw.includes("fetch_failed_403") || raw.includes("fetch_failed_429")) return "source_access_denied";
+    if (raw.includes("fetch_failed_")) return "source_unavailable";
+    return "fetch_failed";
   }
 
   private extractArticleContentFromHtml(html: string): { body: string | null; summary: string | null } {

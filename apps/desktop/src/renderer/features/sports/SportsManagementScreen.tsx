@@ -5,9 +5,9 @@ import { apiClient } from "../../services/api-client";
 import { isValidLogoSource, LogoUrlField } from "../../components/LogoUrlField";
 import { resolveAssetUrl } from "../../components/asset-url";
 
-interface SportsManagementScreenProps {}
+interface SportsManagementScreenProps { accessToken: string; }
 
-export function SportsManagementScreen({}: SportsManagementScreenProps) {
+export function SportsManagementScreen({ accessToken }: SportsManagementScreenProps) {
   const [sports, setSports] = useState<Sport[]>([]);
   const [countries, setCountries] = useState<Country[]>([]);
   const [selectedSport, setSelectedSport] = useState<Sport | null>(null);
@@ -71,10 +71,10 @@ export function SportsManagementScreen({}: SportsManagementScreenProps) {
 
     try {
       if (selectedSport) {
-        await apiClient.updateSport(selectedSport.id, payload);
+        await apiClient.updateSport(selectedSport.id, payload, accessToken);
         setStatus("Sport updated.");
       } else {
-        await apiClient.createSport(payload as CreateSportRequest);
+        await apiClient.createSport(payload as CreateSportRequest, accessToken);
         setStatus("Sport created.");
       }
 
@@ -91,7 +91,7 @@ export function SportsManagementScreen({}: SportsManagementScreenProps) {
     }
 
     try {
-      await apiClient.deleteSport(selectedSport.id);
+      await apiClient.deleteSport(selectedSport.id, accessToken);
       setStatus("Sport deleted.");
       await loadSports();
       resetForm();
@@ -106,7 +106,7 @@ export function SportsManagementScreen({}: SportsManagementScreenProps) {
     }
 
     try {
-      await apiClient.deleteSport(sport.id);
+      await apiClient.deleteSport(sport.id, accessToken);
       setStatus("Sport deleted.");
       await loadSports();
       if (selectedSport?.id === sport.id) {

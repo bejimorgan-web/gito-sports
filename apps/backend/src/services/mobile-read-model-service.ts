@@ -164,6 +164,7 @@ function toMobileNewsArticle(article: any, includeBody = false) {
     title: article.title,
     summary: article.summary ?? null,
     ...(includeBody ? { body: safeArticleBody(article.body ?? article.fetchedBody) } : {}),
+    ...(includeBody ? { bodyBlocks: Array.isArray(article.bodyBlocks) ? article.bodyBlocks : [] } : {}),
     status: "published",
     sourceName: article.sourceName ?? article.source?.name ?? null,
     sourceUrl: safeAbsoluteUrl(article.sourceUrl),

@@ -28,7 +28,7 @@ function seed() {
   db.prepare("INSERT INTO competition_season_teams (id, competition_id, season_id, team_id, membership_status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)").run("membership-dortmund", "competition-bundesliga", "season-2026", "team-dortmund", now, now);
   db.prepare("INSERT INTO providers (id, name, base_url, type, auth_type, status, created_at, updated_at) VALUES (?, ?, ?, 'manual', 'none', 'active', ?, ?)").run("provider-1", "Public Provider", "https://provider.example", now, now);
   db.prepare("INSERT INTO channels (id, provider_id, name, url, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)").run("channel-1", "provider-1", "Sports HD", "https://stream.example/live.m3u8", now, now);
-  const fixture = createCanonicalFixture({ competitionId: "competition-bundesliga", seasonId: "season-2026", homeTeamId: "team-bayern", awayTeamId: "team-dortmund", startsAt: "2026-08-20T15:00:00.000Z", venueName: "Arena" });
+  const fixture = createCanonicalFixture({ competitionId: "competition-bundesliga", seasonId: "season-2026", homeTeamId: "team-bayern", awayTeamId: "team-dortmund", startsAt: "2099-08-20T15:00:00.000Z", venueName: "Arena" });
   assert.ok(fixture);
   db.prepare("INSERT INTO streams (id, match_id, channel_id, protocol, status, approval_status, health_status, failure_count, created_at, updated_at) VALUES (?, ?, ?, 'hls', 'active', 'active', 'active', 0, ?, ?)").run("stream-1", fixture.id, "channel-1", now, now);
   const article = new NewsRepository().createArticle({ title: "Important Bundesliga story", status: "published" });

@@ -145,4 +145,21 @@ void main() {
     expect(article.imageUrl, isNull);
     expect(article.body, isNull);
   });
+
+  test('preserves ordered News body blocks', () {
+    final article = MobileNewsArticle.fromJson({
+      'id': 'article-3',
+      'title': 'Inline media',
+      'status': 'published',
+      'bodyBlocks': [
+        {'type': 'paragraph', 'text': 'Before'},
+        {'type': 'image', 'url': 'https://example.com/image.jpg'},
+        {'type': 'video', 'platform': 'youtube', 'url': 'https://youtube.com/watch?v=1'},
+        {'type': 'social', 'platform': 'x', 'url': 'https://x.com/example/status/1'},
+      ],
+    });
+
+    expect(article.bodyBlocks.map((block) => block.type).toList(), ['paragraph', 'image', 'video', 'social']);
+    expect(article.bodyBlocks[1].url, 'https://example.com/image.jpg');
+  });
 }

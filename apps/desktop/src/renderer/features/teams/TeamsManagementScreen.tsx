@@ -7,7 +7,7 @@ import { resolveAssetUrl } from "../../components/asset-url";
 
 const teamTypes: TeamType[] = ["club", "national", "custom"];
 
-export function TeamsManagementScreen() {
+export function TeamsManagementScreen({ accessToken }: { accessToken: string }) {
   const [teams, setTeams] = useState<Team[]>([]);
   const [sports, setSports] = useState<Sport[]>([]);
   const [countries, setCountries] = useState<Country[]>([]);
@@ -97,7 +97,7 @@ export function TeamsManagementScreen() {
           ...(shortName ? { shortName } : {}),
           ...(logoUrl ? { logoUrl } : {})
         };
-        await apiClient.updateTeam(selectedTeam.id, updatePayload);
+        await apiClient.updateTeam(selectedTeam.id, updatePayload, accessToken);
         setStatus("Team updated.");
       } else {
         const input: CreateTeamRequest = {
@@ -109,7 +109,7 @@ export function TeamsManagementScreen() {
           ...(shortName ? { shortName } : {}),
           ...(logoUrl ? { logoUrl } : {})
         };
-        await apiClient.createTeam(input);
+        await apiClient.createTeam(input, accessToken);
         setStatus("Team created.");
       }
 
@@ -126,7 +126,7 @@ export function TeamsManagementScreen() {
     }
 
     try {
-      await apiClient.deleteTeam(selectedTeam.id);
+      await apiClient.deleteTeam(selectedTeam.id, accessToken);
       setStatus("Team deleted.");
       await loadData();
       resetForm();
@@ -141,7 +141,7 @@ export function TeamsManagementScreen() {
     }
 
     try {
-      await apiClient.deleteTeam(team.id);
+      await apiClient.deleteTeam(team.id, accessToken);
       setStatus("Team deleted.");
       await loadData();
       if (selectedTeam?.id === team.id) {

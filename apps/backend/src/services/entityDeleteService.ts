@@ -32,6 +32,24 @@ export function deleteEntity(entityType: EntityType, entityId: string, operatorI
     return false;
   }
 
+  if (entityType === "country") {
+    const dependencyQueries = [
+      ["clubs", "SELECT COUNT(1) AS count FROM teams WHERE country_id = ?"],
+      ["competitions", "SELECT COUNT(1) AS count FROM competitions WHERE country_id = ?"],
+      ["matches", "SELECT COUNT(1) AS count FROM matches m JOIN competitions c ON c.id = m.competition_id WHERE c.country_id = ?"],
+      ["news", "SELECT COUNT(1) AS count FROM news_article_categories WHERE category_type = 'country' AND entity_id = ? AND classification_status = 'approved'"],
+      ["sportCountries", "SELECT COUNT(1) AS count FROM sport_countries WHERE country_id = ?"]
+    ] as const;
+    const dependencies = dependencyQueries
+      .map(([name, query]) => ({ name, count: Number((database.prepare(query).get(entityId) as { count: number }).count ?? 0) }))
+      .filter((dependency) => dependency.count > 0);
+    if (dependencies.length > 0) {
+      const error = new Error(`Country cannot be deleted because it is referenced by ${dependencies.map((dependency) => `${dependency.count} ${dependency.name}`).join(", ")}.`) as Error & { code?: string };
+      error.code = "country_in_use";
+      throw error;
+    }
+  }
+
   const affectedRecords: Record<string, number> = {};
   database.exec("BEGIN TRANSACTION;");
 

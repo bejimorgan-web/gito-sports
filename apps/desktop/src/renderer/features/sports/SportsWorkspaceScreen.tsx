@@ -74,7 +74,7 @@ function EntityAvatar({ src, fallback }: { src?: string | undefined; fallback: s
   );
 }
 
-export function SportsWorkspaceScreen() {
+export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) {
   const [sports, setSports] = useState<Sport[]>([]);
   const [countries, setCountries] = useState<Country[]>([]);
   const [competitions, setCompetitions] = useState<Competition[]>([]);
@@ -303,17 +303,17 @@ export function SportsWorkspaceScreen() {
     try {
       switch (deleteContext.kind) {
         case "sport":
-          await apiClient.deleteSport(deleteContext.id);
+          await apiClient.deleteSport(deleteContext.id, accessToken);
           setSelectedSport((current) => (current?.id === deleteContext.id ? null : current));
           break;
         case "country":
-          await apiClient.deleteCountry(deleteContext.id);
+          await apiClient.deleteCountry(deleteContext.id, accessToken);
           break;
         case "competition":
-          await apiClient.deleteCompetition(deleteContext.id);
+          await apiClient.deleteCompetition(deleteContext.id, accessToken);
           break;
         case "team":
-          await apiClient.deleteTeam(deleteContext.id);
+          await apiClient.deleteTeam(deleteContext.id, accessToken);
           break;
       }
 
@@ -346,11 +346,11 @@ export function SportsWorkspaceScreen() {
     setIsSaving(true);
     try {
       if (modalContext?.action === "edit" && selectedSport) {
-        await apiClient.updateSport(selectedSport.id, payload);
+        await apiClient.updateSport(selectedSport.id, payload, accessToken);
         setStatus("Sport updated.");
         pushToast("Sport updated.", "success");
       } else {
-        const created = await apiClient.createSport(payload);
+        const created = await apiClient.createSport(payload, accessToken);
         setStatus("Sport created.");
         setSelectedSport(created);
         createdId = created.id;
@@ -406,11 +406,11 @@ export function SportsWorkspaceScreen() {
     setIsSaving(true);
     try {
       if (editingCountryId) {
-        await apiClient.updateCountry(editingCountryId, payload);
+        await apiClient.updateCountry(editingCountryId, payload, accessToken);
         setStatus("Country updated.");
         pushToast("Country updated.", "success");
       } else {
-        await apiClient.createCountry(payload);
+        await apiClient.createCountry(payload, accessToken);
         setStatus("Country created.");
         pushToast("Country created.", "success");
       }
@@ -458,11 +458,11 @@ export function SportsWorkspaceScreen() {
     setIsSaving(true);
     try {
       if (editingCompetitionId) {
-        await apiClient.updateCompetition(editingCompetitionId, payload);
+        await apiClient.updateCompetition(editingCompetitionId, payload, accessToken);
         setStatus("Competition updated.");
         pushToast("Competition updated.", "success");
       } else {
-        await apiClient.createCompetition(payload);
+        await apiClient.createCompetition(payload, accessToken);
         setStatus("Competition created.");
         pushToast("Competition created.", "success");
       }
@@ -510,11 +510,11 @@ export function SportsWorkspaceScreen() {
     setIsSaving(true);
     try {
       if (editingTeamId) {
-        await apiClient.updateTeam(editingTeamId, payload);
+        await apiClient.updateTeam(editingTeamId, payload, accessToken);
         setStatus("Team updated.");
         pushToast("Team updated.", "success");
       } else {
-        await apiClient.createTeam(payload);
+        await apiClient.createTeam(payload, accessToken);
         setStatus("Team created.");
         pushToast("Team created.", "success");
       }
@@ -698,7 +698,7 @@ export function SportsWorkspaceScreen() {
             </article>
           </section>
 
-          <SeasonMembershipPanel teams={teams} competitions={competitions} selectedSportId={selectedSport.id} />
+          <SeasonMembershipPanel teams={teams} competitions={competitions} selectedSportId={selectedSport.id} accessToken={accessToken} />
 
           <section className="console-panel sports-workspace-grid">
             <article className="entity-panel">

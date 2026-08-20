@@ -12,7 +12,7 @@ const availableParticipantTypes: { value: Competition["participantType"]; label:
   { value: "nationalTeams", label: "National Teams" }
 ];
 
-export function CompetitionCatalogScreen() {
+export function CompetitionCatalogScreen({ accessToken }: { accessToken: string }) {
   const [competitions, setCompetitions] = useState<Competition[]>([]);
   const [sports, setSports] = useState<Sport[]>([]);
   const [countries, setCountries] = useState<Country[]>([]);
@@ -97,7 +97,7 @@ export function CompetitionCatalogScreen() {
           ...(countryId ? { countryId } : {}),
           ...(logoUrl ? { logoUrl } : {})
         };
-        await apiClient.updateCompetition(selectedCompetition.id, updatePayload);
+        await apiClient.updateCompetition(selectedCompetition.id, updatePayload, accessToken);
         setStatus("Competition updated.");
       } else {
         const input: CreateCompetitionRequest = {
@@ -109,7 +109,7 @@ export function CompetitionCatalogScreen() {
           ...(countryId ? { countryId } : {}),
           ...(logoUrl ? { logoUrl } : {})
         };
-        await apiClient.createCompetition(input);
+        await apiClient.createCompetition(input, accessToken);
         setStatus("Competition created.");
       }
 
@@ -126,7 +126,7 @@ export function CompetitionCatalogScreen() {
     }
 
     try {
-      await apiClient.deleteCompetition(selectedCompetition.id);
+      await apiClient.deleteCompetition(selectedCompetition.id, accessToken);
       setStatus("Competition deleted.");
       await loadData();
       resetForm();
@@ -141,7 +141,7 @@ export function CompetitionCatalogScreen() {
     }
 
     try {
-      await apiClient.deleteCompetition(competition.id);
+      await apiClient.deleteCompetition(competition.id, accessToken);
       setStatus("Competition deleted.");
       await loadData();
       if (selectedCompetition?.id === competition.id) {

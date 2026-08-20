@@ -6,19 +6,23 @@ interface Props {
   teams: Team[];
   competitions: Competition[];
   selectedSportId: string;
+  accessToken: string;
 }
 
-export function SeasonMembershipPanel({ teams, competitions, selectedSportId }: Props) {
+export function SeasonMembershipPanel({ teams, competitions, selectedSportId, accessToken }: Props) {
   const clubs = teams.filter((team) => team.sportId === selectedSportId && team.type === "club");
   const sportCompetitions = competitions.filter((competition) => competition.sportId === selectedSportId && competition.participantType === "clubs");
   const [teamId, setTeamId] = useState("");
   const [competitionId, setCompetitionId] = useState("");
   const [seasonId, setSeasonId] = useState("");
   const [seasonName, setSeasonName] = useState("");
+  const [seasonStartsAt, setSeasonStartsAt] = useState("");
+  const [seasonEndsAt, setSeasonEndsAt] = useState("");
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [members, setMembers] = useState<Array<{ team?: Team; teamId: string }>>([]);
   const [competitionMembers, setCompetitionMembers] = useState<Team[]>([]);
   const [status, setStatus] = useState("Ready");
+  const [isSavingSeason, setIsSavingSeason] = useState(false);
 
   useEffect(() => {
     setTeamId("");
@@ -54,7 +58,7 @@ export function SeasonMembershipPanel({ teams, competitions, selectedSportId }: 
   const addCompetitionMembership = async () => {
     if (!competitionId || !teamId) return;
     try {
-      await apiClient.addTeamToCompetition(competitionId, teamId);
+      await apiClient.addTeamToCompetition(competitionId, teamId, accessToken);
       setCompetitionMembers(await apiClient.listCompetitionTeams(competitionId));
       setStatus("Competition membership added.");
     } catch (error) { setStatus(error instanceof Error ? error.message : "Unable to add membership."); }
@@ -63,18 +67,27 @@ export function SeasonMembershipPanel({ teams, competitions, selectedSportId }: 
   const createSeason = async () => {
     if (!competitionId || !seasonName.trim()) return;
     try {
-      const season = await apiClient.createSeason(competitionId, { name: seasonName.trim() });
+      setIsSavingSeason(true);
+      setStatus("Saving…");
+      const season = await apiClient.createSeason(competitionId, {
+        name: seasonName.trim(),
+        startsAt: seasonStartsAt ? new Date(`${seasonStartsAt}T00:00:00.000Z`).toISOString() : null,
+        endsAt: seasonEndsAt ? new Date(`${seasonEndsAt}T00:00:00.000Z`).toISOString() : null
+      }, accessToken);
       setSeasons(await apiClient.listSeasons(competitionId));
       setSeasonId(season.id);
       setSeasonName("");
+      setSeasonStartsAt("");
+      setSeasonEndsAt("");
       setStatus("Season created.");
     } catch (error) { setStatus(error instanceof Error ? error.message : "Unable to create season."); }
+    finally { setIsSavingSeason(false); }
   };
 
   const addSeasonMembership = async () => {
     if (!competitionId || !seasonId || !teamId) return;
     try {
-      await apiClient.addSeasonTeam(competitionId, seasonId, teamId);
+      await apiClient.addSeasonTeam(competitionId, seasonId, teamId, accessToken);
       setMembers(await apiClient.listSeasonTeams(competitionId, seasonId));
       setStatus("Season membership added.");
     } catch (error) { setStatus(error instanceof Error ? error.message : "Unable to add season membership."); }
@@ -83,7 +96,7 @@ export function SeasonMembershipPanel({ teams, competitions, selectedSportId }: 
   const removeSeasonMembership = async (memberTeamId: string) => {
     if (!competitionId || !seasonId) return;
     try {
-      await apiClient.removeSeasonTeam(competitionId, seasonId, memberTeamId);
+      await apiClient.removeSeasonTeam(competitionId, seasonId, memberTeamId, accessToken);
       setMembers(await apiClient.listSeasonTeams(competitionId, seasonId));
       setStatus("Season membership removed.");
     } catch (error) { setStatus(error instanceof Error ? error.message : "Unable to remove season membership."); }
@@ -121,7 +134,9 @@ export function SeasonMembershipPanel({ teams, competitions, selectedSportId }: 
           New season
           <div className="button-row">
             <input value={seasonName} onChange={(event) => setSeasonName(event.target.value)} placeholder="2026/27" />
-            <button type="button" onClick={() => void createSeason()} disabled={!competitionId || !seasonName.trim()}>Create</button>
+            <input type="date" value={seasonStartsAt} onChange={(event) => setSeasonStartsAt(event.target.value)} aria-label="Season start" />
+            <input type="date" value={seasonEndsAt} onChange={(event) => setSeasonEndsAt(event.target.value)} aria-label="Season end" />
+            <button type="button" onClick={() => void createSeason()} disabled={isSavingSeason || !competitionId || !seasonName.trim()}>{isSavingSeason ? "Saving…" : "Create"}</button>
           </div>
         </label>
       </div>

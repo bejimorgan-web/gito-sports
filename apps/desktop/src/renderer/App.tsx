@@ -146,7 +146,7 @@ function renderScreen(
         />
       );
     case "sports":
-      return <SportsWorkspaceScreen />;
+      return <SportsWorkspaceScreen accessToken={state.accessToken} />;
     case "matches":
       return <MatchSchedulerScreen selectedMatchId={state.selectedMatchId} accessToken={state.accessToken} />;
     case "approvals":

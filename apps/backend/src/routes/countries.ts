@@ -11,6 +11,7 @@ import {
 } from "../repositories/countries-repository.js";
 import { getHostCatalogById, listHostCatalog } from "../repositories/catalog-shadow-repository.js";
 import { normalizeCountry } from "./asset-url.js";
+import { protectedRoute } from "../middleware/protected.js";
 
 export const countriesRouter = Router();
 
@@ -37,7 +38,7 @@ countriesRouter.get("/:countryId", (request, response) => {
   response.json({ data: normalizeCountry(request, country) });
 });
 
-countriesRouter.post("/", (request, response) => {
+countriesRouter.post("/", protectedRoute, (request, response) => {
   const body = request.body as CreateCountryRequest;
 
   if (!body.name || !body.iso2Code || !body.iso3Code) {
@@ -51,18 +52,18 @@ countriesRouter.post("/", (request, response) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const code = (error as { code?: string })?.code ?? "country_error";
-    response.status(code === "country_already_exists" ? 409 : 400).json({
+    response.status(code === "country_already_exists" || code === "country_in_use" ? 409 : 400).json({
       error: code,
       message
     });
   }
 });
 
-countriesRouter.put("/:countryId", (request, response) => {
+countriesRouter.put("/:countryId", protectedRoute, (request, response) => {
   const body = request.body as UpdateCountryRequest;
 
   try {
-    const updated = updateCountry(request.params.countryId, body);
+    const updated = updateCountry(String(request.params.countryId ?? ""), body);
 
     if (!updated) {
       response.status(404).json({ error: "country_not_found" });
@@ -80,17 +81,18 @@ countriesRouter.put("/:countryId", (request, response) => {
   }
 });
 
-countriesRouter.delete("/:countryId", (request, response) => {
+countriesRouter.delete("/:countryId", protectedRoute, (request, response) => {
   const operatorId = (request as AuthenticatedRequest).operator?.id;
-  const ok = deleteCountry(request.params.countryId, operatorId);
-
-  if (!ok) {
-    response.status(409).json({
-      error: "country_in_use_or_not_found",
-      message: "Country cannot be deleted while competitions, teams, or matches reference it. Remove linked entities first."
-    });
-    return;
+  try {
+    const ok = deleteCountry(String(request.params.countryId ?? ""), operatorId);
+    if (!ok) {
+      response.status(404).json({ error: "country_not_found", message: "Country not found." });
+      return;
+    }
+    response.status(204).send();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const code = (error as { code?: string })?.code ?? "country_delete_failed";
+    response.status(code === "country_in_use" ? 409 : 400).json({ error: code, message });
   }
-
-  response.status(204).send();
 });

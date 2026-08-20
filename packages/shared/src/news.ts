@@ -4,6 +4,11 @@ import type { Competition, Country, Match, Sport, Team } from "./sports.js";
 export type NewsArticleStatus = "draft" | "review" | "published" | "archived";
 export type NewsSourceType = "external" | "partner" | "wire" | "internal";
 export type NewsMediaType = "image" | "video" | "embed";
+export type NewsArticleBodyBlock =
+  | { type: "paragraph"; text: string }
+  | { type: "image"; url: string; altText?: string | null; caption?: string | null }
+  | { type: "video"; url: string; platform?: string | null; caption?: string | null }
+  | { type: "social"; url: string; platform: string; caption?: string | null; enabled?: boolean };
 export type NewsContentAvailability = "full_feed_content" | "summary_only" | "no_content";
 export type NewsContentOrigin = "summary" | "rss_full" | "fetched_page" | "manual" | "gito_ai";
 export type NewsFetchStatus = "idle" | "success" | "failed";
@@ -145,6 +150,7 @@ export interface NewsArticle {
   slug: string;
   summary?: string | null;
   body?: string | null;
+  bodyBlocks?: NewsArticleBodyBlock[];
   status: NewsArticleStatus;
   sportId?: string | null;
   competitionId?: string | null;
@@ -184,6 +190,7 @@ export interface CreateNewsArticleRequest {
   slug?: string;
   summary?: string | null;
   body?: string | null;
+  bodyBlocks?: NewsArticleBodyBlock[];
   status?: NewsArticleStatus;
   sportId?: string | null;
   competitionId?: string | null;
@@ -213,6 +220,7 @@ export interface UpdateNewsArticleRequest {
   slug?: string;
   summary?: string | null;
   body?: string | null;
+  bodyBlocks?: NewsArticleBodyBlock[];
   status?: NewsArticleStatus;
   sportId?: string | null;
   competitionId?: string | null;

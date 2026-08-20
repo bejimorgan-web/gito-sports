@@ -88,7 +88,7 @@ export function getDatabase(): DatabaseSync {
     return database;
   }
 
-  const resolvedDatabasePath = env.absoluteDatabasePath;
+  const resolvedDatabasePath = runtimeConfig.newsTestMode ? ":memory:" : env.absoluteDatabasePath;
 
   console.log(`[startup] ========== DATABASE PERSISTENCE STARTUP ==========`);
   console.log(`[startup] RESOLVED_DATABASE_PATH=${resolvedDatabasePath}`);
@@ -98,6 +98,13 @@ export function getDatabase(): DatabaseSync {
   // restore the latest valid backup before opening the database. This avoids
   // creating a fresh empty DB that would discard previous data.
   try {
+    if (runtimeConfig.newsTestMode) {
+      database = allowSqliteInstantiation(() => new DatabaseSync(":memory:"));
+      database.exec(readInitialSchema());
+      database.exec(readNewsSchema());
+      ensureSchemaVersion(database);
+      return database;
+    }
     const autoRestore = runtimeConfig.autoRestoreBackup;
     const dbExists = fs.existsSync(resolvedDatabasePath);
     const dbStat = dbExists ? fs.statSync(resolvedDatabasePath) : null;
@@ -362,6 +369,7 @@ function ensureNewsSchemaColumns(database: DatabaseSync) {
       ["author", "TEXT"],
       ["categories_json", "TEXT"],
       ["tags_json", "TEXT"],
+      ["body_blocks_json", "TEXT"],
       ["content_availability", "TEXT"],
       ["content_origin", "TEXT"],
       ["fetched_body", "TEXT"],

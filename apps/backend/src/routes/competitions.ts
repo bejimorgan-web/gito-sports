@@ -17,6 +17,7 @@ import {
 } from "../repositories/competition-teams-repository.js";
 import { listCatalogCompetitions, getCatalogCompetitionById } from "../repositories/catalog-shadow-repository.js";
 import { normalizeCompetition } from "./asset-url.js";
+import { protectedRoute } from "../middleware/protected.js";
 
 export const competitionsRouter = Router();
 
@@ -48,7 +49,7 @@ competitionsRouter.get("/:competitionId", (request, response) => {
   response.json({ data: normalizeCompetition(request, competition) });
 });
 
-competitionsRouter.post("/", (request, response) => {
+competitionsRouter.post("/", protectedRoute, (request, response) => {
   const body = request.body as CreateCompetitionRequest;
 
   if (!body.sportId || !body.name || !body.scope || !body.type) {
@@ -60,9 +61,9 @@ competitionsRouter.post("/", (request, response) => {
   response.status(201).json({ data: normalizeCompetition(request, competition) });
 });
 
-competitionsRouter.put("/:competitionId", (request, response) => {
+competitionsRouter.put("/:competitionId", protectedRoute, (request, response) => {
   const body = request.body as UpdateCompetitionRequest;
-  const updated = updateCompetition(request.params.competitionId, body);
+  const updated = updateCompetition(String(request.params.competitionId ?? ""), body);
 
   if (!updated) {
     response.status(404).json({ error: "competition_not_found" });
@@ -72,9 +73,9 @@ competitionsRouter.put("/:competitionId", (request, response) => {
   response.json({ data: normalizeCompetition(request, updated) });
 });
 
-competitionsRouter.delete("/:competitionId", (request, response) => {
+competitionsRouter.delete("/:competitionId", protectedRoute, (request, response) => {
   const operatorId = (request as AuthenticatedRequest).operator?.id;
-  const ok = deleteCompetition(request.params.competitionId, operatorId);
+  const ok = deleteCompetition(String(request.params.competitionId ?? ""), operatorId);
 
   if (!ok) {
     response.status(409).json({
@@ -88,8 +89,8 @@ competitionsRouter.delete("/:competitionId", (request, response) => {
 });
 
 // Competition teams management
-competitionsRouter.post("/:competitionId/teams", (request, response) => {
-  const competitionId = request.params.competitionId;
+competitionsRouter.post("/:competitionId/teams", protectedRoute, (request, response) => {
+  const competitionId = String(request.params.competitionId ?? "");
   const { teamId } = request.body as { teamId?: string };
 
   if (!teamId) {
@@ -118,8 +119,8 @@ competitionsRouter.get("/:competitionId/teams", (request, response) => {
   response.json({ data: teams });
 });
 
-competitionsRouter.delete("/:competitionId/teams/:teamId", (request, response) => {
-  const ok = removeTeamFromCompetition(request.params.competitionId, request.params.teamId);
+competitionsRouter.delete("/:competitionId/teams/:teamId", protectedRoute, (request, response) => {
+  const ok = removeTeamFromCompetition(String(request.params.competitionId ?? ""), String(request.params.teamId ?? ""));
 
   if (!ok) {
     response.status(404).json({ error: "assignment_not_found" });

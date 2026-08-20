@@ -7,6 +7,7 @@ import type {
   Competition,
   Country,
   Match,
+  NewsArticleBodyBlock,
   NewsArticle,
   NewsArticleCategory,
   NewsArticleCategoryType,
@@ -50,6 +51,7 @@ type ArticleFormState = {
   title: string;
   summary: string;
   body: string;
+  bodyBlocks: NewsArticleBodyBlock[];
   sourceId: string;
   sourceName: string;
   sourceUrl: string;
@@ -132,6 +134,7 @@ const emptyArticleForm = (): ArticleFormState => ({
   title: "",
   summary: "",
   body: "",
+  bodyBlocks: [],
   sourceId: "",
   sourceName: "",
   sourceUrl: "",
@@ -256,6 +259,7 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
   const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
   const [sourceAuditDetails, setSourceAuditDetails] = useState<Record<string, NewsSourceRightsAudit>>({});
   const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
+  const [fetchingArticleContentId, setFetchingArticleContentId] = useState<string | null>(null);
   const [selectedArticleIds, setSelectedArticleIds] = useState<string[]>([]);
   const [isPublishingArticleId, setIsPublishingArticleId] = useState<string | null>(null);
   const [approvingClassificationId, setApprovingClassificationId] = useState<string | null>(null);
@@ -425,6 +429,7 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
       title: article?.title ?? "",
       summary: article?.summary ?? "",
       body: article?.body ?? "",
+      bodyBlocks: article?.bodyBlocks ?? [],
       sourceId: article?.source?.id ?? "",
       sourceName: article?.sourceName ?? "",
       sourceUrl: article?.sourceUrl ?? "",
@@ -461,6 +466,7 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
         slug: createSlug(articleForm.title.trim() || "article"),
         summary: articleForm.summary || null,
         body: articleForm.body || null,
+        bodyBlocks: articleForm.bodyBlocks,
         status: nextStatus,
         sportId: categoryMap.get("sport") ?? null,
         competitionId: categoryMap.get("competition") ?? null,
@@ -543,6 +549,11 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
   };
 
   const handleFetchArticleContent = async (articleId: string) => {
+    if (fetchingArticleContentId) {
+      return;
+    }
+    setFetchingArticleContentId(articleId);
+    setStatusMessage("Fetching article content…");
     try {
       const result = await apiClient.fetchNewsArticleContent(articleId, accessToken);
       setStatusMessage(result.message || (result.success ? "Article content fetched." : "Article content fetch failed."));
@@ -550,6 +561,8 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to fetch article content.";
       setStatusMessage(message);
+    } finally {
+      setFetchingArticleContentId(null);
     }
   };
 
@@ -1339,8 +1352,8 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
                   <button type="button" onClick={() => { resetArticleForm(selectedArticle); setActiveSection("articles"); }}>
                     Edit article
                   </button>
-                  <button type="button" onClick={() => void handleFetchArticleContent(selectedArticle.id)}>
-                    Fetch article content
+                  <button type="button" disabled={fetchingArticleContentId === selectedArticle.id} onClick={() => void handleFetchArticleContent(selectedArticle.id)}>
+                    {fetchingArticleContentId === selectedArticle.id ? "Fetching article content…" : "Fetch article content"}
                   </button>
                   <button
                     type="button"
@@ -1415,6 +1428,34 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
                 Body
                 <textarea value={articleForm.body} onChange={(event) => setArticleForm((current) => ({ ...current, body: event.target.value }))} rows={8} />
               </label>
+              <div className="news-editor-category-section">
+                <div className="news-panel-header">
+                  <h4>Article body media</h4>
+                  <div className="news-action-row">
+                    <button type="button" onClick={() => setArticleForm((current) => ({ ...current, bodyBlocks: [...current.bodyBlocks, { type: "paragraph", text: "" }] }))}>Add paragraph</button>
+                    <button type="button" onClick={() => setArticleForm((current) => ({ ...current, bodyBlocks: [...current.bodyBlocks, { type: "image", url: "", altText: "", caption: "" }] }))}>Add image</button>
+                    <button type="button" onClick={() => setArticleForm((current) => ({ ...current, bodyBlocks: [...current.bodyBlocks, { type: "video", url: "", platform: "youtube", caption: "" }] }))}>Add video</button>
+                    <button type="button" onClick={() => setArticleForm((current) => ({ ...current, bodyBlocks: [...current.bodyBlocks, { type: "social", url: "", platform: "x", caption: "", enabled: true }] }))}>Add social post</button>
+                  </div>
+                </div>
+                {articleForm.bodyBlocks.map((block, index) => (
+                  <div key={`${block.type}-${index}`} className="news-edit-category-row">
+                    <strong>{block.type}</strong>
+                    {block.type === "paragraph" ? (
+                      <textarea value={block.text} rows={3} onChange={(event) => setArticleForm((current) => ({ ...current, bodyBlocks: current.bodyBlocks.map((item, itemIndex) => itemIndex === index ? { ...block, text: event.target.value } : item) }))} />
+                    ) : (
+                      <>
+                        <input value={block.url} placeholder="https://..." onChange={(event) => setArticleForm((current) => ({ ...current, bodyBlocks: current.bodyBlocks.map((item, itemIndex) => itemIndex === index ? { ...block, url: event.target.value } : item) }))} />
+                        {block.type === "social" ? <input value={block.platform} placeholder="Platform" onChange={(event) => setArticleForm((current) => ({ ...current, bodyBlocks: current.bodyBlocks.map((item, itemIndex) => itemIndex === index ? { ...block, platform: event.target.value } : item) }))} /> : null}
+                        <input value={block.caption ?? ""} placeholder="Optional caption" onChange={(event) => setArticleForm((current) => ({ ...current, bodyBlocks: current.bodyBlocks.map((item, itemIndex) => itemIndex === index ? { ...block, caption: event.target.value } : item) }))} />
+                      </>
+                    )}
+                    <button type="button" disabled={index === 0} onClick={() => setArticleForm((current) => ({ ...current, bodyBlocks: current.bodyBlocks.map((item, itemIndex, blocks) => itemIndex === index - 1 ? blocks[index]! : itemIndex === index ? blocks[index - 1]! : item) }))}>Move up</button>
+                    <button type="button" disabled={index === articleForm.bodyBlocks.length - 1} onClick={() => setArticleForm((current) => ({ ...current, bodyBlocks: current.bodyBlocks.map((item, itemIndex, blocks) => itemIndex === index ? blocks[index + 1]! : itemIndex === index + 1 ? blocks[index]! : item) }))}>Move down</button>
+                    <button type="button" onClick={() => setArticleForm((current) => ({ ...current, bodyBlocks: current.bodyBlocks.filter((_, itemIndex) => itemIndex !== index) }))}>Remove</button>
+                  </div>
+                ))}
+              </div>
               <div className="news-form-grid">
                 <label>
                   Source name

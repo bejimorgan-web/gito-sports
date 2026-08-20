@@ -80,8 +80,7 @@ test("news end-to-end fetch -> normalize -> generate integration", async () => {
 
     assert.ok(/Example Publisher/.test(draft?.body ?? ""));
     assert.ok(draft?.body?.includes("https://example.com/match/1"));
-    assert.ok(draft?.body?.includes("Team A beat Team B 2-1"));
-    assert.ok(draft?.body?.includes("John Doe scored the decisive goal"));
+    assert.ok(draft?.body?.includes("John Doe found the decisive moment"));
     assert.notEqual(draft?.body, fixtureHtml);
 
     const reloadedSource = service.getArticle(sourceArticle.id);

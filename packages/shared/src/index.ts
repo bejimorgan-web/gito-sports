@@ -46,6 +46,7 @@ export { canTransitionMatch, canTransitionStream } from "./lifecycle.js";
 export type {
   NewsArticle,
   NewsArticleAuditEntry,
+  NewsArticleBodyBlock,
   NewsArticleCategory,
   NewsArticleCategoryInput,
   NewsClassificationSuggestion,

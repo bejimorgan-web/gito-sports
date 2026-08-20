@@ -4,6 +4,7 @@ import type { CreateSportRequest, UpdateSportRequest } from "@gito/shared";
 import type { AuthenticatedRequest } from "../middleware/protected.js";
 import { normalizeSport } from "./asset-url.js";
 import { CatalogService } from "../services/catalog-service.js";
+import { protectedRoute } from "../middleware/protected.js";
 
 export const sportsRouter = Router();
 
@@ -22,7 +23,7 @@ sportsRouter.get("/:sportId", (request, response) => {
   response.json({ data: normalizeSport(request, sport) });
 });
 
-sportsRouter.post("/", (request, response) => {
+sportsRouter.post("/", protectedRoute, (request, response) => {
   const body = request.body as CreateSportRequest;
 
   if (!body.name) {
@@ -34,9 +35,9 @@ sportsRouter.post("/", (request, response) => {
   response.status(201).json({ data: normalizeSport(request, sport) });
 });
 
-sportsRouter.put("/:sportId", (request, response) => {
+sportsRouter.put("/:sportId", protectedRoute, (request, response) => {
   const body = request.body as UpdateSportRequest;
-  const updated = CatalogService.updateSport(request.params.sportId, body);
+  const updated = CatalogService.updateSport(String(request.params.sportId ?? ""), body);
 
   if (!updated) {
     response.status(404).json({ error: "sport_not_found" });
@@ -46,9 +47,9 @@ sportsRouter.put("/:sportId", (request, response) => {
   response.json({ data: normalizeSport(request, updated) });
 });
 
-sportsRouter.delete("/:sportId", (request, response) => {
+sportsRouter.delete("/:sportId", protectedRoute, (request, response) => {
   const operatorId = (request as AuthenticatedRequest).operator?.id;
-  const ok = CatalogService.deleteSport(request.params.sportId, operatorId);
+  const ok = CatalogService.deleteSport(String(request.params.sportId ?? ""), operatorId);
 
   if (!ok) {
     response.status(409).json({

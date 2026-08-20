@@ -428,7 +428,7 @@ test("collection applies confident catalog classification without publishing", a
   `);
   const source = repository.createSource({ name: "Classified source", feedUrl: "https://example.com/classified.xml", enabled: true });
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response(createFeedXml("Manchester United report", "https://example.com/classified", "", "England club Manchester United prepare for the weekend."), { status: 200 });
+  globalThis.fetch = async () => new Response(createFeedXml("Manchester United report", "https://example.com/classified", "", "Football: England club Manchester United prepare for the weekend."), { status: 200 });
   try {
     await new NewsService(repository as any).collectSource({ sourceId: source.id });
   } finally {

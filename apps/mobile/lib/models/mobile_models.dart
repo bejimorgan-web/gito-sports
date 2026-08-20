@@ -130,6 +130,26 @@ class MobileStream {
       healthStatus: '${json['healthStatus'] ?? ''}');
 }
 
+class MobileNewsBodyBlock {
+    const MobileNewsBodyBlock({required this.type, this.text, this.url, this.platform, this.altText, this.caption, this.enabled = true});
+    final String type;
+    final String? text;
+    final String? url;
+    final String? platform;
+    final String? altText;
+    final String? caption;
+    final bool enabled;
+
+    factory MobileNewsBodyBlock.fromJson(Map<String, dynamic> json) => MobileNewsBodyBlock(
+            type: '${json['type'] ?? 'paragraph'}',
+            text: json['text']?.toString(),
+            url: json['url']?.toString(),
+            platform: json['platform']?.toString(),
+            altText: json['altText']?.toString(),
+            caption: json['caption']?.toString(),
+            enabled: json['enabled'] != false);
+}
+
 class MobileNewsArticle {
   const MobileNewsArticle(
       {required this.id,
@@ -140,7 +160,8 @@ class MobileNewsArticle {
       this.sourceName,
       this.sourceUrl,
       this.publishedAt,
-      this.imageUrl});
+    this.imageUrl,
+    this.bodyBlocks = const []});
   final String id;
   final String title;
   final String? summary;
@@ -150,6 +171,7 @@ class MobileNewsArticle {
   final String? sourceUrl;
   final String? publishedAt;
   final String? imageUrl;
+    final List<MobileNewsBodyBlock> bodyBlocks;
   factory MobileNewsArticle.fromJson(Map<String, dynamic> json) =>
       MobileNewsArticle(
           id: '${json['id'] ?? ''}',
@@ -164,7 +186,11 @@ class MobileNewsArticle {
           imageUrl: json['imageUrl']?.toString() ??
               ((json['media'] is List && (json['media'] as List).isNotEmpty)
                   ? ((json['media'] as List).first as Map)['url']?.toString()
-                  : null));
+                  : null),
+          bodyBlocks: (json['bodyBlocks'] as List? ?? const [])
+              .whereType<Map>()
+              .map((item) => MobileNewsBodyBlock.fromJson(Map<String, dynamic>.from(item)))
+              .toList());
 }
 
 class MobileFixture {

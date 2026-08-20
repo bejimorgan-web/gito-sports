@@ -1,17 +1,27 @@
 import type Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { getDatabase } from "../db/connection.js";
-import type { CreateNewsArticleRequest, CreateNewsSourceRequest, NewsArticle, NewsArticleAuditEntry, NewsArticleCategory, NewsArticleCategoryInput, NewsArticleLink, NewsArticleMedia, NewsQueryOptions, UpdateNewsArticleRequest, UpdateNewsSourceRequest, NewsSource, NewsResearchResult, NewsClassificationSuggestion, NewsClassificationStatus } from "@gito/shared";
+import type { CreateNewsArticleRequest, CreateNewsSourceRequest, NewsArticle, NewsArticleAuditEntry, NewsArticleBodyBlock, NewsArticleCategory, NewsArticleCategoryInput, NewsArticleLink, NewsArticleMedia, NewsQueryOptions, UpdateNewsArticleRequest, UpdateNewsSourceRequest, NewsSource, NewsResearchResult, NewsClassificationSuggestion, NewsClassificationStatus } from "@gito/shared";
 import { parseFeedItems } from "../services/news-collector.js";
 import { NewsClassificationService } from "../services/news-classification-service.js";
 
 function toArticleRow(row: any): NewsArticle {
+  let bodyBlocks: NewsArticleBodyBlock[] = [];
+  if (row.body_blocks_json) {
+    try {
+      const parsed = JSON.parse(row.body_blocks_json);
+      if (Array.isArray(parsed)) bodyBlocks = parsed;
+    } catch {
+      bodyBlocks = [];
+    }
+  }
   return {
     id: row.id,
     title: row.title,
     slug: row.slug,
     summary: row.summary ?? null,
     body: row.body ?? null,
+    bodyBlocks,
     status: row.status,
     sportId: row.sport_id ?? null,
     competitionId: row.competition_id ?? null,
@@ -59,7 +69,7 @@ export class NewsRepository {
         this.db.exec("ALTER TABLE news_articles ADD COLUMN external_id TEXT");
       }
       const articleColumns = this.db.prepare("PRAGMA table_info(news_articles)").all() as Array<{ name: string }>;
-      for (const [columnName, columnType] of [["country_id", "TEXT"], ["author", "TEXT"], ["categories_json", "TEXT"], ["tags_json", "TEXT"], ["content_availability", "TEXT"], ["content_origin", "TEXT"], ["fetched_body", "TEXT"], ["fetched_at", "TEXT"], ["fetch_status", "TEXT"], ["fetch_error", "TEXT"]] as const) {
+      for (const [columnName, columnType] of [["country_id", "TEXT"], ["author", "TEXT"], ["categories_json", "TEXT"], ["tags_json", "TEXT"], ["body_blocks_json", "TEXT"], ["content_availability", "TEXT"], ["content_origin", "TEXT"], ["fetched_body", "TEXT"], ["fetched_at", "TEXT"], ["fetch_status", "TEXT"], ["fetch_error", "TEXT"]] as const) {
         if (!articleColumns.some((column) => column.name === columnName)) {
           this.db.exec(`ALTER TABLE news_articles ADD COLUMN ${columnName} ${columnType}`);
         }
@@ -108,7 +118,7 @@ export class NewsRepository {
 
     const statement = this.db.prepare(`
       INSERT INTO news_articles (
-        id, title, slug, summary, body, status, sport_id, competition_id, team_id, match_id,
+        id, title, slug, summary, body, body_blocks_json, status, sport_id, competition_id, team_id, match_id,
         source_id, source_name, source_url, external_id, country_id, author, categories_json, tags_json,
         content_availability, content_origin, fetched_body, fetched_at, fetch_status, fetch_error,
         created_by, published_at, created_at, updated_at
@@ -116,7 +126,7 @@ export class NewsRepository {
         ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?
       )
     `);
 
@@ -130,6 +140,7 @@ export class NewsRepository {
       slug,
       input.summary ?? null,
       input.body ?? null,
+      this.serializeBodyBlocks(input.bodyBlocks),
       input.status ?? "draft",
       input.sportId ?? null,
       input.competitionId ?? null,
@@ -195,19 +206,19 @@ export class NewsRepository {
     }
 
     if (options.sportId) {
-      conditions.push("(a.sport_id = ? OR EXISTS (SELECT 1 FROM news_article_categories nsc WHERE nsc.article_id = a.id AND nsc.category_type = 'sport' AND nsc.entity_id = ? AND nsc.classification_status = 'approved'))");
+      conditions.push("(EXISTS (SELECT 1 FROM news_article_categories nsc WHERE nsc.article_id = a.id AND nsc.category_type = 'sport' AND nsc.entity_id = ? AND nsc.classification_status = 'approved') OR (a.sport_id = ? AND NOT EXISTS (SELECT 1 FROM news_article_categories nsc_any WHERE nsc_any.article_id = a.id AND nsc_any.category_type = 'sport')))");
       params.push(options.sportId);
       params.push(options.sportId);
     }
 
     if (options.competitionId) {
-      conditions.push("(a.competition_id = ? OR EXISTS (SELECT 1 FROM news_article_categories ncc WHERE ncc.article_id = a.id AND ncc.category_type = 'competition' AND ncc.entity_id = ? AND ncc.classification_status = 'approved'))");
+      conditions.push("(EXISTS (SELECT 1 FROM news_article_categories ncc WHERE ncc.article_id = a.id AND ncc.category_type = 'competition' AND ncc.entity_id = ? AND ncc.classification_status = 'approved') OR (a.competition_id = ? AND NOT EXISTS (SELECT 1 FROM news_article_categories ncc_any WHERE ncc_any.article_id = a.id AND ncc_any.category_type = 'competition')))");
       params.push(options.competitionId);
       params.push(options.competitionId);
     }
 
     if (options.teamId) {
-      conditions.push("(a.team_id = ? OR EXISTS (SELECT 1 FROM news_article_categories ntc WHERE ntc.article_id = a.id AND ntc.category_type = 'team' AND ntc.entity_id = ? AND ntc.classification_status = 'approved'))");
+      conditions.push("(EXISTS (SELECT 1 FROM news_article_categories ntc WHERE ntc.article_id = a.id AND ntc.category_type = 'team' AND ntc.entity_id = ? AND ntc.classification_status = 'approved') OR (a.team_id = ? AND NOT EXISTS (SELECT 1 FROM news_article_categories ntc_any WHERE ntc_any.article_id = a.id AND ntc_any.category_type = 'team')))");
       params.push(options.teamId);
       params.push(options.teamId);
     }
@@ -219,7 +230,7 @@ export class NewsRepository {
     }
 
     if (options.matchId) {
-      conditions.push("(a.match_id = ? OR EXISTS (SELECT 1 FROM news_article_categories nmc WHERE nmc.article_id = a.id AND nmc.category_type = 'match' AND nmc.entity_id = ? AND nmc.classification_status = 'approved'))");
+      conditions.push("(EXISTS (SELECT 1 FROM news_article_categories nmc WHERE nmc.article_id = a.id AND nmc.category_type = 'match' AND nmc.entity_id = ? AND nmc.classification_status = 'approved') OR (a.match_id = ? AND NOT EXISTS (SELECT 1 FROM news_article_categories nmc_any WHERE nmc_any.article_id = a.id AND nmc_any.category_type = 'match')))");
       params.push(options.matchId);
       params.push(options.matchId);
     }
@@ -265,7 +276,7 @@ export class NewsRepository {
     const slug = this.generateUniqueSlug(input.slug ?? existing.slug, id);
     const statement = this.db.prepare(`
       UPDATE news_articles
-        SET title = ?, slug = ?, summary = ?, body = ?, status = ?, sport_id = ?, competition_id = ?, team_id = ?, country_id = ?, match_id = ?,
+        SET title = ?, slug = ?, summary = ?, body = ?, body_blocks_json = ?, status = ?, sport_id = ?, competition_id = ?, team_id = ?, country_id = ?, match_id = ?,
           source_id = ?, source_name = ?, source_url = ?, external_id = ?, author = ?, categories_json = ?, tags_json = ?, content_availability = ?,
           content_origin = COALESCE(?, content_origin), fetched_body = ?, fetched_at = ?, fetch_status = ?, fetch_error = ?, published_at = ?, updated_at = ?
       WHERE id = ?
@@ -289,6 +300,7 @@ export class NewsRepository {
       slug,
       input.summary ?? existing.summary ?? null,
       input.body ?? existing.body ?? null,
+      input.bodyBlocks !== undefined ? this.serializeBodyBlocks(input.bodyBlocks) : this.serializeBodyBlocks(existing.bodyBlocks),
       input.status ?? existing.status,
       nextSportId,
       nextCompetitionId,
@@ -799,6 +811,21 @@ export class NewsRepository {
 
     const trimmed = actorId.trim();
     return trimmed.length > 0 ? trimmed : null;
+  }
+
+  private serializeBodyBlocks(blocks?: NewsArticleBodyBlock[] | null): string | null {
+    if (!blocks?.length) return null;
+    return JSON.stringify(blocks.filter((block) => {
+      if (!block || typeof block !== "object" || typeof block.type !== "string") return false;
+      if (block.type === "paragraph") return typeof block.text === "string" && block.text.trim().length > 0;
+      if (!("url" in block) || typeof block.url !== "string") return false;
+      try {
+        const parsed = new URL(block.url);
+        return (parsed.protocol === "http:" || parsed.protocol === "https:") && !parsed.username && !parsed.password;
+      } catch {
+        return false;
+      }
+    }));
   }
 
   private normalizeCategoryInputs(input: Array<NewsArticleCategoryInput | string> | null | undefined): NewsArticleCategoryInput[] {

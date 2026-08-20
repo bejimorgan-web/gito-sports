@@ -39,7 +39,7 @@ export function ClubManagementScreen({ accessToken }: Props) {
   const addMembership = async () => {
     if (!selectedId || !competitionId || !seasonId) return;
     try {
-      await apiClient.addSeasonTeam(competitionId, seasonId, selectedId);
+      await apiClient.addSeasonTeam(competitionId, seasonId, selectedId, accessToken);
       setStatus("Season membership added."); await load();
     } catch (error) { setStatus(error instanceof Error ? error.message : "Unable to add membership."); }
   };

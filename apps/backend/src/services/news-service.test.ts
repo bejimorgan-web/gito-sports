@@ -27,6 +27,25 @@ test("news service can create and publish an article", () => {
   assert.equal(fetched?.status, "published");
 });
 
+test("news service preserves ordered inline body blocks and rejects unsafe block URLs", () => {
+  const service = new NewsService();
+  const article = service.createArticle({
+    title: "Inline media article",
+    bodyBlocks: [
+      { type: "paragraph", text: "Before the image" },
+      { type: "image", url: "https://cdn.example.com/image.jpg", caption: "Matchday" },
+      { type: "video", url: "https://www.youtube.com/watch?v=abc", platform: "youtube" },
+      { type: "social", url: "javascript:alert(1)", platform: "x" }
+    ]
+  });
+
+  assert.deepEqual(article.bodyBlocks, [
+    { type: "paragraph", text: "Before the image" },
+    { type: "image", url: "https://cdn.example.com/image.jpg", caption: "Matchday" },
+    { type: "video", url: "https://www.youtube.com/watch?v=abc", platform: "youtube" }
+  ]);
+});
+
 test("news service can fetch article content from JSON-LD and preserve status", async () => {
   const originalFetch = globalThis.fetch;
   const service = new NewsService();

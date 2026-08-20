@@ -5,6 +5,7 @@ import type { CreateTeamRequest, UpdateTeamRequest } from "@gito/shared";
 import { createTeam, deleteTeam, getTeamById, listTeams, updateTeam } from "../repositories/teams-repository.js";
 import { getCatalogTeamById, listCatalogTeams } from "../repositories/catalog-shadow-repository.js";
 import { normalizeTeam } from "./asset-url.js";
+import { protectedRoute } from "../middleware/protected.js";
 
 export const teamsRouter = Router();
 
@@ -36,7 +37,7 @@ teamsRouter.get("/:teamId", (request, response) => {
   response.json({ data: normalizeTeam(request, team) });
 });
 
-teamsRouter.post("/", (request, response) => {
+teamsRouter.post("/", protectedRoute, (request, response) => {
   const body = request.body as CreateTeamRequest;
 
   if (!body.sportId || !body.name || !body.type) {
@@ -48,9 +49,9 @@ teamsRouter.post("/", (request, response) => {
   response.status(201).json({ data: normalizeTeam(request, team) });
 });
 
-teamsRouter.put("/:teamId", (request, response) => {
+teamsRouter.put("/:teamId", protectedRoute, (request, response) => {
   const body = request.body as UpdateTeamRequest;
-  const updated = updateTeam(request.params.teamId, body);
+  const updated = updateTeam(String(request.params.teamId ?? ""), body);
 
   if (!updated) {
     response.status(404).json({ error: "team_not_found" });
@@ -60,9 +61,9 @@ teamsRouter.put("/:teamId", (request, response) => {
   response.json({ data: normalizeTeam(request, updated) });
 });
 
-teamsRouter.delete("/:teamId", (request, response) => {
+teamsRouter.delete("/:teamId", protectedRoute, (request, response) => {
   const operatorId = (request as AuthenticatedRequest).operator?.id;
-  const ok = deleteTeam(request.params.teamId, operatorId);
+  const ok = deleteTeam(String(request.params.teamId ?? ""), operatorId);
 
   if (!ok) {
     response.status(409).json({

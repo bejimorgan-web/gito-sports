@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS news_articles (
   slug TEXT NOT NULL UNIQUE,
   summary TEXT,
   body TEXT,
+  body_blocks_json TEXT,
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'review', 'published', 'archived')),
   sport_id TEXT,
   competition_id TEXT,

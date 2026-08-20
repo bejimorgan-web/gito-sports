@@ -5,7 +5,7 @@ import { apiClient } from "../../services/api-client";
 import { isValidLogoSource, LogoUrlField } from "../../components/LogoUrlField";
 import { resolveAssetUrl } from "../../components/asset-url";
 
-export function CountriesManagementScreen() {
+export function CountriesManagementScreen({ accessToken }: { accessToken: string }) {
   const [countries, setCountries] = useState<Country[]>([]);
   const [selectedCountry, setSelectedCountry] = useState<Country | null>(null);
   const [name, setName] = useState("");
@@ -69,7 +69,7 @@ export function CountriesManagementScreen() {
           iso3Code,
           ...(logoUrl ? { flagUrl: logoUrl } : {})
         };
-        await apiClient.updateCountry(selectedCountry.id, updatePayload);
+        await apiClient.updateCountry(selectedCountry.id, updatePayload, accessToken);
         setStatus("Country updated.");
       } else {
         const input: CreateCountryRequest = {
@@ -78,7 +78,7 @@ export function CountriesManagementScreen() {
           iso3Code,
           ...(logoUrl ? { flagUrl: logoUrl } : {})
         };
-        await apiClient.createCountry(input);
+        await apiClient.createCountry(input, accessToken);
         setStatus("Country created.");
       }
 
@@ -95,7 +95,7 @@ export function CountriesManagementScreen() {
     }
 
     try {
-      await apiClient.deleteCountry(selectedCountry.id);
+      await apiClient.deleteCountry(selectedCountry.id, accessToken);
       setStatus("Country deleted.");
       await loadCountries();
       resetForm();
@@ -110,7 +110,7 @@ export function CountriesManagementScreen() {
     }
 
     try {
-      await apiClient.deleteCountry(country.id);
+      await apiClient.deleteCountry(country.id, accessToken);
       setStatus("Country deleted.");
       await loadCountries();
       if (selectedCountry?.id === country.id) {
