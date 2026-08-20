@@ -13,6 +13,34 @@ function getCount(database: ReturnType<typeof getDatabase>, table: string) {
   }
 }
 
+function databaseSchemaReady(database: ReturnType<typeof getDatabase>): boolean {
+  try {
+    const schemaVersion = Number((database.prepare("PRAGMA user_version").get() as { user_version?: number }).user_version ?? 0);
+    if (schemaVersion !== 1) return false;
+    const requiredTables = [
+      "sports",
+      "teams",
+      "competitions",
+      "seasons",
+      "matches",
+      "streams",
+      "providers",
+      "channels",
+      "operator_users",
+      "news_articles",
+      "news_article_categories",
+      "news_article_media"
+    ];
+    const placeholders = requiredTables.map(() => "?").join(",");
+    const rows = database
+      .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${placeholders})`)
+      .all(...requiredTables) as Array<{ name: string }>;
+    return new Set(rows.map((row) => row.name)).size === requiredTables.length;
+  } catch {
+    return false;
+  }
+}
+
 healthRouter.get("/", (_request, response) => {
   const db = getDatabase();
 
@@ -28,12 +56,7 @@ healthRouter.get("/", (_request, response) => {
     operator_users: getCount(db, "operator_users"),
   };
 
-  const databaseReady =
-    counts.sports > 0 &&
-    counts.teams > 0 &&
-    counts.matches > 0 &&
-    counts.streams > 0 &&
-    counts.operator_users > 0;
+  const databaseReady = databaseSchemaReady(db) && counts.operator_users > 0;
 
   const migrationImported = isMigrationImported(db);
   const migrationMeta = migrationImported ? getMigrationMetadata(db) : null;
