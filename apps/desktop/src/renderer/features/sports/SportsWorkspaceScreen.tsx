@@ -831,8 +831,26 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                 Country Name
                 <input value={countryName} onChange={(event) => setCountryName(event.target.value)} />
               </label>
+              <label>
+                ISO2 Code
+                <input
+                  value={countryIso2Code}
+                  maxLength={2}
+                  placeholder="ES"
+                  onChange={(event) => setCountryIso2Code(event.target.value.toUpperCase())}
+                />
+              </label>
+              <label>
+                ISO3 Code
+                <input
+                  value={countryIso3Code}
+                  maxLength={3}
+                  placeholder="ESP"
+                  onChange={(event) => setCountryIso3Code(event.target.value.toUpperCase())}
+                />
+              </label>
               <LogoUrlField label="Upload Flag" value={countryFlagUrl} onChange={setCountryFlagUrl} />
-              <small className="field-note">ISO codes are stored internally and are not shown to operators.</small>
+              <small className="field-note">Use ISO 3166-1 codes, for example Spain: ES / ESP.</small>
             </div>
           ) : modalContext.kind === "competition" ? (
             <div className="form-grid two-column">

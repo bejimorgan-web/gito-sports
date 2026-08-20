@@ -39,6 +39,11 @@ export const navigationItems: NavigationItem[] = [
     description: "Manage canonical clubs, seasons, and fixtures"
   },
   {
+    key: "sports",
+    label: "Manage",
+    description: "Manage sports, countries, competitions, and clubs"
+  },
+  {
     key: "mobileFeatures",
     label: "Mobile App",
     description: "Configure visible mobile navigation sections"
