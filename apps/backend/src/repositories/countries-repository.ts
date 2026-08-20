@@ -28,6 +28,20 @@ function normalizeCountryName(value: string): string {
   return value.trim();
 }
 
+function validateCountryCodes(iso2Code: string | undefined, iso3Code: string | undefined) {
+  if (!iso2Code || !/^[A-Z]{2}$/.test(iso2Code)) {
+    throw Object.assign(new Error("ISO2 must be exactly 2 uppercase letters."), { code: "country_iso2_invalid" });
+  }
+
+  if (!iso3Code || !/^[A-Z]{3}$/.test(iso3Code)) {
+    throw Object.assign(new Error("ISO3 must be exactly 3 uppercase letters."), { code: "country_iso3_invalid" });
+  }
+
+  if (iso2Code === "XX") {
+    throw Object.assign(new Error("ISO2 XX is reserved and cannot be used as a country code."), { code: "country_iso2_reserved" });
+  }
+}
+
 function findCountryConflict(
   database: ReturnType<typeof getDatabase>,
   payload: { iso2Code?: string; iso3Code?: string },
@@ -68,7 +82,8 @@ function findCountryConflict(
 }
 
 function buildCountryConflictError(existing: { name: string }, field: "iso2Code" | "iso3Code", value: string): CountryConflictError {
-  const error = new Error(`${existing.name} already exists for ${field} ${value}.`) as CountryConflictError;
+  const label = field === "iso2Code" ? "ISO2" : "ISO3";
+  const error = new Error(`${existing.name} already exists for ${label} ${value}.`) as CountryConflictError;
   error.code = "country_already_exists";
   error.field = field;
   return error;
@@ -123,6 +138,7 @@ export function createCountry(input: CreateCountryRequest): Country {
   if (!normalizedName || !iso2Code || !iso3Code) {
     throw Object.assign(new Error("Country name and ISO codes are required."), { code: "country_validation_failed" });
   }
+  validateCountryCodes(iso2Code, iso3Code);
 
   const conflict = findCountryConflict(database, { iso2Code, iso3Code });
   if (conflict) {
@@ -172,6 +188,7 @@ export function updateCountry(countryId: string, input: Partial<CreateCountryReq
   if (!nextName || !nextIso2Code || !nextIso3Code) {
     throw Object.assign(new Error("Country name and ISO codes are required."), { code: "country_validation_failed" });
   }
+  validateCountryCodes(nextIso2Code, nextIso3Code);
 
   const conflict = findCountryConflict(database, { iso2Code: nextIso2Code, iso3Code: nextIso3Code }, countryId);
   if (conflict) {

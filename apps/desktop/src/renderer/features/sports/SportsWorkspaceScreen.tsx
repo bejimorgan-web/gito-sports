@@ -46,24 +46,6 @@ type DeleteContext = {
   label: string;
 };
 
-function generateCountryIsoCodes(name: string) {
-  const tokens = name.trim().split(/\s+/).filter(Boolean);
-  const iso2 = tokens
-    .slice(0, 2)
-    .map((token) => token[0]?.toUpperCase() ?? "")
-    .join("")
-    .padEnd(2, "X")
-    .slice(0, 2);
-  const iso3 = tokens
-    .slice(0, 3)
-    .map((token) => token[0]?.toUpperCase() ?? "")
-    .join("")
-    .padEnd(3, "X")
-    .slice(0, 3);
-
-  return { iso2Code: iso2, iso3Code: iso3 };
-}
-
 function EntityAvatar({ src, fallback }: { src?: string | undefined; fallback: string }) {
   const resolvedSrc = resolveAssetUrl(src);
 
@@ -231,9 +213,8 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
     } else {
       setCountryName("");
       setCountryFlagUrl("");
-      const generated = generateCountryIsoCodes("");
-      setCountryIso2Code(generated.iso2Code);
-      setCountryIso3Code(generated.iso3Code);
+      setCountryIso2Code("");
+      setCountryIso3Code("");
       setEditingCountryId(null);
       openModal({ kind: "country", action: "create" });
     }
@@ -381,10 +362,23 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
       return;
     }
 
-    const { iso2Code, iso3Code } =
-      countryIso2Code && countryIso3Code
-        ? { iso2Code: countryIso2Code, iso3Code: countryIso3Code }
-        : generateCountryIsoCodes(countryName);
+    const iso2Code = countryIso2Code.trim().toUpperCase();
+    const iso3Code = countryIso3Code.trim().toUpperCase();
+
+    if (!/^[A-Z]{2}$/.test(iso2Code)) {
+      setStatus("ISO2 must be exactly 2 letters.");
+      return;
+    }
+
+    if (!/^[A-Z]{3}$/.test(iso3Code)) {
+      setStatus("ISO3 must be exactly 3 letters.");
+      return;
+    }
+
+    if (iso2Code === "XX") {
+      setStatus("ISO2 XX is reserved and cannot be used as a country code.");
+      return;
+    }
 
     if (isLogoUploading) {
       setStatus("Please wait for the flag upload to finish before saving.");
