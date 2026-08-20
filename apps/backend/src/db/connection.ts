@@ -640,6 +640,50 @@ function createPasswordHash(password: string) {
   } as const;
 }
 
+export function syncAdminOperatorUserPassword(
+  database: DatabaseSync,
+  email: string,
+  password: string
+) {
+  if (!email || !password) {
+    return false;
+  }
+
+  const existingUser = database
+    .prepare(
+      "SELECT id, password_hash, password_salt, password_iterations, password_algo FROM operator_users WHERE email = ?"
+    )
+    .get(email) as
+    | {
+        id: string;
+        password_hash?: string | null;
+        password_salt?: string | null;
+        password_iterations?: number | null;
+        password_algo?: string | null;
+      }
+    | undefined;
+
+  if (!existingUser) {
+    return false;
+  }
+
+  const { hash, salt, iterations, algo } = createPasswordHash(password);
+
+  database
+    .prepare(
+      `UPDATE operator_users
+       SET password_hash = ?,
+           password_salt = ?,
+           password_iterations = ?,
+           password_algo = ?,
+           updated_at = ?
+       WHERE email = ?`
+    )
+    .run(hash, salt, iterations, algo, new Date().toISOString(), email);
+
+  return true;
+}
+
 export function createAdminOperatorUser(
   database: DatabaseSync,
   email: string,
@@ -736,6 +780,9 @@ export function bootstrapAdminUserIfNeeded(database: DatabaseSync) {
       } else {
         console.warn("[AUTH BOOTSTRAP] ADMIN_EMAIL is set but ADMIN_PASSWORD is missing; cannot create admin user");
       }
+    } else if (adminPassword) {
+      const synced = syncAdminOperatorUserPassword(database, adminEmail, adminPassword);
+      console.log(`[AUTH BOOTSTRAP] admin password synced for ${adminEmail}: ${synced ? "true" : "false"}`);
     }
   }
 

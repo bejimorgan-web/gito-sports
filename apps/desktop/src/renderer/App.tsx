@@ -26,6 +26,7 @@ import { apiClient, API_BASE_URL } from "./services/api-client";
 import type { NavigationKey } from "./types/navigation";
 
 type ProviderList = Awaited<ReturnType<typeof apiClient.listProviders>>;
+type ChannelPage = Awaited<ReturnType<typeof apiClient.listChannelPage>>;
 type BackendStatus = "online" | "offline" | "reconnecting";
 
 const AUTH_STORAGE_KEY = "gito-live-sports-auth";
@@ -52,6 +53,7 @@ function renderScreen(
     assignment: MatchAssignmentResult | undefined;
     backendStatus: BackendStatus;
     channels: Channel[];
+    channelPage: ChannelPage;
     liveMatches: PublishedLiveMatch[];
     previewedChannelId: string | undefined;
     selectedMatchId?: string | undefined;
@@ -86,6 +88,7 @@ function renderScreen(
     startIptvOperation: typeof apiClient.startIptvOperation;
     getIptvOperation: typeof apiClient.getIptvOperation;
     cancelIptvOperation: typeof apiClient.cancelIptvOperation;
+    loadChannelPage: (options: { page: number; q?: string; category?: string; providerId?: string }) => Promise<void>;
     openMatch: (matchId?: string) => void;
   }
 ) {
@@ -94,6 +97,8 @@ function renderScreen(
       return (
         <IptvManagementScreen
           channels={state.channels}
+          channelPage={state.channelPage}
+          onLoadChannelPage={actions.loadChannelPage}
           providers={state.providers}
           onCreateProvider={actions.createProvider}
           onUpdateProvider={actions.updateProvider}
@@ -224,6 +229,7 @@ export function App() {
   const [assignment, setAssignment] = useState<MatchAssignmentResult>();
   const [backendStatus, setBackendStatus] = useState<BackendStatus>("reconnecting");
   const [channels, setChannels] = useState<Channel[]>([]);
+  const [channelPage, setChannelPage] = useState<ChannelPage>({ items: [], page: 1, pageSize: 50, total: 0, totalPages: 1 });
   const [liveMatches, setLiveMatches] = useState<PublishedLiveMatch[]>([]);
   const [providers, setProviders] = useState<ProviderList>([]);
   const [previewedChannelId, setPreviewedChannelId] = useState<string>();
@@ -261,6 +267,7 @@ export function App() {
     setActiveScreen("dashboard");
     setAssignment(undefined);
     setChannels([]);
+    setChannelPage({ items: [], page: 1, pageSize: 50, total: 0, totalPages: 1 });
     setLiveMatches([]);
     setProviders([]);
     setPreviewedChannelId(undefined);
@@ -334,18 +341,21 @@ export function App() {
 
       const [providerData, channelData, liveData] = await Promise.all([
         apiClient.listProviders(),
-        apiClient.listChannelPage(undefined, { includeInactive: true, page: 1, pageSize: 100 }),
+        apiClient.listChannelPage(undefined, { includeInactive: true, page: 1, pageSize: 50 }),
         apiClient.listLiveMatches()
       ]);
 
       setBackendStatus("online");
       applyResolvedState("iptv:providers", providerData, setProviders, "api-refresh");
-      const channelPage = Array.isArray(channelData) ? channelData : channelData.items;
-      applyResolvedState("iptv:channels", channelPage, setChannels, "api-refresh");
+      const resolvedChannelPage = Array.isArray(channelData)
+        ? { items: channelData, page: 1, pageSize: channelData.length, total: channelData.length, totalPages: 1 }
+        : channelData;
+      applyResolvedState("iptv:channels-page", resolvedChannelPage, setChannelPage, "api-refresh");
+      applyResolvedState("iptv:channels", resolvedChannelPage.items, setChannels, "api-refresh");
       applyResolvedState("live:matches", liveData, setLiveMatches, "api-refresh");
 
       const currentSelectedChannel = selectedChannelRef.current;
-      if (!isSelectedChannelStillValid(currentSelectedChannel, channelPage, providerData)) {
+      if (!isSelectedChannelStillValid(currentSelectedChannel, resolvedChannelPage.items, providerData)) {
         clearPreviewState();
       }
     } catch {
@@ -653,6 +663,18 @@ export function App() {
     setAssignment(undefined);
   }, []);
 
+    const loadChannelPage = useCallback(async (options: { page: number; q?: string; category?: string; providerId?: string }) => {
+      const nextPage = await apiClient.listChannelPage(undefined, {
+        includeInactive: true,
+        page: options.page,
+        pageSize: 50,
+        ...(options.q ? { q: options.q } : {}),
+        ...(options.category ? { category: options.category } : {}),
+        ...(options.providerId ? { providerId: options.providerId } : {})
+      });
+      setChannelPage(nextPage);
+    }, []);
+
   const actions = useMemo(
       () => ({
         approveStream,
@@ -684,6 +706,7 @@ export function App() {
         startIptvOperation: apiClient.startIptvOperation,
         getIptvOperation: apiClient.getIptvOperation,
         cancelIptvOperation: apiClient.cancelIptvOperation
+        ,loadChannelPage
       }),
       [
         approveStream,
@@ -705,7 +728,8 @@ export function App() {
         setSelectedMatchId,
         syncXtream,
         setProviderStatus,
-        testProviderById
+        testProviderById,
+        loadChannelPage
       ]
   );
 
@@ -715,6 +739,7 @@ export function App() {
       assignment,
       backendStatus,
       channels,
+      channelPage,
       liveMatches,
       previewedChannelId,
       providers,
@@ -731,6 +756,7 @@ export function App() {
       assignment,
       backendStatus,
       channels,
+      channelPage,
       liveMatches,
       previewedChannelId,
       providers,

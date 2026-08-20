@@ -257,6 +257,10 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
   const [sourceAuditDetails, setSourceAuditDetails] = useState<Record<string, NewsSourceRightsAudit>>({});
   const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
   const [selectedArticleIds, setSelectedArticleIds] = useState<string[]>([]);
+  const [isPublishingArticleId, setIsPublishingArticleId] = useState<string | null>(null);
+  const [approvingClassificationId, setApprovingClassificationId] = useState<string | null>(null);
+  const [approvingMultipleClassifications, setApprovingMultipleClassifications] = useState(false);
+  const [savingArticleStatus, setSavingArticleStatus] = useState<NewsArticleStatus | null>(null);
   const [researchSourceArticleId, setResearchSourceArticleId] = useState<string | null>(null);
   const [researchResult, setResearchResult] = useState<NewsResearchResult | null>(null);
   const [researchLoading, setResearchLoading] = useState(false);
@@ -442,6 +446,7 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
       return;
     }
 
+    setSavingArticleStatus(nextStatus);
     try {
       const resolvedCategoryRows = articleForm.categories.filter((category) => category.entityId);
       const categoryMap = new Map<NewsArticleCategoryType, string>();
@@ -507,10 +512,13 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to save article.";
       setStatusMessage(message);
+    } finally {
+      setSavingArticleStatus(null);
     }
   };
 
   const handlePublishArticle = async (articleId: string) => {
+    setIsPublishingArticleId(articleId);
     try {
       await apiClient.publishNewsArticle(articleId, accessToken);
       setStatusMessage("Article published.");
@@ -518,6 +526,8 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to publish article.";
       setStatusMessage(message);
+    } finally {
+      setIsPublishingArticleId(null);
     }
   };
 
@@ -640,8 +650,17 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
 
   const approveClassification = async (categoryId: string) => {
     if (!selectedArticleId) return;
-    try { await apiClient.approveNewsClassification(selectedArticleId, categoryId, accessToken); await refreshClassification(selectedArticleId); await loadData(); setStatusMessage("Classification approved."); }
-    catch (error) { setStatusMessage(error instanceof Error ? error.message : "Unable to approve classification."); }
+    setApprovingClassificationId(categoryId);
+    try {
+      await apiClient.approveNewsClassification(selectedArticleId, categoryId, accessToken);
+      await refreshClassification(selectedArticleId);
+      await loadData();
+      setStatusMessage("Classification approved.");
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Unable to approve classification.");
+    } finally {
+      setApprovingClassificationId(null);
+    }
   };
 
   const rejectClassification = async (categoryId: string) => {
@@ -652,8 +671,17 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
 
   const approveSelectedClassifications = async () => {
     if (!selectedArticleId || !selectedClassificationIds.length) return;
-    try { await apiClient.approveNewsClassifications(selectedArticleId, selectedClassificationIds, accessToken); await refreshClassification(selectedArticleId); await loadData(); setStatusMessage("Selected classifications approved."); }
-    catch (error) { setStatusMessage(error instanceof Error ? error.message : "Unable to approve classifications."); }
+    setApprovingMultipleClassifications(true);
+    try {
+      await apiClient.approveNewsClassifications(selectedArticleId, selectedClassificationIds, accessToken);
+      await refreshClassification(selectedArticleId);
+      await loadData();
+      setStatusMessage("Selected classifications approved.");
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Unable to approve classifications.");
+    } finally {
+      setApprovingMultipleClassifications(false);
+    }
   };
 
   const refreshSelectedClassification = async () => {
@@ -1201,6 +1229,8 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
                   onReject={(categoryId) => void rejectClassification(categoryId)}
                   onApproveSelected={() => void approveSelectedClassifications()}
                   onRerun={() => void rerunClassification()}
+                  approvingCategoryId={approvingClassificationId}
+                  approvingMultiple={approvingMultipleClassifications}
                   aiStatus={aiClassificationStatus}
                   onAiClassify={() => void aiClassifySelectedArticle()}
                   entities={{
@@ -1319,8 +1349,8 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
                   >
                     {isGeneratingDraft ? "Generating draft…" : "Generate GiTO draft"}
                   </button>
-                  <button type="button" onClick={() => void handlePublishArticle(selectedArticle.id)}>
-                    Publish
+                  <button type="button" disabled={isPublishingArticleId === selectedArticle.id} onClick={() => void handlePublishArticle(selectedArticle.id)}>
+                    {isPublishingArticleId === selectedArticle.id ? "Publishing…" : "Publish"}
                   </button>
                   <button type="button" onClick={() => void handleArchiveArticle(selectedArticle.id)}>
                     Archive
@@ -1367,10 +1397,10 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
               <button type="button" onClick={() => { setEditingArticleId(null); setArticleForm(emptyArticleForm()); setSelectedArticleId(null); }}>
                 New article
               </button>
-              <button type="button" onClick={() => void handleArticleSubmit("draft")}>Save draft</button>
-              <button type="button" onClick={() => void handleArticleSubmit("review")}>Send for review</button>
-              <button type="button" onClick={() => void handleArticleSubmit("published")}>Publish</button>
-              <button type="button" onClick={() => void handleArticleSubmit("archived")}>Archive</button>
+              <button type="button" disabled={savingArticleStatus === "draft"} onClick={() => void handleArticleSubmit("draft")}>{savingArticleStatus === "draft" ? "Saving…" : "Save draft"}</button>
+              <button type="button" disabled={savingArticleStatus === "review"} onClick={() => void handleArticleSubmit("review")}>{savingArticleStatus === "review" ? "Sending…" : "Send for review"}</button>
+              <button type="button" disabled={savingArticleStatus === "published"} onClick={() => void handleArticleSubmit("published")}>{savingArticleStatus === "published" ? "Publishing…" : "Publish"}</button>
+              <button type="button" disabled={savingArticleStatus === "archived"} onClick={() => void handleArticleSubmit("archived")}>{savingArticleStatus === "archived" ? "Archiving…" : "Archive"}</button>
             </div>
             <form className="news-editor-form" onSubmit={(event) => { event.preventDefault(); void handleArticleSubmit(articleForm.status); }}>
               <label>

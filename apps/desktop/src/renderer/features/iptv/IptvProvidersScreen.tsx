@@ -36,6 +36,7 @@ interface IptvProvidersScreenProps {
   onTestProviderById: ((providerId: string) => Promise<any>) | undefined;
   onValidateProvider?: () => Promise<void>;
   providerAction?: "idle" | "validating" | "saving";
+  statusChangingProviderId?: string | null;
 }
 
 export function IptvProvidersScreen({
@@ -60,7 +61,8 @@ export function IptvProvidersScreen({
   onSetProviderStatus,
   onTestProviderById,
   onValidateProvider,
-  providerAction = "idle"
+  providerAction = "idle",
+  statusChangingProviderId = null
 }: IptvProvidersScreenProps) {
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
   const activeProviders = useMemo(() => providers.filter((provider) => provider.status !== "inactive"), [providers]);
@@ -217,9 +219,10 @@ export function IptvProvidersScreen({
                     </button>
                     <button
                       type="button"
+                      disabled={statusChangingProviderId === provider.id}
                       onClick={() => onSetProviderStatus(provider.id, isActive ? "inactive" : "active")}
                     >
-                      {isActive ? "Deactivate" : "Activate"}
+                      {statusChangingProviderId === provider.id ? (isActive ? "Deactivating…" : "Activating…") : (isActive ? "Deactivate" : "Activate")}
                     </button>
                     <button type="button" onClick={() => onDeleteProvider(provider.id)}>
                       Delete
@@ -256,8 +259,8 @@ export function IptvProvidersScreen({
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <span className="provider-status-badge inactive">Deactivated</span>
-                        <button type="button" onClick={() => onSetProviderStatus(provider.id, "active")}>
-                          Activate
+                        <button type="button" disabled={statusChangingProviderId === provider.id} onClick={() => onSetProviderStatus(provider.id, "active")}>
+                          {statusChangingProviderId === provider.id ? "Activating…" : "Activate"}
                         </button>
                       </div>
                     </div>

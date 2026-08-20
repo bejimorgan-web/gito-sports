@@ -18,13 +18,15 @@ interface Props {
   entities?: Record<NewsArticleCategory["categoryType"], Array<{ id: string; name: string }>>;
   onRemoveApproved?: (categoryId: string) => void;
   onAddManual?: (categoryType: NewsArticleCategory["categoryType"], entityId: string) => void;
+  approvingCategoryId?: string | null;
+  approvingMultiple?: boolean;
 }
 
 function CategoryGroup({ title, categories, labelFor, onRemove }: { title: string; categories: NewsArticleCategory[]; labelFor: Props["labelFor"]; onRemove?: Props["onRemoveApproved"] }) {
   return <div className="news-classification-group"><strong>{title}</strong>{categories.length ? categories.map((category) => <span key={category.id}>{labelFor(category)}{onRemove ? <button type="button" className="secondary" onClick={() => onRemove(category.id)}>Remove</button> : null}</span>) : <small>None</small>}</div>;
 }
 
-export function NewsClassificationPanel({ classification, labelFor, selectedIds, onToggle, onApprove, onReject, onApproveSelected, onRerun, aiStatus = "idle", onAiClassify, entities, onRemoveApproved, onAddManual }: Props) {
+export function NewsClassificationPanel({ classification, labelFor, selectedIds, onToggle, onApprove, onReject, onApproveSelected, onRerun, aiStatus = "idle", onAiClassify, entities, onRemoveApproved, onAddManual, approvingCategoryId, approvingMultiple }: Props) {
   const approved = classification?.approved ?? [];
   const rejected = (classification?.suggestions ?? []).filter((category) => category.classificationStatus === "rejected");
   const suggestions = (classification?.suggestions ?? []).filter((category) => category.classificationStatus === "suggested");
@@ -36,11 +38,11 @@ export function NewsClassificationPanel({ classification, labelFor, selectedIds,
     <div className="news-classification-approved"><h4>Approved</h4>
       {(["team", "competition", "country", "sport", "match"] as const).map((type) => <CategoryGroup key={type} title={({ team: "Teams", competition: "Competitions", country: "Countries", sport: "Sports", match: "Matches" })[type]} categories={group(approved, type)} labelFor={labelFor} onRemove={onRemoveApproved} />)}
     </div>
-    <div className="news-classification-suggestions"><div className="news-panel-header"><h4>Suggestions</h4><div className="button-row"><button type="button" onClick={onRerun}>Rerun classification</button><button type="button" onClick={onApproveSelected} disabled={!selectedIds.length}>Approve selected</button></div></div>
+    <div className="news-classification-suggestions"><div className="news-panel-header"><h4>Suggestions</h4><div className="button-row"><button type="button" onClick={onRerun}>Rerun classification</button><button type="button" onClick={onApproveSelected} disabled={!selectedIds.length || approvingMultiple}>{approvingMultiple ? "Approving…" : "Approve selected"}</button></div></div>
       {suggestions.length ? suggestions.map((category) => <div className="news-classification-suggestion" key={category.id}>
         <label><input type="checkbox" checked={selectedIds.includes(category.id)} onChange={() => onToggle(category.id)} /><strong>{labelFor(category)}</strong> <span>{category.confidence}%</span></label>
         <small>{category.classificationSource.toUpperCase()} · {category.reason}</small>
-        <div className="button-row"><button type="button" onClick={() => onApprove(category.id)}>Approve</button><button type="button" className="secondary" onClick={() => onReject(category.id)}>Reject</button></div>
+        <div className="button-row"><button type="button" disabled={approvingCategoryId === category.id || approvingMultiple} onClick={() => onApprove(category.id)}>{approvingCategoryId === category.id ? "Approving…" : "Approve"}</button><button type="button" className="secondary" disabled={approvingCategoryId !== null || approvingMultiple} onClick={() => onReject(category.id)}>Reject</button></div>
       </div>) : <p className="field-note">No pending suggestions.</p>}
       {rejected.length ? <div className="news-classification-rejected"><h4>Rejected</h4>{rejected.map((category) => <div className="news-classification-suggestion" key={category.id}><strong>{labelFor(category)}</strong><small>REJECTED · {category.classificationSource.toUpperCase()} · {category.reason}</small></div>)}</div> : null}
     </div>

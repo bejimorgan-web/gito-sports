@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { apiClient } from "../../services/api-client";
 import { Toast } from "../../components/Toast";
 
@@ -184,16 +184,19 @@ export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControl
   return (
     <section className="screen-stack mobile-feature-screen">
       <header className="screen-header">
-        <p className="eyebrow">Mobile Navigation</p>
-        <h2>Remote feature control</h2>
-        <span>Enable or disable mobile navigation tabs for viewers in real time.</span>
+        <p className="eyebrow">Mobile App</p>
+        <h2>Mobile App Configuration</h2>
+        <span>Enable or disable mobile navigation sections for the installed app without rebuilding the APK.</span>
       </header>
 
       <div className="console-panel">
         {loading ? (
-          <p>Loading mobile navigation settings…</p>
+          <p>Loading mobile configuration…</p>
         ) : error ? (
-          <p className="error-text">{error}</p>
+          <>
+            <p className="error-text">{error}</p>
+            <button type="button" onClick={() => void loadFeatures()} disabled={loading}>Retry</button>
+          </>
         ) : (
           <div className="feature-list">
             {featureRows}

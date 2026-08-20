@@ -1,9 +1,10 @@
 ﻿import { useEffect, useState } from "react";
 
-import type { Channel, CreateProviderRequest, IptvOperation, IptvOperationType, IPTVProvider, ProviderConnectionTest } from "@gito/shared";
+import type { Channel, CreateProviderRequest, IptvOperation, IptvOperationType, IPTVProvider, PaginatedChannels, ProviderConnectionTest } from "@gito/shared";
 import { IptvImportScreen } from "./IptvImportScreen";
 import { IptvOperationProgress } from "./IptvOperationProgress";
 import { IptvProvidersScreen } from "./IptvProvidersScreen";
+import { IptvChannelsScreen } from "./IptvChannelsScreen";
 
 function getFriendlyErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
@@ -21,6 +22,8 @@ function getFriendlyErrorMessage(error: unknown) {
 
 interface IptvManagementScreenProps {
   channels: Channel[];
+  channelPage: PaginatedChannels<Channel>;
+  onLoadChannelPage: (options: { page: number; q?: string; category?: string; providerId?: string }) => Promise<void>;
   providers: IPTVProvider[];
   onCreateProvider: (input: CreateProviderRequest) => Promise<void>;
   onIngestM3u: (providerId: string, playlist: string) => Promise<void>;
@@ -37,6 +40,8 @@ interface IptvManagementScreenProps {
 
 export function IptvManagementScreen({
   channels,
+  channelPage,
+  onLoadChannelPage,
   providers,
   onCreateProvider,
   onIngestM3u,
@@ -61,6 +66,11 @@ export function IptvManagementScreen({
   const [importStatus, setImportStatus] = useState("Ready");
   const [operation, setOperation] = useState<IptvOperation>();
   const [providerAction, setProviderAction] = useState<"idle" | "validating" | "saving">("idle");
+  const [statusChangingProviderId, setStatusChangingProviderId] = useState<string | null>(null);
+  const [channelSearch, setChannelSearch] = useState("");
+  const [channelCategory, setChannelCategory] = useState("");
+  const [channelProviderFilter, setChannelProviderFilter] = useState("");
+  const [selectedChannelId, setSelectedChannelId] = useState<string>();
   const providerInput: CreateProviderRequest = {
     name: providerName.trim(),
     baseUrl: baseUrl.trim(),
@@ -77,6 +87,27 @@ export function IptvManagementScreen({
     }, 750);
     return () => window.clearInterval(timer);
   }, [operation, onGetIptvOperation]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void onLoadChannelPage({
+        page: 1,
+        ...(channelSearch.trim() ? { q: channelSearch.trim() } : {}),
+        ...(channelCategory ? { category: channelCategory } : {}),
+        ...(channelProviderFilter ? { providerId: channelProviderFilter } : {})
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [channelSearch, channelCategory, channelProviderFilter, onLoadChannelPage]);
+
+  const loadChannelPage = (page: number) => {
+    void onLoadChannelPage({
+      page,
+      ...(channelSearch.trim() ? { q: channelSearch.trim() } : {}),
+      ...(channelCategory ? { category: channelCategory } : {}),
+      ...(channelProviderFilter ? { providerId: channelProviderFilter } : {})
+    });
+  };
 
   const startOperation = async (type: IptvOperationType, input: { providerId?: string; playlist?: string; baseUrl?: string; username?: string; password?: string } = {}) => {
     const started = await onStartIptvOperation(type, input);
@@ -258,13 +289,16 @@ export function IptvManagementScreen({
   const handleSetProviderStatus = async (providerId: string, nextStatus: string) => {
     if (!onSetProviderStatus) return;
 
-    setStatusMessage("Updating provider status...");
+    setStatusChangingProviderId(providerId);
+    setStatusMessage(`${nextStatus === "active" ? "Activating" : "Deactivating"} provider...`);
 
     try {
       await onSetProviderStatus(providerId, nextStatus);
       setStatusMessage("Provider status updated.");
     } catch (error) {
       setStatusMessage(getFriendlyErrorMessage(error) || "Unable to update provider status.");
+    } finally {
+      setStatusChangingProviderId(null);
     }
   };
 
@@ -300,6 +334,7 @@ export function IptvManagementScreen({
           onTestProviderById={onTestProviderById}
           onValidateProvider={handleTestConnection}
           providerAction={providerAction}
+          statusChangingProviderId={statusChangingProviderId}
         />
 
         <IptvImportScreen
@@ -314,6 +349,20 @@ export function IptvManagementScreen({
           onImportM3u={handleImportM3u}
         />
       </div>
+
+      <IptvChannelsScreen
+        page={channelPage}
+        providers={providers}
+        selectedChannelId={selectedChannelId}
+        search={channelSearch}
+        category={channelCategory}
+        selectedProviderId={channelProviderFilter}
+        onSelectChannel={(channel) => setSelectedChannelId(channel.id)}
+        onSearchChange={setChannelSearch}
+        onCategoryChange={setChannelCategory}
+        onProviderFilterChange={setChannelProviderFilter}
+        onPageChange={loadChannelPage}
+      />
 
       {operation ? <IptvOperationProgress operation={operation} onCancel={async () => { await onCancelIptvOperation(operation.id); }} /> : null}
 
