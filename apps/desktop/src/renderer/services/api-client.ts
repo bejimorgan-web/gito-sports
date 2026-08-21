@@ -35,15 +35,13 @@ const runtimeEnv = typeof import.meta !== "undefined" && typeof (import.meta as 
   : process.env as Record<string, string | undefined>;
 
 const configuredApiBaseUrl = (runtimeEnv?.VITE_API_URL as string | undefined) ?? (runtimeEnv?.VITE_GITO_API_BASE_URL as string | undefined);
-const DEV_API_BASE_URL = ["http://", "localhost", ":4100"].join("");
+const DEV_API_BASE_URL = "http://localhost:4100";
 const isDevelopmentMode = String(runtimeEnv?.MODE) === "development" || runtimeEnv?.DEV === true || runtimeEnv?.DEV === "true";
 
 let API_BASE_URL = configuredApiBaseUrl?.trim() || "";
 
 if (!API_BASE_URL) {
   API_BASE_URL = isDevelopmentMode ? DEV_API_BASE_URL : "https://gito-sports.onrender.com";
-} else if (isDevelopmentMode && /gito-sports\.onrender\.com/i.test(API_BASE_URL)) {
-  API_BASE_URL = DEV_API_BASE_URL;
 }
 
 API_BASE_URL = API_BASE_URL.replace(/\/$/, "");
