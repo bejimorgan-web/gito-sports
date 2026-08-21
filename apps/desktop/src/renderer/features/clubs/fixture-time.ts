@@ -58,6 +58,12 @@ export function parseOperatorKickoff(value: string): { date: string; time: strin
   return { date, time };
 }
 
+export function utcToOperatorKickoff(startsAt: string, timeZone = getBrowserTimeZone()): string {
+  const parts = getTimeZoneParts(new Date(startsAt), timeZone);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${pad(parts.day)}/${pad(parts.month)}/${parts.year} ${pad(parts.hour)}:${pad(parts.minute)}`;
+}
+
 export function formatFixtureDateTime(startsAt: string): string {
   const instant = new Date(startsAt);
   if (Number.isNaN(instant.getTime())) {

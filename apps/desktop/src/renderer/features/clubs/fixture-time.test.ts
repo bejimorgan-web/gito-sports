@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { formatFixtureDateTime, localDateTimeToUtc, parseOperatorKickoff } from "./fixture-time";
+import { formatFixtureDateTime, localDateTimeToUtc, parseOperatorKickoff, utcToOperatorKickoff } from "./fixture-time";
 
 test("converts native local date and time to an explicit UTC instant", () => {
   const parsed = parseOperatorKickoff("23/08/2026 21:30");
@@ -19,6 +19,7 @@ test("rejects incomplete date/time and formats canonical timestamps", () => {
   assert.equal(localDateTimeToUtc("2026-08-21", ""), undefined);
   assert.notEqual(formatFixtureDateTime("2026-08-21T18:30:00Z"), "Invalid kickoff");
   assert.equal(formatFixtureDateTime("not-a-date"), "Invalid kickoff");
+  assert.equal(utcToOperatorKickoff("2026-08-23T19:30:00.000Z", "Europe/Paris"), "23/08/2026 21:30");
 });
 
 test("honors winter and summer Paris offsets", () => {

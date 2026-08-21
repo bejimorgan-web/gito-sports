@@ -1249,10 +1249,9 @@ function migrateExistingOperationalState(database: DatabaseSync) {
     `UPDATE matches
       SET status = CASE
         WHEN status = 'completed' THEN 'ended'
-        WHEN status = 'postponed' THEN 'cancelled'
         WHEN status = 'scheduled' AND id IN (SELECT match_id FROM streams) THEN 'assigned'
         ELSE status
       END
-      WHERE status IN ('completed', 'postponed', 'scheduled')`
+      WHERE status IN ('completed', 'scheduled')`
   );
 }

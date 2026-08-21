@@ -228,7 +228,7 @@ CREATE TABLE IF NOT EXISTS matches (
   external_provider TEXT,
   external_match_id TEXT,
   status TEXT NOT NULL DEFAULT 'draft' CHECK (
-    status IN ('draft', 'scheduled', 'assigned', 'approved', 'published', 'live', 'ended', 'cancelled')
+    status IN ('draft', 'scheduled', 'assigned', 'approved', 'published', 'live', 'ended', 'cancelled', 'postponed')
   ),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,

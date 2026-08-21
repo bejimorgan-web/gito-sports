@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import type { Competition, Country, Sport, Team } from "@gito/shared";
 import { apiClient } from "../../services/api-client";
+import { formatFixtureDateTime, getBrowserTimeZone, localDateTimeToUtc, parseOperatorKickoff } from "../clubs/fixture-time";
 import StreamStatusPanel from "./StreamStatusPanel";
 
 interface MatchSchedulerScreenProps {
@@ -20,6 +21,7 @@ export function MatchSchedulerScreen({ selectedMatchId: externalSelectedMatchId,
   const [homeTeam, setHomeTeam] = useState("");
   const [awayTeam, setAwayTeam] = useState("");
   const [kickoff, setKickoff] = useState("");
+  const timeZone = getBrowserTimeZone();
   const [matches, setMatches] = useState<any[]>([]);
   const [status, setStatus] = useState("Ready");
   const [selectedMatchId, setSelectedMatchId] = useState<string | undefined>(externalSelectedMatchId);
@@ -95,9 +97,23 @@ export function MatchSchedulerScreen({ selectedMatchId: externalSelectedMatchId,
       return;
     }
 
+    const parsed = parseOperatorKickoff(kickoff);
+    if (!parsed) {
+      setStatus("Enter kickoff as DD/MM/YYYY HH:mm.");
+      return;
+    }
+
+    const startsAt = localDateTimeToUtc(parsed.date, parsed.time, timeZone);
+    if (!startsAt) {
+      setStatus("Kickoff time could not be interpreted for your timezone.");
+      return;
+    }
+
     try {
-      await apiClient.createMatch({ competitionId: selectedCompetition, homeTeamId: homeTeam, awayTeamId: awayTeam, kickoffTime: kickoff });
-      setStatus("Match created");
+      setStatus("Creating...");
+      await apiClient.createMatch({ competitionId: selectedCompetition, homeTeamId: homeTeam, awayTeamId: awayTeam, kickoffTime: startsAt });
+      setStatus("Created");
+      setKickoff("");
       void load();
     } catch (err) {
       setStatus(err instanceof Error ? err.message : "Create failed");
@@ -215,8 +231,9 @@ export function MatchSchedulerScreen({ selectedMatchId: externalSelectedMatchId,
                 </select>
               </label>
               <label>
-                Kickoff (ISO)
-                <input value={kickoff} onChange={(e) => setKickoff(e.target.value)} placeholder="2026-05-30T15:00:00Z" />
+                Kickoff
+                <input value={kickoff} onChange={(e) => setKickoff(e.target.value)} placeholder="DD/MM/YYYY HH:mm" />
+                <small>Timezone: {timeZone}</small>
               </label>
             </div>
 

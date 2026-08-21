@@ -6,6 +6,7 @@ import {
   getBrowserTimeZone,
   localDateTimeToUtc,
   parseOperatorKickoff,
+  utcToOperatorKickoff,
 } from "./fixture-time";
 
 export function FixtureWorkspaceScreen({
@@ -22,7 +23,7 @@ export function FixtureWorkspaceScreen({
   const [homeTeamId, setHomeTeamId] = useState("");
   const [awayTeamId, setAwayTeamId] = useState("");
   const [kickoff, setKickoff] = useState("");
-  const [timeZone] = useState(getBrowserTimeZone);
+  const timeZone = getBrowserTimeZone();
   const [venueName, setVenueName] = useState("");
   const [status, setStatus] = useState("Ready");
   const [selectedFixture, setSelectedFixture] = useState<any | null>(null);
@@ -34,6 +35,11 @@ export function FixtureWorkspaceScreen({
   const [deletingFixtureId, setDeletingFixtureId] = useState<string | null>(
     null,
   );
+  const [editingFixtureId, setEditingFixtureId] = useState<string | null>(null);
+  const [editingKickoff, setEditingKickoff] = useState("");
+  const [editingVenue, setEditingVenue] = useState("");
+  const [editingStatus, setEditingStatus] = useState("scheduled");
+  const [isSavingFixture, setIsSavingFixture] = useState(false);
 
   const loadFixtures = async () => {
     if (competitionId) {
@@ -89,8 +95,8 @@ export function FixtureWorkspaceScreen({
       return;
     }
     try {
-      setStatus("Creating…");
-      await apiClient.createFixture(
+      setStatus("Creating...");
+      const createdFixture = await apiClient.createFixture(
         {
           competitionId,
           seasonId,
@@ -102,16 +108,63 @@ export function FixtureWorkspaceScreen({
         },
         accessToken,
       );
-      setStatus("Canonical fixture created.");
+      setStatus("Created");
       setHomeTeamId("");
       setAwayTeamId("");
       setKickoff("");
       setVenueName("");
       await loadFixtures();
+      if (createdFixture?.id) {
+        await openFixture(createdFixture.id);
+      }
     } catch (error) {
       setStatus(
         error instanceof Error ? error.message : "Unable to create fixture.",
       );
+    }
+  };
+
+  const beginEditFixture = (fixture: any) => {
+    setEditingFixtureId(fixture.id);
+    setEditingKickoff(utcToOperatorKickoff(fixture.startsAt, timeZone));
+    setEditingVenue(fixture.venueName ?? "");
+    setEditingStatus(fixture.status ?? "scheduled");
+  };
+
+  const saveFixture = async () => {
+    if (!editingFixtureId || isSavingFixture) return;
+    const parsed = parseOperatorKickoff(editingKickoff);
+    if (!parsed) {
+      setStatus("Enter kickoff as DD/MM/YYYY HH:mm.");
+      return;
+    }
+    const startsAt = localDateTimeToUtc(parsed.date, parsed.time, timeZone);
+    if (!startsAt) {
+      setStatus("Kickoff time could not be interpreted for your timezone.");
+      return;
+    }
+    setIsSavingFixture(true);
+    setStatus(editingStatus === "postponed" ? "Rescheduling..." : editingStatus === "cancelled" ? "Cancelling..." : "Saving...");
+    try {
+      await apiClient.updateFixture(editingFixtureId, { startsAt, venueName: editingVenue || null, status: editingStatus }, accessToken);
+      setEditingFixtureId(null);
+      await loadFixtures();
+      await openFixture(editingFixtureId);
+      setStatus(
+        editingStatus === "postponed"
+          ? "Postponed"
+          : editingStatus === "cancelled"
+            ? "Cancelled"
+            : "Rescheduled",
+      );
+    } catch (error) {
+      if (error instanceof Error && /fixture_in_use|streams/i.test(error.message)) {
+        setStatus("Fixture cannot be deleted because streams are assigned to it.");
+      } else {
+        setStatus(error instanceof Error ? error.message : "Unable to update fixture.");
+      }
+    } finally {
+      setIsSavingFixture(false);
     }
   };
 
@@ -170,16 +223,20 @@ export function FixtureWorkspaceScreen({
   const deleteFixture = async (fixtureId: string) => {
     if (deletingFixtureId || !window.confirm("Delete this fixture?")) return;
     setDeletingFixtureId(fixtureId);
-    setStatus("Deleting…");
+    setStatus("Deleting...");
     try {
       await apiClient.deleteFixture(fixtureId, accessToken);
       if (selectedFixture?.id === fixtureId) setSelectedFixture(null);
       await loadFixtures();
-      setStatus("Fixture deleted.");
+      setStatus("Deleted");
     } catch (error) {
-      setStatus(
-        error instanceof Error ? error.message : "Fixture deletion failed.",
-      );
+      if (error instanceof Error && /fixture_in_use|streams/i.test(error.message)) {
+        setStatus("Fixture cannot be deleted because streams are assigned to it.");
+      } else {
+        setStatus(
+          error instanceof Error ? error.message : "Fixture deletion failed.",
+        );
+      }
     } finally {
       setDeletingFixtureId(null);
     }
@@ -268,10 +325,7 @@ export function FixtureWorkspaceScreen({
               placeholder="DD/MM/YYYY HH:mm"
               inputMode="numeric"
             />
-          </label>
-          <label>
-            Timezone
-            <input value={timeZone} readOnly />
+            <small>Timezone: {timeZone}</small>
           </label>
           <label>
             Venue
@@ -311,10 +365,68 @@ export function FixtureWorkspaceScreen({
               >
                 Open streams
               </button>
+              <button type="button" onClick={() => beginEditFixture(fixture)}>
+                Edit fixture
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => void deleteFixture(fixture.id)}
+                disabled={Boolean(deletingFixtureId)}
+              >
+                {deletingFixtureId === fixture.id ? "Deleting…" : "Delete"}
+              </button>
             </div>
           ))}
         </div>
       </section>
+      {editingFixtureId ? (
+        <section className="console-panel">
+          <div className="panel-heading">
+            <h3>Edit / Reschedule Fixture</h3>
+            <span className="status-pill">{status}</span>
+          </div>
+          <div className="form-grid two-column">
+            <label>
+              Kickoff
+              <input value={editingKickoff} onChange={(event) => setEditingKickoff(event.target.value)} placeholder="DD/MM/YYYY HH:mm" />
+              <small>Timezone: {timeZone}</small>
+            </label>
+            <label>
+              Venue
+              <input value={editingVenue} onChange={(event) => setEditingVenue(event.target.value)} />
+            </label>
+            <label>
+              Status
+              <select value={editingStatus} onChange={(event) => setEditingStatus(event.target.value)}>
+                <option value="scheduled">Scheduled</option>
+                <option value="postponed">Postponed</option>
+                <option value="cancelled">Cancelled</option>
+                <option value="completed">Completed</option>
+              </select>
+            </label>
+          </div>
+          <div className="button-row">
+            <button type="button" onClick={() => void saveFixture()} disabled={isSavingFixture}>
+              {isSavingFixture ? "Saving..." : "Save fixture"}
+            </button>
+            <button type="button" className="secondary" onClick={() => setEditingStatus("postponed")} disabled={isSavingFixture}>
+              Postpone
+            </button>
+            <button type="button" className="secondary" onClick={() => {
+              if (window.confirm("Cancel this fixture?")) {
+                setEditingStatus("cancelled");
+                void saveFixture();
+              }
+            }} disabled={isSavingFixture}>
+              Cancel fixture
+            </button>
+            <button type="button" className="secondary" onClick={() => setEditingFixtureId(null)} disabled={isSavingFixture}>
+              Close
+            </button>
+          </div>
+        </section>
+      ) : null}
       {selectedFixture ? (
         <section className="console-panel">
           <div className="panel-heading">
