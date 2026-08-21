@@ -80,6 +80,7 @@ const IMPORT_ORDER = [
   'regions',
   'sports',
   'countries',
+  'hosts',
   'sport_countries',
   'providers',
   'competitions',
@@ -395,6 +396,7 @@ router.post('/import/:tableName', (req: Request, res: Response) => {
     'sports',
     'regions',
     'countries',
+    'hosts',
     'sport_countries',
     'providers',
     'channels',
@@ -478,7 +480,7 @@ router.get('/count/:tableName', (req: Request, res: Response) => {
 
   // Validate table name
   const validTables = [
-    'sports', 'regions', 'countries', 'sport_countries', 'providers',
+    'sports', 'regions', 'countries', 'hosts', 'sport_countries', 'providers',
     'channels', 'competitions', 'seasons', 'teams', 'competition_teams',
     'matches', 'scheduling_matches', 'scheduling_match_links', 'match_streams', 'streams',
     'operator_users', 'operator_settings', 'auth_sessions',

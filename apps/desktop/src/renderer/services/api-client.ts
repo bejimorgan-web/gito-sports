@@ -11,12 +11,14 @@ import type {
   CreateProviderRequest,
   CreateSportRequest,
   CreateTeamRequest,
+  CreateHostRequest,
   CreateSeasonRequest,
   UpdateSeasonRequest,
   ClubDetail,
   Season,
   CompetitionSeasonTeam,
   Country,
+  Host,
   IPTVProvider,
   MatchAssignmentRequest,
   MatchAssignmentResult,
@@ -25,7 +27,8 @@ import type {
   PublishedLiveMatch,
   Sport,
   Stream,
-  Team
+  Team,
+  UpdateHostRequest
 } from "@gito/shared";
 
 // Prefer the standardized `VITE_API_URL` but keep backwards compatibility
@@ -541,8 +544,29 @@ export const apiClient = {
   deleteCountry(countryId: string, accessToken: string) {
     return request<void>(`/countries/${countryId}`, { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } });
   },
-  listCompetitions(mode?: 'legacy' | 'catalog') {
-    const path = buildApiPath('/competitions', { mode });
+  listHosts(sportId?: string) {
+    const path = buildApiPath('/hosts', sportId ? { sportId } : undefined);
+    return request<Host[]>(path);
+  },
+  createHost(input: CreateHostRequest, accessToken: string) {
+    return request<Host>('/hosts', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(input)
+    });
+  },
+  updateHost(hostId: string, input: UpdateHostRequest, accessToken: string) {
+    return request<Host>(`/hosts/${hostId}`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(input)
+    });
+  },
+  deleteHost(hostId: string, accessToken: string) {
+    return request<void>(`/hosts/${hostId}`, { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } });
+  },
+  listCompetitions(mode?: 'legacy' | 'catalog', hostId?: string) {
+    const path = buildApiPath('/competitions', { mode, ...(hostId ? { hostId } : {}) });
     return request<Competition[]>(path);
   },
   getCompetition(competitionId: string, mode?: 'legacy' | 'catalog') {

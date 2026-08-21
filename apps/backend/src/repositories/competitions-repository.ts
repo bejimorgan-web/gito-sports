@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import type { Competition, CreateCompetitionRequest } from "@gito/shared";
+import type { Competition, CreateCompetitionRequest, UpdateCompetitionRequest } from "@gito/shared";
 import { createSlug } from "@gito/shared";
 
 import { deleteEntity } from "../services/entityDeleteService.js";
@@ -9,6 +9,7 @@ import { getDatabase } from "../db/connection.js";
 interface CompetitionRow {
   id: string;
   sport_id: string;
+  host_id: string | null;
   country_id: string | null;
   region_id: string | null;
   name: string;
@@ -63,6 +64,7 @@ function mapCompetition(row: CompetitionRow): Competition {
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    ...(row.host_id ? { hostId: row.host_id } : {}),
     ...(row.country_id ? { countryId: row.country_id } : {}),
     ...(row.region_id ? { regionId: row.region_id } : {}),
     ...(row.current_season_id ? { currentSeasonId: row.current_season_id } : {}),
@@ -70,7 +72,7 @@ function mapCompetition(row: CompetitionRow): Competition {
   };
 }
 
-export function listCompetitions(filters?: { sportId?: string; countryId?: string }): Competition[] {
+export function listCompetitions(filters?: { sportId?: string; countryId?: string; hostId?: string }): Competition[] {
   const database = getDatabase();
   const conditions: string[] = [];
   const parameters: Array<string> = [];
@@ -85,10 +87,15 @@ export function listCompetitions(filters?: { sportId?: string; countryId?: strin
     parameters.push(filters.countryId);
   }
 
+  if (filters?.hostId) {
+    conditions.push("host_id = ?");
+    parameters.push(filters.hostId);
+  }
+
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const rows = database
     .prepare(
-      `SELECT id, sport_id, country_id, region_id, name, slug, scope, competition_type, participant_type, logo_url, current_season_id, status, created_at, updated_at
+      `SELECT id, sport_id, host_id, country_id, region_id, name, slug, scope, competition_type, participant_type, logo_url, current_season_id, status, created_at, updated_at
        FROM competitions ${where} ORDER BY name`
     )
     .all(...parameters) as CompetitionRow[];
@@ -99,7 +106,7 @@ export function listCompetitions(filters?: { sportId?: string; countryId?: strin
 export function getCompetitionById(competitionId: string): Competition | undefined {
   const row = getDatabase()
     .prepare(
-      `SELECT id, sport_id, country_id, region_id, name, slug, scope, competition_type, participant_type, logo_url, current_season_id, status, created_at, updated_at
+      `SELECT id, sport_id, host_id, country_id, region_id, name, slug, scope, competition_type, participant_type, logo_url, current_season_id, status, created_at, updated_at
        FROM competitions WHERE id = ?`
     )
     .get(competitionId) as CompetitionRow | undefined;
@@ -109,6 +116,13 @@ export function getCompetitionById(competitionId: string): Competition | undefin
 
 export function createCompetition(input: CreateCompetitionRequest): Competition {
   const database = getDatabase();
+  let countryId = input.countryId ?? null;
+  if (input.hostId) {
+    const host = database.prepare("SELECT sport_id, host_type, country_id FROM hosts WHERE id = ?").get(input.hostId) as { sport_id: string; host_type: string; country_id: string | null } | undefined;
+    if (!host) throw new Error("host_not_found");
+    if (host.sport_id !== input.sportId) throw new Error("host_sport_mismatch");
+    if (!countryId && host.host_type === "country") countryId = host.country_id;
+  }
   const id = crypto.randomUUID();
   const timestamp = now();
   const baseSlug = createSlug(input.name);
@@ -116,13 +130,14 @@ export function createCompetition(input: CreateCompetitionRequest): Competition 
 
   database
     .prepare(
-      `INSERT INTO competitions (id, sport_id, country_id, region_id, name, slug, scope, competition_type, participant_type, logo_url, current_season_id, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`
+      `INSERT INTO competitions (id, sport_id, host_id, country_id, region_id, name, slug, scope, competition_type, participant_type, logo_url, current_season_id, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`
     )
     .run(
       id,
       input.sportId,
-      input.countryId ?? null,
+      input.hostId ?? null,
+      countryId,
       input.regionId ?? null,
       input.name,
       slug,
@@ -146,7 +161,8 @@ export function createCompetition(input: CreateCompetitionRequest): Competition 
     status: "active",
     createdAt: timestamp,
     updatedAt: timestamp,
-    ...(input.countryId ? { countryId: input.countryId } : {}),
+    ...(input.hostId ? { hostId: input.hostId } : {}),
+    ...(countryId ? { countryId } : {}),
     ...(input.regionId ? { regionId: input.regionId } : {}),
     ...(input.currentSeasonId ? { currentSeasonId: input.currentSeasonId } : {}),
     ...(input.logoUrl ? { logoUrl: input.logoUrl } : {})
@@ -155,17 +171,18 @@ export function createCompetition(input: CreateCompetitionRequest): Competition 
 
 export function updateCompetition(
   competitionId: string,
-  input: Partial<CreateCompetitionRequest> & { status?: Competition["status"] }
+  input: UpdateCompetitionRequest
 ): Competition | undefined {
   const database = getDatabase();
   const existing = database
     .prepare(
-      `SELECT sport_id, country_id, region_id, name, slug, scope, competition_type, participant_type, logo_url, current_season_id, status
+      `SELECT sport_id, host_id, country_id, region_id, name, slug, scope, competition_type, participant_type, logo_url, current_season_id, status
        FROM competitions WHERE id = ?`
     )
     .get(competitionId) as
     | {
         sport_id: string;
+        host_id: string | null;
         country_id: string | null;
         region_id: string | null;
         name: string;
@@ -186,15 +203,24 @@ export function updateCompetition(
   const updatedName = input.name ?? existing.name;
   const baseSlug = createSlug(updatedName);
   const updatedSlug = createUniqueCompetitionSlug(database, baseSlug, competitionId);
+  if (input.hostId) {
+    const host = database.prepare("SELECT sport_id, host_type, country_id FROM hosts WHERE id = ?").get(input.hostId) as { sport_id: string; host_type: string; country_id: string | null } | undefined;
+    if (!host) throw new Error("host_not_found");
+    if ((input.sportId ?? existing.sport_id) !== host.sport_id) throw new Error("host_sport_mismatch");
+    if (input.countryId === undefined) {
+      input = { ...input, countryId: host.host_type === "country" ? host.country_id ?? undefined : undefined };
+    }
+  }
   const timestamp = now();
 
   database
     .prepare(
-      `UPDATE competitions SET sport_id = ?, country_id = ?, region_id = ?, name = ?, slug = ?, scope = ?, competition_type = ?, participant_type = ?, logo_url = ?, current_season_id = ?, status = ?, updated_at = ?
+      `UPDATE competitions SET sport_id = ?, host_id = ?, country_id = ?, region_id = ?, name = ?, slug = ?, scope = ?, competition_type = ?, participant_type = ?, logo_url = ?, current_season_id = ?, status = ?, updated_at = ?
        WHERE id = ?`
     )
     .run(
       input.sportId ?? existing.sport_id,
+      input.hostId !== undefined ? input.hostId : existing.host_id,
       input.countryId ?? existing.country_id,
       input.regionId ?? existing.region_id,
       updatedName,

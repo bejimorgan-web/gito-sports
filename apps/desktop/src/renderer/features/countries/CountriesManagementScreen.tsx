@@ -4,13 +4,12 @@ import type { Country, CreateCountryRequest } from "@gito/shared";
 import { apiClient } from "../../services/api-client";
 import { isValidLogoSource, LogoUrlField } from "../../components/LogoUrlField";
 import { resolveAssetUrl } from "../../components/asset-url";
+import { countryNames, resolveCountryName } from "./country-catalog";
 
 export function CountriesManagementScreen({ accessToken }: { accessToken: string }) {
   const [countries, setCountries] = useState<Country[]>([]);
   const [selectedCountry, setSelectedCountry] = useState<Country | null>(null);
   const [name, setName] = useState("");
-  const [iso2Code, setIso2Code] = useState("");
-  const [iso3Code, setIso3Code] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
   const [status, setStatus] = useState("Ready");
   const [isLogoUploading, setIsLogoUploading] = useState(false);
@@ -30,8 +29,6 @@ export function CountriesManagementScreen({ accessToken }: { accessToken: string
   const resetForm = () => {
     setSelectedCountry(null);
     setName("");
-    setIso2Code("");
-    setIso3Code("");
     setLogoUrl("");
     setStatus("Ready");
   };
@@ -39,15 +36,14 @@ export function CountriesManagementScreen({ accessToken }: { accessToken: string
   const selectCountry = (country: Country) => {
     setSelectedCountry(country);
     setName(country.name);
-    setIso2Code(country.iso2Code);
-    setIso3Code(country.iso3Code);
     setLogoUrl(country.flagUrl ?? "");
     setStatus("Editing country");
   };
 
   const saveCountry = async () => {
-    if (!name.trim() || !iso2Code.trim() || !iso3Code.trim()) {
-      setStatus("Name and ISO codes are required.");
+    const resolvedCountry = resolveCountryName(name);
+    if (!resolvedCountry) {
+      setStatus("Country not recognized. Please select a valid country.");
       return;
     }
 
@@ -64,18 +60,18 @@ export function CountriesManagementScreen({ accessToken }: { accessToken: string
     try {
       if (selectedCountry) {
         const updatePayload: Partial<CreateCountryRequest> = {
-          name,
-          iso2Code,
-          iso3Code,
+          name: resolvedCountry.name,
+          iso2Code: resolvedCountry.iso2Code,
+          iso3Code: resolvedCountry.iso3Code,
           ...(logoUrl ? { flagUrl: logoUrl } : {})
         };
         await apiClient.updateCountry(selectedCountry.id, updatePayload, accessToken);
         setStatus("Country updated.");
       } else {
         const input: CreateCountryRequest = {
-          name,
-          iso2Code,
-          iso3Code,
+          name: resolvedCountry.name,
+          iso2Code: resolvedCountry.iso2Code,
+          iso3Code: resolvedCountry.iso3Code,
           ...(logoUrl ? { flagUrl: logoUrl } : {})
         };
         await apiClient.createCountry(input, accessToken);
@@ -85,7 +81,8 @@ export function CountriesManagementScreen({ accessToken }: { accessToken: string
       await loadCountries();
       resetForm();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Save failed.");
+      const message = error instanceof Error ? error.message : "Save failed.";
+      setStatus(message.replace(/ already exists for ISO[23] [A-Z]+\.$/i, " already exists."));
     }
   };
 
@@ -138,15 +135,10 @@ export function CountriesManagementScreen({ accessToken }: { accessToken: string
         <div className="form-grid two-column">
           <label>
             Country Name
-            <input value={name} onChange={(event) => setName(event.target.value)} />
-          </label>
-          <label>
-            ISO2 Code
-            <input value={iso2Code} onChange={(event) => setIso2Code(event.target.value.toUpperCase())} />
-          </label>
-          <label>
-            ISO3 Code
-            <input value={iso3Code} onChange={(event) => setIso3Code(event.target.value.toUpperCase())} />
+            <input list="country-name-options" value={name} onChange={(event) => setName(event.target.value)} />
+            <datalist id="country-name-options">
+              {countryNames.map((countryName) => <option key={countryName} value={countryName} />)}
+            </datalist>
           </label>
           <LogoUrlField label="Upload Flag / Logo" value={logoUrl} onChange={setLogoUrl} onUploadStateChange={setIsLogoUploading} />
         </div>

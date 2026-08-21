@@ -26,7 +26,12 @@ export function listSeasonTeamMemberships(competitionId: string, seasonId: strin
 
 export function createSeasonTeamMembership(competitionId: string, seasonId: string, teamId: string): CompetitionSeasonTeam {
   assertCompetitionSeason(competitionId, seasonId);
-  if (!getTeamById(teamId)) throw new Error("team_not_found");
+  const competition = getDatabase().prepare("SELECT sport_id, participant_type FROM competitions WHERE id = ?").get(competitionId) as { sport_id: string; participant_type: string } | undefined;
+  const team = getTeamById(teamId);
+  if (!team) throw new Error("team_not_found");
+  if (team.sportId !== competition?.sport_id) throw new Error("team_sport_mismatch");
+  const expectedType = competition.participant_type === "nationalTeams" ? "national" : competition.participant_type === "clubs" ? "club" : "custom";
+  if (expectedType !== "custom" && team.type !== expectedType) throw new Error("team_participant_type_mismatch");
   const existing = getDatabase().prepare("SELECT id FROM competition_season_teams WHERE competition_id = ? AND season_id = ? AND team_id = ?").get(competitionId, seasonId, teamId);
   if (existing) throw new Error("season_team_duplicate");
   const id = crypto.randomUUID();

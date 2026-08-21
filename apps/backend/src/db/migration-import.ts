@@ -6,6 +6,7 @@ export const IMPORT_ORDER = [
   "regions",
   "sports",
   "countries",
+  "hosts",
   "sport_countries",
   "providers",
   "channels",

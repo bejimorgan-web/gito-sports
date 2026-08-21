@@ -7,12 +7,16 @@ export type CompetitionScope =
   | "domestic"
   | "continental"
   | "international"
+  | "global"
+  | "regional"
   | "friendly"
   | "custom";
 
-export type CompetitionType = "league" | "cup" | "tournament" | "friendly" | "custom";
+export type CompetitionType = "league" | "cup" | "tournament" | "championship" | "friendly" | "custom";
 
 export type CompetitionParticipantType = "clubs" | "nationalTeams";
+
+export type HostType = "country" | "organization" | "federation" | "association" | "regional" | "international" | "other";
 
 export type TeamType = "club" | "national" | "custom";
 
@@ -36,6 +40,18 @@ export interface Country {
   iso3Code: string;
   regionId?: EntityId;
   flagUrl?: string;
+  status: EntityStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Host {
+  id: EntityId;
+  sportId: EntityId;
+  name: string;
+  type: HostType;
+  countryId?: EntityId;
+  logoUrl?: string;
   status: EntityStatus;
   createdAt: string;
   updatedAt: string;
@@ -66,6 +82,7 @@ export interface UpdateSeasonRequest {
 export interface Competition {
   id: EntityId;
   sportId: EntityId;
+  hostId?: EntityId;
   countryId?: EntityId;
   regionId?: EntityId;
   name: string;
@@ -171,6 +188,22 @@ export interface CreateCountryRequest {
   flagUrl?: string;
 }
 
+export interface CreateHostRequest {
+  sportId: EntityId;
+  name: string;
+  type: HostType;
+  countryId?: EntityId;
+  logoUrl?: string;
+}
+
+export interface UpdateHostRequest {
+  name?: string;
+  type?: HostType;
+  countryId?: EntityId | null;
+  logoUrl?: string | null;
+  status?: EntityStatus;
+}
+
 export interface UpdateCountryRequest {
   name?: string;
   iso2Code?: string;
@@ -182,6 +215,7 @@ export interface UpdateCountryRequest {
 
 export interface CreateCompetitionRequest {
   sportId: EntityId;
+  hostId?: EntityId;
   countryId?: EntityId;
   regionId?: EntityId;
   name: string;
@@ -194,6 +228,7 @@ export interface CreateCompetitionRequest {
 
 export interface UpdateCompetitionRequest {
   sportId?: EntityId;
+  hostId?: EntityId | null;
   countryId?: EntityId;
   regionId?: EntityId;
   name?: string;

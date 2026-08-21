@@ -30,6 +30,7 @@ interface TeamRow {
 interface CompetitionRow {
   id: string;
   sport_id: string;
+  host_id: string | null;
   country_id: string | null;
   region_id: string | null;
   name: string;
@@ -86,6 +87,7 @@ function mapCompetition(row: CompetitionRow): Competition {
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    ...(row.host_id ? { hostId: row.host_id } : {}),
     ...(row.country_id ? { countryId: row.country_id } : {}),
     ...(row.region_id ? { regionId: row.region_id } : {}),
     ...(row.current_season_id ? { currentSeasonId: row.current_season_id } : {}),
@@ -162,7 +164,7 @@ export function getCatalogTeamById(teamId: string): Team | undefined {
   return row ? mapTeam(row) : undefined;
 }
 
-export function listCatalogCompetitions(filters?: { sportId?: string; countryId?: string }): Competition[] {
+export function listCatalogCompetitions(filters?: { sportId?: string; countryId?: string; hostId?: string }): Competition[] {
   const conditions: string[] = ["m.catalog_type = 'competitions'"];
   const parameters: Array<string> = [];
 
@@ -176,11 +178,16 @@ export function listCatalogCompetitions(filters?: { sportId?: string; countryId?
     parameters.push(filters.countryId);
   }
 
+  if (filters?.hostId) {
+    conditions.push("c.host_id = ?");
+    parameters.push(filters.hostId);
+  }
+
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
   const rows = getDatabase()
     .prepare(
-      `SELECT c.id, c.sport_id, c.country_id, c.region_id, c.name, c.slug, c.scope, c.competition_type, c.participant_type, c.logo_url, c.current_season_id, c.status, c.created_at, c.updated_at
+      `SELECT c.id, c.sport_id, c.host_id, c.country_id, c.region_id, c.name, c.slug, c.scope, c.competition_type, c.participant_type, c.logo_url, c.current_season_id, c.status, c.created_at, c.updated_at
        FROM entity_catalog_mapping m
        JOIN competitions c ON c.id = m.legacy_id
        ${where}
@@ -194,7 +201,7 @@ export function listCatalogCompetitions(filters?: { sportId?: string; countryId?
 export function getCatalogCompetitionById(competitionId: string): Competition | undefined {
   const row = getDatabase()
     .prepare(
-      `SELECT c.id, c.sport_id, c.country_id, c.region_id, c.name, c.slug, c.scope, c.competition_type, c.participant_type, c.logo_url, c.current_season_id, c.status, c.created_at, c.updated_at
+      `SELECT c.id, c.sport_id, c.host_id, c.country_id, c.region_id, c.name, c.slug, c.scope, c.competition_type, c.participant_type, c.logo_url, c.current_season_id, c.status, c.created_at, c.updated_at
        FROM entity_catalog_mapping m
        JOIN competitions c ON c.id = m.legacy_id
        WHERE m.catalog_type = 'competitions' AND m.legacy_id = ?`

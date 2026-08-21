@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 
-import type { Competition, Country, CreateCompetitionRequest, Sport } from "@gito/shared";
+import type { Competition, CreateCompetitionRequest, Host, Sport } from "@gito/shared";
 import { apiClient } from "../../services/api-client";
 import { isValidLogoSource, LogoUrlField } from "../../components/LogoUrlField";
 import { resolveAssetUrl } from "../../components/asset-url";
 
-const availableScopes: Competition["scope"][] = ["domestic", "continental", "international", "friendly", "custom"];
-const availableTypes: Competition["type"][] = ["league", "cup", "tournament", "friendly", "custom"];
+const availableScopes: Competition["scope"][] = ["domestic", "continental", "international", "global", "regional", "friendly", "custom"];
+const availableTypes: Competition["type"][] = ["league", "cup", "tournament", "championship", "friendly", "custom"];
 const availableParticipantTypes: { value: Competition["participantType"]; label: string }[] = [
   { value: "clubs", label: "Clubs" },
   { value: "nationalTeams", label: "National Teams" }
@@ -15,10 +15,10 @@ const availableParticipantTypes: { value: Competition["participantType"]; label:
 export function CompetitionCatalogScreen({ accessToken }: { accessToken: string }) {
   const [competitions, setCompetitions] = useState<Competition[]>([]);
   const [sports, setSports] = useState<Sport[]>([]);
-  const [countries, setCountries] = useState<Country[]>([]);
+  const [hosts, setHosts] = useState<Host[]>([]);
   const [selectedCompetition, setSelectedCompetition] = useState<Competition | null>(null);
   const [sportId, setSportId] = useState("");
-  const [countryId, setCountryId] = useState("");
+  const [hostId, setHostId] = useState("");
   const [name, setName] = useState("");
   const [scope, setScope] = useState<Competition["scope"]>("domestic");
   const [type, setType] = useState<Competition["type"]>("league");
@@ -28,20 +28,18 @@ export function CompetitionCatalogScreen({ accessToken }: { accessToken: string 
   const [isLogoUploading, setIsLogoUploading] = useState(false);
 
   const selectedSport = sports.find((sport) => sport.id === sportId);
-  const filteredCountries = selectedSport?.countryIds?.length
-    ? countries.filter((country) => selectedSport.countryIds?.includes(country.id))
-    : countries;
+  const filteredHosts = selectedSport ? hosts.filter((host) => host.sportId === selectedSport.id) : [];
 
   const loadData = async () => {
     try {
-      const [competitionData, sportsData, countryData] = await Promise.all([
+      const [competitionData, sportsData, hostData] = await Promise.all([
         apiClient.listCompetitions(),
         apiClient.listSports(),
-        apiClient.listCountries()
+        apiClient.listHosts()
       ]);
       setCompetitions(competitionData);
       setSports(sportsData);
-      setCountries(countryData);
+      setHosts(hostData);
     } catch {
       setStatus("Unable to load competition metadata.");
     }
@@ -54,7 +52,7 @@ export function CompetitionCatalogScreen({ accessToken }: { accessToken: string 
   const resetForm = () => {
     setSelectedCompetition(null);
     setSportId("");
-    setCountryId("");
+    setHostId("");
     setName("");
     setScope("domestic");
     setType("league");
@@ -66,7 +64,7 @@ export function CompetitionCatalogScreen({ accessToken }: { accessToken: string 
   const selectCompetition = (competition: Competition) => {
     setSelectedCompetition(competition);
     setSportId(competition.sportId);
-    setCountryId(competition.countryId ?? "");
+    setHostId(competition.hostId ?? "");
     setName(competition.name);
     setScope(competition.scope);
     setType(competition.type);
@@ -76,8 +74,8 @@ export function CompetitionCatalogScreen({ accessToken }: { accessToken: string 
   };
 
   const saveCompetition = async () => {
-    if (!sportId || !name.trim() || !type || !participantType) {
-      setStatus("Sport, competition name, type, and participant type are required.");
+    if (!sportId || !hostId || !name.trim() || !type || !participantType) {
+      setStatus(!hostId ? "Sport, host, competition name, type, and participant type are required." : "Sport, competition name, type, and participant type are required.");
       return;
     }
 
@@ -94,7 +92,7 @@ export function CompetitionCatalogScreen({ accessToken }: { accessToken: string 
           scope,
           type,
           participantType,
-          ...(countryId ? { countryId } : {}),
+          ...(hostId ? { hostId } : {}),
           ...(logoUrl ? { logoUrl } : {})
         };
         await apiClient.updateCompetition(selectedCompetition.id, updatePayload, accessToken);
@@ -106,7 +104,7 @@ export function CompetitionCatalogScreen({ accessToken }: { accessToken: string 
           scope,
           type,
           participantType,
-          ...(countryId ? { countryId } : {}),
+          ...(hostId ? { hostId } : {}),
           ...(logoUrl ? { logoUrl } : {})
         };
         await apiClient.createCompetition(input, accessToken);
@@ -181,16 +179,14 @@ export function CompetitionCatalogScreen({ accessToken }: { accessToken: string 
             </select>
           </label>
           <label>
-            Country
-            <select value={countryId} onChange={(event) => setCountryId(event.target.value)}>
+            Host
+            <select value={hostId} onChange={(event) => setHostId(event.target.value)}>
               <option value="">None</option>
-              {filteredCountries.map((country) => (
-                <option key={country.id} value={country.id}>{country.name}</option>
+              {filteredHosts.map((host) => (
+                <option key={host.id} value={host.id}>{host.name} ({host.type})</option>
               ))}
             </select>
-            {selectedSport?.countryIds?.length ? (
-              <small>{filteredCountries.length} supported country{filteredCountries.length === 1 ? "" : "ies"} for {selectedSport.name}</small>
-            ) : null}
+            {selectedSport ? <small>{filteredHosts.length} host{filteredHosts.length === 1 ? "" : "s"} for {selectedSport.name}</small> : null}
           </label>
           <label>
             Competition Type
@@ -243,7 +239,7 @@ export function CompetitionCatalogScreen({ accessToken }: { accessToken: string 
               <tr>
                 <th>Name</th>
                 <th>Sport</th>
-                <th>Country</th>
+                <th>Host</th>
                 <th>Type</th>
                 <th>Participants</th>
                 <th>Scope</th>
@@ -256,7 +252,7 @@ export function CompetitionCatalogScreen({ accessToken }: { accessToken: string 
                 <tr key={competition.id}>
                   <td>{competition.name}</td>
                   <td>{sports.find((sport) => sport.id === competition.sportId)?.name ?? competition.sportId}</td>
-                  <td>{countries.find((country) => country.id === competition.countryId)?.name ?? competition.countryId ?? "—"}</td>
+                  <td>{hosts.find((host) => host.id === competition.hostId)?.name ?? competition.countryId ?? "—"}</td>
                   <td>{competition.type}</td>
                   <td>{competition.participantType === "clubs" ? "Clubs" : "National Teams"}</td>
                   <td>{competition.scope}</td>

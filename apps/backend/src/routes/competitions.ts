@@ -22,7 +22,7 @@ import { protectedRoute } from "../middleware/protected.js";
 export const competitionsRouter = Router();
 
 competitionsRouter.get("/", (request, response) => {
-  const filters: { sportId?: string; countryId?: string } = {};
+  const filters: { sportId?: string; countryId?: string; hostId?: string } = {};
   const mode = request.query.mode === "catalog" ? "catalog" : "legacy";
 
   if (typeof request.query.sportId === "string") {
@@ -31,6 +31,10 @@ competitionsRouter.get("/", (request, response) => {
 
   if (typeof request.query.countryId === "string") {
     filters.countryId = request.query.countryId;
+  }
+
+  if (typeof request.query.hostId === "string") {
+    filters.hostId = request.query.hostId;
   }
 
   const competitions = mode === "catalog" ? listCatalogCompetitions(filters) : listCompetitions(filters);

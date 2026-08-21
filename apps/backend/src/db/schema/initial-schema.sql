@@ -43,6 +43,22 @@ CREATE TABLE IF NOT EXISTS sport_countries (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sport_countries_sport_country ON sport_countries(sport_id, country_id);
 
+CREATE TABLE IF NOT EXISTS hosts (
+  id TEXT PRIMARY KEY,
+  sport_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  host_type TEXT NOT NULL CHECK (host_type IN ('country', 'organization', 'federation', 'association', 'regional', 'international', 'other')),
+  country_id TEXT,
+  logo_url TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (sport_id) REFERENCES sports(id),
+  FOREIGN KEY (country_id) REFERENCES countries(id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_hosts_sport_name ON hosts(sport_id, name);
+
 -- Phase 7 shadow catalog layer: entity mapping and catalog-only link tables
 CREATE TABLE IF NOT EXISTS entity_catalog_mapping (
   id TEXT PRIMARY KEY,
@@ -152,6 +168,7 @@ CREATE TABLE IF NOT EXISTS channels (
 CREATE TABLE IF NOT EXISTS competitions (
   id TEXT PRIMARY KEY,
   sport_id TEXT,
+  host_id TEXT,
   country_id TEXT,
   region_id TEXT,
   name TEXT NOT NULL,
@@ -165,6 +182,7 @@ CREATE TABLE IF NOT EXISTS competitions (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (sport_id) REFERENCES sports(id),
+  FOREIGN KEY (host_id) REFERENCES hosts(id),
   FOREIGN KEY (country_id) REFERENCES countries(id),
   FOREIGN KEY (region_id) REFERENCES regions(id)
 );

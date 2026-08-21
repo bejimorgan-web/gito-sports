@@ -6,13 +6,15 @@ import type {
   CompetitionScope,
   CompetitionType,
   Country,
+  CreateHostRequest,
   CreateCompetitionRequest,
-  CreateCountryRequest,
   CreateSportRequest,
   CreateTeamRequest,
   Sport,
   Team,
-  TeamType
+  TeamType,
+  Host,
+  HostType
 } from "@gito/shared";
 import { apiClient } from "../../services/api-client";
 import { isValidLogoSource, LogoUrlField } from "../../components/LogoUrlField";
@@ -21,8 +23,8 @@ import { Modal } from "../../components/Modal";
 import { Toast } from "../../components/Toast";
 import { SeasonMembershipPanel } from "./SeasonMembershipPanel";
 
-const competitionScopes: CompetitionScope[] = ["domestic", "continental", "international", "friendly", "custom"];
-const competitionTypes: CompetitionType[] = ["league", "cup", "tournament", "friendly", "custom"];
+const competitionScopes: CompetitionScope[] = ["domestic", "continental", "international", "global", "regional", "friendly", "custom"];
+const competitionTypes: CompetitionType[] = ["league", "cup", "tournament", "championship", "friendly", "custom"];
 const competitionParticipantTypes: { value: CompetitionParticipantType; label: string }[] = [
   { value: "clubs", label: "Clubs" },
   { value: "nationalTeams", label: "National Teams" }
@@ -32,8 +34,17 @@ const teamTypes: { value: TeamType; label: string }[] = [
   { value: "national", label: "National Team" },
   { value: "custom", label: "Custom" }
 ];
+const hostTypes: { value: HostType; label: string }[] = [
+  { value: "country", label: "Country" },
+  { value: "organization", label: "Organization" },
+  { value: "federation", label: "Federation" },
+  { value: "association", label: "Association" },
+  { value: "regional", label: "Regional" },
+  { value: "international", label: "International" },
+  { value: "other", label: "Other" }
+];
 
-type WorkspaceModalKind = "sport" | "country" | "competition" | "team";
+type WorkspaceModalKind = "sport" | "host" | "competition" | "team";
 
 type WorkspaceModal = {
   kind: WorkspaceModalKind;
@@ -59,6 +70,7 @@ function EntityAvatar({ src, fallback }: { src?: string | undefined; fallback: s
 export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) {
   const [sports, setSports] = useState<Sport[]>([]);
   const [countries, setCountries] = useState<Country[]>([]);
+  const [hosts, setHosts] = useState<Host[]>([]);
   const [competitions, setCompetitions] = useState<Competition[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [selectedSport, setSelectedSport] = useState<Sport | null>(null);
@@ -84,15 +96,15 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
   const [sportLogoUrl, setSportLogoUrl] = useState("");
   const [sportCountryIds, setSportCountryIds] = useState<string[]>([]);
 
-  const [countryName, setCountryName] = useState("");
-  const [countryFlagUrl, setCountryFlagUrl] = useState("");
-  const [countryIso2Code, setCountryIso2Code] = useState("");
-  const [countryIso3Code, setCountryIso3Code] = useState("");
-  const [editingCountryId, setEditingCountryId] = useState<string | null>(null);
+  const [hostName, setHostName] = useState("");
+  const [hostType, setHostType] = useState<HostType>("organization");
+  const [hostCountryId, setHostCountryId] = useState("");
+  const [hostLogoUrl, setHostLogoUrl] = useState("");
+  const [editingHostId, setEditingHostId] = useState<string | null>(null);
 
   const [competitionName, setCompetitionName] = useState("");
   const [competitionLogoUrl, setCompetitionLogoUrl] = useState("");
-  const [competitionCountryId, setCompetitionCountryId] = useState("");
+  const [competitionHostId, setCompetitionHostId] = useState("");
   const [competitionScope, setCompetitionScope] = useState<CompetitionScope>("domestic");
   const [competitionType, setCompetitionType] = useState<CompetitionType>("league");
   const [competitionParticipantType, setCompetitionParticipantType] = useState<CompetitionParticipantType>("clubs");
@@ -114,6 +126,11 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
     [countries, selectedSport]
   );
 
+  const sportHosts = useMemo(
+    () => (selectedSport ? hosts.filter((host) => host.sportId === selectedSport.id) : []),
+    [hosts, selectedSport]
+  );
+
   const sportCompetitions = useMemo(
     () => (selectedSport ? competitions.filter((competition) => competition.sportId === selectedSport.id) : []),
     [competitions, selectedSport]
@@ -129,15 +146,17 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
 
   const loadData = async () => {
     try {
-      const [sportsData, countriesData, competitionData, teamData] = await Promise.all([
+      const [sportsData, countriesData, hostsData, competitionData, teamData] = await Promise.all([
         apiClient.listSports(),
         apiClient.listCountries(viewMode),
+        apiClient.listHosts(),
         apiClient.listCompetitions(viewMode),
         apiClient.listTeams(viewMode)
       ]);
 
       setSports(sportsData);
       setCountries(countriesData);
+      setHosts(hostsData);
       setCompetitions(competitionData);
       setTeams(teamData);
 
@@ -164,14 +183,14 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
     setSportName("");
     setSportLogoUrl("");
     setSportCountryIds([]);
-    setCountryName("");
-    setCountryFlagUrl("");
-    setCountryIso2Code("");
-    setCountryIso3Code("");
-    setEditingCountryId(null);
+    setHostName("");
+    setHostType("organization");
+    setHostCountryId("");
+    setHostLogoUrl("");
+    setEditingHostId(null);
     setCompetitionName("");
     setCompetitionLogoUrl("");
-    setCompetitionCountryId("");
+    setCompetitionHostId("");
     setCompetitionScope("domestic");
     setCompetitionType("league");
     setCompetitionParticipantType("clubs");
@@ -198,25 +217,25 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
     }
   };
 
-  const openCountryEditor = (country?: Country) => {
+  const openHostEditor = (host?: Host) => {
     if (!selectedSport) {
       return;
     }
 
-    if (country) {
-      setCountryName(country.name);
-      setCountryFlagUrl(country.flagUrl ?? "");
-      setCountryIso2Code(country.iso2Code);
-      setCountryIso3Code(country.iso3Code);
-      setEditingCountryId(country.id);
-      openModal({ kind: "country", action: "edit" });
+    if (host) {
+      setHostName(host.name);
+      setHostType(host.type);
+      setHostCountryId(host.countryId ?? "");
+      setHostLogoUrl(host.logoUrl ?? "");
+      setEditingHostId(host.id);
+      openModal({ kind: "host", action: "edit" });
     } else {
-      setCountryName("");
-      setCountryFlagUrl("");
-      setCountryIso2Code("");
-      setCountryIso3Code("");
-      setEditingCountryId(null);
-      openModal({ kind: "country", action: "create" });
+      setHostName("");
+      setHostType("organization");
+      setHostCountryId("");
+      setHostLogoUrl("");
+      setEditingHostId(null);
+      openModal({ kind: "host", action: "create" });
     }
   };
 
@@ -228,7 +247,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
     if (competition) {
       setCompetitionName(competition.name);
       setCompetitionLogoUrl(competition.logoUrl ?? "");
-      setCompetitionCountryId(competition.countryId ?? "");
+      setCompetitionHostId(competition.hostId ?? "");
       setCompetitionScope(competition.scope);
       setCompetitionType(competition.type);
       setCompetitionParticipantType(competition.participantType);
@@ -237,7 +256,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
     } else {
       setCompetitionName("");
       setCompetitionLogoUrl("");
-      setCompetitionCountryId("");
+      setCompetitionHostId("");
       setCompetitionScope("domestic");
       setCompetitionType("league");
       setCompetitionParticipantType("clubs");
@@ -287,8 +306,8 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
           await apiClient.deleteSport(deleteContext.id, accessToken);
           setSelectedSport((current) => (current?.id === deleteContext.id ? null : current));
           break;
-        case "country":
-          await apiClient.deleteCountry(deleteContext.id, accessToken);
+        case "host":
+          await apiClient.deleteHost(deleteContext.id, accessToken);
           break;
         case "competition":
           await apiClient.deleteCompetition(deleteContext.id, accessToken);
@@ -352,69 +371,63 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
   // provide a way to remove individual toasts
   const removeToast = (id: string) => setToasts((t) => t.filter((x) => x.id !== id));
 
-  const saveCountry = async () => {
+  const saveHost = async () => {
     if (!selectedSport) {
       return;
     }
 
-    if (!countryName.trim()) {
-      setStatus("Country name is required.");
+    if (!hostName.trim()) {
+      setStatus("Host name is required.");
       return;
     }
 
-    const iso2Code = countryIso2Code.trim().toUpperCase();
-    const iso3Code = countryIso3Code.trim().toUpperCase();
-
-    if (!/^[A-Z]{2}$/.test(iso2Code)) {
-      setStatus("ISO2 must be exactly 2 letters.");
+    if (hostType === "country" && !hostCountryId) {
+      setStatus("Country is required for a country host.");
       return;
     }
 
-    if (!/^[A-Z]{3}$/.test(iso3Code)) {
-      setStatus("ISO3 must be exactly 3 letters.");
-      return;
-    }
-
-    if (iso2Code === "XX") {
-      setStatus("ISO2 XX is reserved and cannot be used as a country code.");
+    if (hostType !== "country" && hostCountryId) {
+      setStatus("Only country hosts can reference a country.");
       return;
     }
 
     if (isLogoUploading) {
-      setStatus("Please wait for the flag upload to finish before saving.");
+      setStatus("Please wait for the logo upload to finish before saving.");
       return;
     }
 
-    if (countryFlagUrl && !isValidLogoSource(countryFlagUrl)) {
-      setStatus("Invalid flag URL.");
+    if (hostLogoUrl && !isValidLogoSource(hostLogoUrl)) {
+      setStatus("Invalid host logo URL.");
       return;
     }
 
-    const payload: CreateCountryRequest = {
-      name: countryName,
-      iso2Code,
-      iso3Code,
-      ...(countryFlagUrl ? { flagUrl: countryFlagUrl } : {})
+    const payload: CreateHostRequest = {
+      sportId: selectedSport.id,
+      name: hostName,
+      type: hostType,
+      ...(hostCountryId ? { countryId: hostCountryId } : {}),
+      ...(hostLogoUrl ? { logoUrl: hostLogoUrl } : {})
     };
 
     setIsSaving(true);
     try {
-      if (editingCountryId) {
-        await apiClient.updateCountry(editingCountryId, payload, accessToken);
-        setStatus("Country updated.");
-        pushToast("Country updated.", "success");
+      if (editingHostId) {
+        await apiClient.updateHost(editingHostId, payload, accessToken);
+        setStatus("Host updated.");
+        pushToast("Host updated.", "success");
       } else {
-        await apiClient.createCountry(payload, accessToken);
-        setStatus("Country created.");
-        pushToast("Country created.", "success");
+        await apiClient.createHost(payload, accessToken);
+        setStatus("Host created.");
+        pushToast("Host created.", "success");
       }
 
       await loadData();
       closeModal();
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Save failed.";
-      setStatus(msg);
-      pushToast(msg, "error");
+      const friendlyMessage = msg === "host_duplicate" ? `${hostName} already exists.` : msg;
+      setStatus(friendlyMessage);
+      pushToast(friendlyMessage, "error");
     } finally {
       setIsSaving(false);
     }
@@ -425,8 +438,8 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
       return;
     }
 
-    if (!competitionName.trim()) {
-      setStatus("Competition name is required.");
+    if (!competitionName.trim() || !competitionHostId) {
+      setStatus(!competitionName.trim() ? "Competition name is required." : "Competition host is required.");
       return;
     }
 
@@ -446,7 +459,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
       scope: competitionScope,
       type: competitionType,
       participantType: competitionParticipantType,
-      ...(competitionCountryId ? { countryId: competitionCountryId } : {}),
+      ...(competitionHostId ? { hostId: competitionHostId } : {}),
       ...(competitionLogoUrl ? { logoUrl: competitionLogoUrl } : {})
     };
     setIsSaving(true);
@@ -626,33 +639,34 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
           <section className="console-panel sports-workspace-grid">
             <article className="entity-panel">
               <div className="panel-heading">
-                <h3>{isCatalogView ? "Hosts" : "Countries"}</h3>
-                <button type="button" onClick={() => openCountryEditor()} disabled={isCatalogView}>
-                  Add Country
+                <h3>Hosts</h3>
+                <button type="button" onClick={() => openHostEditor()} disabled={isCatalogView}>
+                  Add Host
                 </button>
               </div>
               <div className="entity-list">
-                {supportedCountries.length > 0 ? (
-                  supportedCountries.map((country) => (
-                    <article className="entity-list-item" key={country.id}>
+                {sportHosts.length > 0 ? (
+                  sportHosts.map((host) => (
+                    <article className="entity-list-item" key={host.id}>
                       <div className="entity-row">
-                        <EntityAvatar src={country.flagUrl} fallback={country.name} />
+                        <EntityAvatar src={host.logoUrl} fallback={host.name} />
                         <div>
-                          <strong>{country.name}</strong>
+                          <strong>{host.name}</strong>
+                          <small>{host.type}{host.countryId ? ` · ${countries.find((country) => country.id === host.countryId)?.name ?? ""}` : ""}</small>
                         </div>
                       </div>
                       <div className="entity-row-actions">
-                        <button type="button" onClick={() => openCountryEditor(country)} disabled={isCatalogView}>
+                        <button type="button" onClick={() => openHostEditor(host)} disabled={isCatalogView}>
                           Edit
                         </button>
-                        <button type="button" className="secondary" onClick={() => queueDelete("country", country.id, country.name)} disabled={isCatalogView}>
+                        <button type="button" className="secondary" onClick={() => queueDelete("host", host.id, host.name)} disabled={isCatalogView}>
                           Delete
                         </button>
                       </div>
                     </article>
                   ))
                 ) : (
-                  <p className="field-note">No {isCatalogView ? "hosts" : "countries"} are linked to this sport yet.</p>
+                  <p className="field-note">No hosts are linked to this sport yet.</p>
                 )}
               </div>
             </article>
@@ -772,7 +786,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
 
       {modalContext ? (
         <Modal
-          title={`${modalContext.action === "create" ? "Create" : "Edit"} ${modalContext.kind === "sport" ? "Sport" : modalContext.kind === "country" ? "Country" : modalContext.kind === "competition" ? "Competition" : "Team"}`}
+          title={`${modalContext.action === "create" ? "Create" : "Edit"} ${modalContext.kind === "sport" ? "Sport" : modalContext.kind === "host" ? "Host" : modalContext.kind === "competition" ? "Competition" : "Team"}`}
           onClose={closeModal}
           footer={
             <div className="button-row">
@@ -782,8 +796,8 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                 onClick={
                   modalContext.kind === "sport"
                     ? saveSport
-                    : modalContext.kind === "country"
-                    ? saveCountry
+                    : modalContext.kind === "host"
+                    ? saveHost
                     : modalContext.kind === "competition"
                     ? saveCompetition
                     : saveTeam
@@ -825,32 +839,28 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                 </div>
               </label>
             </div>
-          ) : modalContext.kind === "country" ? (
+          ) : modalContext.kind === "host" ? (
             <div className="form-grid two-column">
               <label>
-                Country Name
-                <input value={countryName} onChange={(event) => setCountryName(event.target.value)} />
+                Host Name
+                <input value={hostName} onChange={(event) => setHostName(event.target.value)} />
               </label>
               <label>
-                ISO2 Code
-                <input
-                  value={countryIso2Code}
-                  maxLength={2}
-                  placeholder="ES"
-                  onChange={(event) => setCountryIso2Code(event.target.value.toUpperCase())}
-                />
+                Host Type
+                <select value={hostType} onChange={(event) => setHostType(event.target.value as HostType)}>
+                  {hostTypes.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
+                </select>
               </label>
-              <label>
-                ISO3 Code
-                <input
-                  value={countryIso3Code}
-                  maxLength={3}
-                  placeholder="ESP"
-                  onChange={(event) => setCountryIso3Code(event.target.value.toUpperCase())}
-                />
-              </label>
-              <LogoUrlField label="Upload Flag" value={countryFlagUrl} onChange={setCountryFlagUrl} />
-              <small className="field-note">Use ISO 3166-1 codes, for example Spain: ES / ESP.</small>
+              {hostType === "country" ? (
+                <label>
+                  Country
+                  <select value={hostCountryId} onChange={(event) => setHostCountryId(event.target.value)}>
+                    <option value="">Select country</option>
+                    {countries.map((country) => <option key={country.id} value={country.id}>{country.name}</option>)}
+                  </select>
+                </label>
+              ) : null}
+              <LogoUrlField label="Upload Logo / Flag" value={hostLogoUrl} onChange={setHostLogoUrl} />
             </div>
           ) : modalContext.kind === "competition" ? (
             <div className="form-grid two-column">
@@ -884,11 +894,11 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                 </select>
               </label>
               <label>
-                Country
-                <select value={competitionCountryId} onChange={(event) => setCompetitionCountryId(event.target.value)}>
+                Host
+                <select value={competitionHostId} onChange={(event) => setCompetitionHostId(event.target.value)}>
                   <option value="">None</option>
-                  {supportedCountries.map((country) => (
-                    <option key={country.id} value={country.id}>{country.name}</option>
+                  {sportHosts.map((host) => (
+                    <option key={host.id} value={host.id}>{host.name} ({host.type})</option>
                   ))}
                 </select>
               </label>
@@ -932,7 +942,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
 
       {deleteContext ? (
         <Modal
-          title={`Delete ${deleteContext.kind === "sport" ? "Sport" : deleteContext.kind === "country" ? "Country" : deleteContext.kind === "competition" ? "Competition" : "Team"}`}
+          title={`Delete ${deleteContext.kind === "sport" ? "Sport" : deleteContext.kind === "host" ? "Host" : deleteContext.kind === "competition" ? "Competition" : "Team"}`}
           onClose={() => setDeleteContext(null)}
           footer={
             <div className="button-row">

@@ -1084,6 +1084,27 @@ function migrateExistingOperationalState(database: DatabaseSync) {
     database.exec("ALTER TABLE competitions ADD COLUMN country_id TEXT;");
   }
 
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS hosts (
+      id TEXT PRIMARY KEY,
+      sport_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      host_type TEXT NOT NULL CHECK (host_type IN ('country', 'organization', 'federation', 'association', 'regional', 'international', 'other')),
+      country_id TEXT,
+      logo_url TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (sport_id) REFERENCES sports(id),
+      FOREIGN KEY (country_id) REFERENCES countries(id)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_hosts_sport_name ON hosts(sport_id, name);
+  `);
+
+  if (!hasColumn(database, "competitions", "host_id")) {
+    database.exec("ALTER TABLE competitions ADD COLUMN host_id TEXT;");
+  }
+
   if (!hasColumn(database, "competitions", "competition_type")) {
     database.exec("ALTER TABLE competitions ADD COLUMN competition_type TEXT NOT NULL DEFAULT 'league';");
   }
@@ -1108,6 +1129,7 @@ function migrateExistingOperationalState(database: DatabaseSync) {
         CREATE TABLE IF NOT EXISTS competitions_new (
           id TEXT PRIMARY KEY,
           sport_id TEXT,
+          host_id TEXT,
           country_id TEXT,
           region_id TEXT,
           name TEXT NOT NULL,
@@ -1121,13 +1143,14 @@ function migrateExistingOperationalState(database: DatabaseSync) {
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           FOREIGN KEY (sport_id) REFERENCES sports(id),
+          FOREIGN KEY (host_id) REFERENCES hosts(id),
           FOREIGN KEY (country_id) REFERENCES countries(id),
           FOREIGN KEY (region_id) REFERENCES regions(id)
         );
       `);
       database.exec(`
         INSERT INTO competitions_new
-        SELECT id, sport_id, country_id, region_id, name, slug, scope, competition_type, participant_type, logo_url, current_season_id, status, created_at, updated_at
+        SELECT id, sport_id, host_id, country_id, region_id, name, slug, scope, competition_type, participant_type, logo_url, current_season_id, status, created_at, updated_at
         FROM competitions;
       `);
       database.exec("DROP TABLE competitions;");

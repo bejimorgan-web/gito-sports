@@ -22,6 +22,7 @@ import { operationsRouter } from "./routes/operations.js";
 import { scoresRouter } from "./routes/scores.js";
 import { sportsRouter } from "./routes/sports.js";
 import { countriesRouter } from "./routes/countries.js";
+import { hostsRouter } from "./routes/hosts.js";
 import { competitionsRouter } from "./routes/competitions.js";
 import { competitionSeasonsRouter, seasonsRouter } from "./routes/seasons.js";
 import { teamsRouter } from "./routes/teams.js";
@@ -173,6 +174,7 @@ export function createApp() {
   app.use("/sports", sportsRouter);
   app.use("/config", configRouter);
   app.use("/countries", countriesRouter);
+  app.use("/hosts", hostsRouter);
   app.use("/competitions", competitionsRouter);
   app.use("/competitions/:competitionId/seasons", competitionSeasonsRouter);
   app.use("/seasons", seasonsRouter);
