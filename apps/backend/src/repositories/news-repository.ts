@@ -223,6 +223,11 @@ export class NewsRepository {
       params.push(options.teamId);
     }
 
+    if (options.hostId) {
+      conditions.push("EXISTS (SELECT 1 FROM news_article_categories nhc WHERE nhc.article_id = a.id AND nhc.category_type = 'host' AND nhc.entity_id = ? AND nhc.classification_status = 'approved')");
+      params.push(options.hostId);
+    }
+
     if (options.countryId) {
       conditions.push("(a.country_id = ? OR EXISTS (SELECT 1 FROM news_article_categories nco WHERE nco.article_id = a.id AND nco.category_type = 'country' AND nco.entity_id = ? AND nco.classification_status = 'approved'))");
       params.push(options.countryId);
@@ -251,7 +256,7 @@ export class NewsRepository {
     const offsetClause = options.offset ? `OFFSET ${Number(options.offset)}` : "";
 
     const query = `
-      SELECT a.*, s.name AS sport_name, c.name AS competition_name, t.name AS team_name, co.name AS country_name, m.id AS match_id, ns.name AS configured_source_name, ns.source_type
+      SELECT DISTINCT a.*, s.name AS sport_name, c.name AS competition_name, t.name AS team_name, co.name AS country_name, m.id AS match_id, ns.name AS configured_source_name, ns.source_type
       FROM news_articles a
       LEFT JOIN sports s ON s.id = a.sport_id
       LEFT JOIN competitions c ON c.id = a.competition_id
@@ -330,6 +335,7 @@ export class NewsRepository {
         sportId: nextSportId,
         competitionId: nextCompetitionId,
         teamId: nextTeamId,
+        hostId: input.hostId !== undefined ? input.hostId : existing.hostId ?? null,
         countryId: nextCountryId,
         matchId: nextMatchId
       }),
@@ -842,12 +848,13 @@ export class NewsRepository {
     });
   }
 
-  private deriveLegacyCategoryInputs(article: Partial<Pick<NewsArticle, "sportId" | "competitionId" | "teamId" | "countryId" | "matchId">>): NewsArticleCategoryInput[] {
+  private deriveLegacyCategoryInputs(article: Partial<Pick<NewsArticle, "sportId" | "competitionId" | "teamId" | "hostId" | "countryId" | "matchId">>): NewsArticleCategoryInput[] {
     const categories: NewsArticleCategoryInput[] = [];
-    const pairs: Array<["sport" | "competition" | "team" | "country" | "match", string | null | undefined]> = [
+    const pairs: Array<["sport" | "competition" | "team" | "host" | "country" | "match", string | null | undefined]> = [
       ["sport", article.sportId],
       ["competition", article.competitionId],
       ["team", article.teamId],
+      ["host", article.hostId],
       ["country", article.countryId],
       ["match", article.matchId]
     ];
@@ -997,6 +1004,12 @@ export class NewsRepository {
 
   private attachRelations(article: NewsArticle): NewsArticle {
     article.categories = this.listArticleCategories(article.id);
+    const approvedHostCategory = article.categories.find((category) => category.categoryType === "host" && category.classificationStatus === "approved");
+    article.hostId = approvedHostCategory?.entityId ?? null;
+    article.host = approvedHostCategory ? (() => {
+      const row = this.db.prepare("SELECT id, name, host_type FROM hosts WHERE id = ?").get(approvedHostCategory.entityId) as { id: string; name: string; host_type: string } | undefined;
+      return row ? { id: row.id, name: row.name, type: row.host_type as any } : null;
+    })() : null;
     article.media = this.listMedia(article.id);
     article.links = this.listLinks(article.id);
     article.audit = this.listAudit(article.id);

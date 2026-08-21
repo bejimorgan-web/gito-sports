@@ -1,5 +1,5 @@
 import type { EntityId, EntityStatus } from "./naming.js";
-import type { Competition, Country, Match, Sport, Team } from "./sports.js";
+import type { Competition, Country, Host, Match, Sport, Team } from "./sports.js";
 
 export type NewsArticleStatus = "draft" | "review" | "published" | "archived";
 export type NewsSourceType = "external" | "partner" | "wire" | "internal";
@@ -155,6 +155,7 @@ export interface NewsArticle {
   sportId?: string | null;
   competitionId?: string | null;
   teamId?: string | null;
+  hostId?: string | null;
   countryId?: string | null;
   matchId?: string | null;
   sourceId?: string | null;
@@ -177,6 +178,7 @@ export interface NewsArticle {
   sport?: Pick<Sport, "id" | "name"> | null;
   competition?: Pick<Competition, "id" | "name"> | null;
   team?: Pick<Team, "id" | "name"> | null;
+  host?: Pick<Host, "id" | "name" | "type"> | null;
   country?: Pick<Country, "id" | "name"> | null;
   match?: Pick<Match, "id"> | null;
   source?: Pick<NewsSource, "id" | "name" | "sourceType"> | null;
@@ -195,6 +197,7 @@ export interface CreateNewsArticleRequest {
   sportId?: string | null;
   competitionId?: string | null;
   teamId?: string | null;
+  hostId?: string | null;
   countryId?: string | null;
   matchId?: string | null;
   sourceId?: string | null;
@@ -225,6 +228,7 @@ export interface UpdateNewsArticleRequest {
   sportId?: string | null;
   competitionId?: string | null;
   teamId?: string | null;
+  hostId?: string | null;
   countryId?: string | null;
   matchId?: string | null;
   sourceId?: string | null;
@@ -338,6 +342,7 @@ export interface NewsQueryOptions {
   sportId?: string;
   competitionId?: string;
   teamId?: string;
+  hostId?: string;
   countryId?: string;
   matchId?: string;
   sourceId?: string;

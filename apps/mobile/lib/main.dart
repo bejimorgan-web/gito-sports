@@ -11,6 +11,8 @@ import 'dart:ui';
 import 'app_config.dart';
 import 'services/analytics_service.dart';
 import 'services/remote_config_service.dart';
+import 'services/mobile_api_service.dart';
+import 'models/mobile_models.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
@@ -73,6 +75,426 @@ Future<void> _initializeCrashlytics() async {
   }
 }
 
+class GiTOBrandColors {
+  static const background = Color(0xFF0B1020);
+  static const primary = Color(0xFF4F46E5);
+  static const accent = Color(0xFF22D3EE);
+  static const live = Color(0xFF22C55E);
+  static const warning = Color(0xFFF59E0B);
+  static const error = Color(0xFFEF4444);
+  static const surface = Color(0xFF111827);
+  static const surfaceAlt = Color(0xFF171F2E);
+  static const text = Color(0xFFE5E7EB);
+  static const muted = Color(0xFF94A3B8);
+  static const cardBorder = Color(0xFF2A3345);
+}
+
+class GitoFollowStore {
+  static const String _sportsKey = 'gito_followed_sports';
+  static const String _competitionsKey = 'gito_followed_competitions';
+  static const String _teamsKey = 'gito_followed_teams';
+
+  static const List<String> sports = <String>[
+    'football',
+    'basketball',
+    'tennis'
+  ];
+
+  static String displayName(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      return trimmed;
+    }
+
+    final normalized = trimmed.replaceAll('-', ' ').replaceAll('_', ' ');
+    final words = normalized
+        .split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .map((word) {
+      if (word.length <= 1) {
+        return word.toUpperCase();
+      }
+      return word[0].toUpperCase() + word.substring(1).toLowerCase();
+    }).toList();
+
+    return words.join(' ');
+  }
+
+  static const Map<String, List<String>> recommendedCompetitions =
+      <String, List<String>>{
+    'football': <String>['La Liga', 'Premier League', 'Champions League'],
+    'basketball': <String>['NBA', 'EuroLeague'],
+    'tennis': <String>['ATP', 'WTA'],
+  };
+  static const Map<String, List<String>> recommendedTeams =
+      <String, List<String>>{
+    'football': <String>['Barcelona', 'Manchester City', 'Real Madrid'],
+    'basketball': <String>[
+      'Los Angeles Lakers',
+      'Boston Celtics',
+      'Golden State Warriors'
+    ],
+    'tennis': <String>['Carlos Alcaraz', 'Novak Djokovic', 'Iga Swiatek'],
+  };
+
+  static Future<Set<String>> readSports() async {
+    final prefs = await SharedPreferences.getInstance();
+    final values = prefs.getStringList(_sportsKey) ?? const <String>[];
+    return values.where((value) => value.isNotEmpty).toSet();
+  }
+
+  static Future<Set<String>> readCompetitions() async {
+    final prefs = await SharedPreferences.getInstance();
+    final values = prefs.getStringList(_competitionsKey) ?? const <String>[];
+    return values.where((value) => value.isNotEmpty).toSet();
+  }
+
+  static Future<Set<String>> readTeams() async {
+    final prefs = await SharedPreferences.getInstance();
+    final values = prefs.getStringList(_teamsKey) ?? const <String>[];
+    return values.where((value) => value.isNotEmpty).toSet();
+  }
+
+  static Future<void> saveSelections({
+    Set<String>? sports,
+    Set<String>? competitions,
+    Set<String>? teams,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (sports != null) {
+      await prefs.setStringList(_sportsKey, sports.toList()..sort());
+    }
+    if (competitions != null) {
+      await prefs.setStringList(
+          _competitionsKey, competitions.toList()..sort());
+    }
+    if (teams != null) {
+      await prefs.setStringList(_teamsKey, teams.toList()..sort());
+    }
+  }
+}
+
+class GitoFollowSummary {
+  final Set<String> sports;
+  final Set<String> competitions;
+  final Set<String> teams;
+
+  const GitoFollowSummary({
+    required this.sports,
+    required this.competitions,
+    required this.teams,
+  });
+}
+
+class GitoFollowStoreViewModel {
+  static Future<GitoFollowSummary> load() async {
+    final sports = await GitoFollowStore.readSports();
+    final competitions = await GitoFollowStore.readCompetitions();
+    final teams = await GitoFollowStore.readTeams();
+    return GitoFollowSummary(
+        sports: sports, competitions: competitions, teams: teams);
+  }
+}
+
+class GitoPersonalizeScreen extends StatefulWidget {
+  const GitoPersonalizeScreen({super.key});
+
+  @override
+  State<GitoPersonalizeScreen> createState() => _GitoPersonalizeScreenState();
+}
+
+class _GitoPersonalizeScreenState extends State<GitoPersonalizeScreen> {
+  final Set<String> _selectedSports = <String>{};
+  final Set<String> _selectedCompetitions = <String>{};
+  final Set<String> _selectedTeams = <String>{};
+  int _step = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentSelections();
+  }
+
+  Future<void> _loadCurrentSelections() async {
+    final summary = await GitoFollowStoreViewModel.load();
+    if (!mounted) return;
+    setState(() {
+      _selectedSports.addAll(summary.sports);
+      _selectedCompetitions.addAll(summary.competitions);
+      _selectedTeams.addAll(summary.teams);
+    });
+  }
+
+  List<String> _recommendedCompetitionsForCurrentSports() {
+    final result = <String>[];
+    for (final sport in _selectedSports) {
+      result.addAll(
+          GitoFollowStore.recommendedCompetitions[sport] ?? const <String>[]);
+    }
+    return result.toSet().toList();
+  }
+
+  List<String> _recommendedTeamsForCurrentSports() {
+    final result = <String>[];
+    for (final sport in _selectedSports) {
+      result
+          .addAll(GitoFollowStore.recommendedTeams[sport] ?? const <String>[]);
+    }
+    return result.toSet().toList();
+  }
+
+  Future<void> _saveAndClose() async {
+    await GitoFollowStore.saveSelections(
+      sports: _selectedSports,
+      competitions: _selectedCompetitions,
+      teams: _selectedTeams,
+    );
+    if (!mounted) return;
+    Navigator.of(context).pop();
+  }
+
+  Widget _buildChipList(List<String> values, Set<String> selection,
+      {required String title}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Text(title,
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w800)),
+        ),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: values.map((value) {
+            final rawValue = value.toLowerCase();
+            final selected = selection.contains(rawValue);
+            return FilterChip(
+              selected: selected,
+              selectedColor: GiTOBrandColors.primary.withAlpha(90),
+              backgroundColor: GiTOBrandColors.surfaceAlt,
+              label: Text(GitoFollowStore.displayName(value)),
+              onSelected: (_) {
+                setState(() {
+                  if (selected) {
+                    selection.remove(rawValue);
+                  } else {
+                    selection.add(rawValue);
+                  }
+                });
+              },
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final stepTitle = <String>[
+      'What sports do you follow?',
+      'Recommended competitions',
+      'Recommended clubs and teams',
+    ];
+
+    final sportOptions = GitoFollowStore.sports.toList();
+
+    final recommendations = _recommendedCompetitionsForCurrentSports();
+    final teamRecommendations = _recommendedTeamsForCurrentSports();
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Personalize GiTO'),
+        actions: [
+          TextButton(
+            onPressed: _saveAndClose,
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Step ${_step + 1}',
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: GiTOBrandColors.accent,
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                stepTitle[_step],
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+              ),
+              const SizedBox(height: 18),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: _step == 0
+                      ? _buildChipList(sportOptions, _selectedSports,
+                          title: 'Select the sports you care about')
+                      : _step == 1
+                          ? _buildChipList(
+                              recommendations, _selectedCompetitions,
+                              title: 'Choose competitions to follow')
+                          : _buildChipList(teamRecommendations, _selectedTeams,
+                              title: 'Choose clubs or teams to follow'),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  TextButton.icon(
+                    onPressed: _step == 0
+                        ? () => _saveAndClose()
+                        : () => setState(() => _step = (_step - 1).clamp(0, 2)),
+                    icon: const Icon(Icons.skip_next_rounded),
+                    label: Text(_step == 0 ? 'Skip' : 'Back'),
+                  ),
+                  const Spacer(),
+                  FilledButton.icon(
+                    onPressed: _step == 2
+                        ? _saveAndClose
+                        : () => setState(() => _step = (_step + 1).clamp(0, 2)),
+                    icon: const Icon(Icons.arrow_forward_rounded),
+                    label: Text(_step == 2 ? 'Done' : 'Next'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class GitoFollowingScreen extends StatefulWidget {
+  const GitoFollowingScreen({super.key});
+
+  @override
+  State<GitoFollowingScreen> createState() => _GitoFollowingScreenState();
+}
+
+class _GitoFollowingScreenState extends State<GitoFollowingScreen> {
+  late Future<GitoFollowSummary> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = GitoFollowStoreViewModel.load();
+  }
+
+  Future<void> _reload() async {
+    setState(() {
+      _future = GitoFollowStoreViewModel.load();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Following'),
+        actions: [
+          IconButton(
+            tooltip: 'Add',
+            onPressed: () {
+              Navigator.of(context)
+                  .push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const GitoPersonalizeScreen(),
+                    ),
+                  )
+                  .then((_) => _reload());
+            },
+            icon: const Icon(Icons.add_rounded),
+          ),
+        ],
+      ),
+      body: FutureBuilder<GitoFollowSummary>(
+        future: _future,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final summary = snapshot.data ??
+              const GitoFollowSummary(
+                  sports: <String>{},
+                  competitions: <String>{},
+                  teams: <String>{});
+          final sections = <MapEntry<String, List<String>>>[
+            MapEntry(
+                'SPORTS',
+                summary.sports.map(GitoFollowStore.displayName).toList()
+                  ..sort()),
+            MapEntry(
+                'COMPETITIONS',
+                summary.competitions.map(GitoFollowStore.displayName).toList()
+                  ..sort()),
+            MapEntry(
+                'TEAMS',
+                summary.teams.map(GitoFollowStore.displayName).toList()
+                  ..sort()),
+          ];
+
+          return RefreshIndicator(
+            onRefresh: () async => _reload(),
+            child: ListView(
+              padding: const EdgeInsets.all(18),
+              children: sections
+                  .where((entry) => entry.value.isNotEmpty)
+                  .map((entry) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Text(
+                          entry.key,
+                          style:
+                              Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w900,
+                                    color: GiTOBrandColors.accent,
+                                  ),
+                        ),
+                      ),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: entry.value.map((value) {
+                          return InputChip(
+                            label: Text(value),
+                            onPressed: () {},
+                            avatar: const Icon(Icons.check_rounded, size: 16),
+                            backgroundColor: GiTOBrandColors.surfaceAlt,
+                          );
+                        }).toList(),
+                      )
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
 class GitoLiveSportsApp extends StatelessWidget {
   const GitoLiveSportsApp({super.key});
 
@@ -84,12 +506,27 @@ class GitoLiveSportsApp extends StatelessWidget {
       theme: ThemeData(
         brightness: Brightness.dark,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF20D37B),
+          seedColor: GiTOBrandColors.primary,
           brightness: Brightness.dark,
-          surface: const Color(0xFF101418),
+          surface: GiTOBrandColors.background,
+          primary: GiTOBrandColors.primary,
+          secondary: GiTOBrandColors.accent,
+        ),
+        scaffoldBackgroundColor: GiTOBrandColors.background,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: GiTOBrandColors.background,
+          foregroundColor: GiTOBrandColors.text,
+          elevation: 0,
+        ),
+        cardTheme: CardThemeData(
+          color: GiTOBrandColors.surface,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: const BorderSide(color: GiTOBrandColors.cardBorder),
+          ),
         ),
         fontFamily: 'Roboto',
-        scaffoldBackgroundColor: const Color(0xFF080B0E),
         useMaterial3: true,
       ),
       home: const LiveHomeScreen(),
@@ -1012,6 +1449,28 @@ class _LiveHomeScreenState extends State<LiveHomeScreen> {
         title: const Text('GiTO Live Sports'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.person_add_alt_1_rounded),
+            tooltip: 'Personalize GiTO',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const GitoPersonalizeScreen(),
+                ),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.favorite_rounded),
+            tooltip: 'Following',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const GitoFollowingScreen(),
+                ),
+              );
+            },
+          ),
+          IconButton(
             icon: const Icon(Icons.campaign_rounded),
             tooltip: 'Promotions',
             onPressed: _showPromotions,
@@ -1053,8 +1512,12 @@ class LiveScoresScreen extends StatefulWidget {
 }
 
 class _LiveScoresScreenState extends State<LiveScoresScreen> {
-  final _scoreService = const ScoreService();
-  final _scores = <ScoreMatch>[];
+  final _mobileApi = const MobileApiService();
+  final _fixtures = <MobileFixture>[];
+  List<MobileSport> _sports = const <MobileSport>[];
+  String? _selectedSportId;
+  DateTime _selectedDate = DateTime.now();
+  bool _following = true;
   Timer? _refreshTimer;
   FeedConnectionState _connectionState = FeedConnectionState.reconnecting;
   bool _firstLoad = true;
@@ -1075,20 +1538,33 @@ class _LiveScoresScreenState extends State<LiveScoresScreen> {
 
   Future<void> _refreshScores() async {
     try {
-      final result = await _scoreService.fetchLiveScores();
-      final nextScores = result.matches;
+      final sports = await _mobileApi.getSports();
+      final selectedSportId =
+          _selectedSportId ?? (sports.isNotEmpty ? sports.first.id : null);
+      final following = await resolveMobileFollowingIds(_mobileApi);
+      final day = DateTime.utc(
+          _selectedDate.year, _selectedDate.month, _selectedDate.day);
+      final nextFixtures = await _mobileApi.getFixtures(
+        mode: _following ? 'following' : 'all',
+        sportId: selectedSportId,
+        sportIds: _following ? following.sports : const <String>[],
+        teamIds: _following ? following.teams : const <String>[],
+        competitionIds: _following ? following.competitions : const <String>[],
+        from: day.toIso8601String(),
+        to: day.add(const Duration(days: 1)).toIso8601String(),
+      );
 
       if (!mounted) {
         return;
       }
 
       setState(() {
-        _scores
+        _fixtures
           ..clear()
-          ..addAll(nextScores);
-        _connectionState = result.source == 'stale_cache'
-            ? FeedConnectionState.reconnecting
-            : FeedConnectionState.online;
+          ..addAll(nextFixtures);
+        _sports = sports;
+        _selectedSportId = selectedSportId;
+        _connectionState = FeedConnectionState.online;
         _firstLoad = false;
       });
     } catch (_) {
@@ -1097,7 +1573,7 @@ class _LiveScoresScreenState extends State<LiveScoresScreen> {
       }
 
       setState(() {
-        _connectionState = _scores.isEmpty
+        _connectionState = _fixtures.isEmpty
             ? FeedConnectionState.offline
             : FeedConnectionState.reconnecting;
         _firstLoad = false;
@@ -1116,6 +1592,72 @@ class _LiveScoresScreenState extends State<LiveScoresScreen> {
             key: const PageStorageKey('live-scores'),
             physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 12, 18, 4),
+                  child: SegmentedButton<bool>(
+                    segments: const [
+                      ButtonSegment(value: true, label: Text('Following')),
+                      ButtonSegment(value: false, label: Text('All')),
+                    ],
+                    selected: {_following},
+                    onSelectionChanged: (selection) {
+                      setState(() => _following = selection.first);
+                      unawaited(_refreshScores());
+                    },
+                  ),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: SingleChildScrollView(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: _sports
+                        .map((sport) => Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: ChoiceChip(
+                                label: Text(sport.name),
+                                selected: sport.id == _selectedSportId,
+                                onSelected: (_) {
+                                  setState(() => _selectedSportId = sport.id);
+                                  unawaited(_refreshScores());
+                                },
+                              ),
+                            ))
+                        .toList(),
+                  ),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: SingleChildScrollView(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 18, vertical: 2),
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: List.generate(3, (index) {
+                      final date =
+                          DateTime.now().add(Duration(days: index - 1));
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: ChoiceChip(
+                          label: Text(index == 0
+                              ? 'Yesterday'
+                              : index == 1
+                                  ? 'Today'
+                                  : 'Tomorrow'),
+                          selected: _isSameDay(date, _selectedDate),
+                          onSelected: (_) {
+                            setState(() => _selectedDate = date);
+                            unawaited(_refreshScores());
+                          },
+                        ),
+                      );
+                    }),
+                  ),
+                ),
+              ),
               SliverToBoxAdapter(
                 child: AppBrandHero(
                   title: 'Live Scores',
@@ -1140,7 +1682,7 @@ class _LiveScoresScreenState extends State<LiveScoresScreen> {
                   hasScrollBody: false,
                   child: Center(child: CircularProgressIndicator()),
                 )
-              else if (_scores.isEmpty)
+              else if (_fixtures.isEmpty)
                 const SliverFillRemaining(
                   hasScrollBody: false,
                   child: Center(
@@ -1151,13 +1693,23 @@ class _LiveScoresScreenState extends State<LiveScoresScreen> {
                 )
               else
                 SliverList.separated(
-                  itemCount: _scores.length,
+                  itemCount: _groupedFixtures.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 10),
                   itemBuilder: (context, index) {
-                    final score = _scores[index];
+                    final entry = _groupedFixtures[index];
+                    if (entry.fixture == null) {
+                      return Padding(
+                        padding: const EdgeInsets.fromLTRB(18, 8, 18, 0),
+                        child: Text(entry.competitionName,
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w800)),
+                      );
+                    }
                     return Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 18),
-                      child: ScoreMatchCard(match: score),
+                      child: _CanonicalFixtureCard(fixture: entry.fixture!),
                     );
                   },
                 ),
@@ -1168,6 +1720,77 @@ class _LiveScoresScreenState extends State<LiveScoresScreen> {
       ),
     );
   }
+
+  bool _isSameDay(DateTime left, DateTime right) =>
+      left.year == right.year &&
+      left.month == right.month &&
+      left.day == right.day;
+
+  List<_FixtureGroupEntry> get _groupedFixtures {
+    final entries = <_FixtureGroupEntry>[];
+    String? current;
+    for (final fixture in _fixtures) {
+      final competitionName = fixture.competition.name;
+      if (competitionName != current) {
+        current = competitionName;
+        entries.add(_FixtureGroupEntry.header(competitionName));
+      }
+      entries.add(_FixtureGroupEntry.fixture(fixture));
+    }
+    return entries;
+  }
+}
+
+class _FixtureGroupEntry {
+  const _FixtureGroupEntry.header(this.competitionName) : fixture = null;
+  const _FixtureGroupEntry.fixture(this.fixture) : competitionName = '';
+  final String competitionName;
+  final MobileFixture? fixture;
+}
+
+class _CanonicalFixtureCard extends StatelessWidget {
+  const _CanonicalFixtureCard({required this.fixture});
+  final MobileFixture fixture;
+
+  @override
+  Widget build(BuildContext context) => Card(
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+              builder: (_) => FixtureDetailScreen(fixtureId: fixture.id))),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(children: [
+              _FixtureLogo(url: fixture.homeClub.logoUrl),
+              Expanded(
+                  child: Column(children: [
+                Text(fixture.homeClub.name, textAlign: TextAlign.center),
+                Text(fixture.scoreLabel,
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w800)),
+                Text(fixture.awayClub.name, textAlign: TextAlign.center),
+              ])),
+              _FixtureLogo(url: fixture.awayClub.logoUrl),
+            ]),
+          ),
+        ),
+      );
+}
+
+class _FixtureLogo extends StatelessWidget {
+  const _FixtureLogo({this.url});
+  final String? url;
+  @override
+  Widget build(BuildContext context) => SizedBox(
+      width: 36,
+      height: 36,
+      child: url?.isNotEmpty == true
+          ? Image.network(url!,
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => const Icon(Icons.shield_outlined))
+          : const Icon(Icons.shield_outlined));
 }
 
 class ScoreMatchCard extends StatelessWidget {

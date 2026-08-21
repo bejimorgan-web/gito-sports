@@ -7,6 +7,7 @@ import { getDatabase } from "../db/connection.js";
 import { protectedRoute } from "../middleware/protected.js";
 import {
   mobileSports,
+  mobileCompetitions,
   mobileClubs,
   mobileClubDetail,
   mobileClubFixtures,
@@ -16,6 +17,7 @@ import {
   mobileNewsArticle,
   mobileCompetitionSeasons,
   mobileFixture,
+  mobileFixtures,
   mobileNews,
   mobileSeasonFixtures,
   mobileSeason,
@@ -66,16 +68,52 @@ function filters(request: Request) {
   };
 }
 
+function parseListQueryValue(value: unknown): string[] {
+  if (!value) return [];
+  const values = Array.isArray(value) ? value : [value];
+  return [...new Set(values
+    .filter((entry): entry is string => typeof entry === "string")
+    .flatMap((entry) => entry.split(","))
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0))];
+}
+
 mobileRouter.get("/sports", (_request, response) => response.json({ data: mobileSports() }));
+mobileRouter.get("/competitions", (_request, response) => response.json({ data: mobileCompetitions() }));
 
 mobileRouter.get("/clubs", (request, response) => {
   try {
     response.json({ data: mobileClubs({
       ...(typeof request.query.sportId === "string" ? { sportId: request.query.sportId } : {}),
       ...(typeof request.query.countryId === "string" ? { countryId: request.query.countryId } : {}),
-      ...(typeof request.query.status === "string" ? { status: request.query.status } : {})
+      ...(typeof request.query.status === "string" ? { status: request.query.status } : {}),
+      ...(parseListQueryValue(request.query.teamIds ?? request.query.teamId).length
+        ? { teamIds: parseListQueryValue(request.query.teamIds ?? request.query.teamId) }
+        : {})
     }) });
   } catch { response.status(400).json({ error: "invalid_club_filter" }); }
+});
+
+mobileRouter.get("/fixtures", (request, response) => {
+  try {
+    const teamIds = parseListQueryValue(request.query.teamIds ?? request.query.teamId);
+    const competitionIds = parseListQueryValue(request.query.competitionIds ?? request.query.competitionId);
+    const sportIds = parseListQueryValue(request.query.sportIds ?? request.query.sportId);
+    response.json({ data: mobileFixtures({
+      mode: request.query.mode === "following" ? "following" : "all",
+      ...(typeof request.query.sportId === "string" ? { sportId: request.query.sportId } : {}),
+      ...(request.query.sportIds !== undefined ? { sportIds } : {}),
+      ...(competitionIds.length ? { competitionIds } : {}),
+      ...(teamIds.length ? { teamIds } : {}),
+      ...(typeof request.query.status === "string" ? { status: request.query.status } : {}),
+      ...(typeof request.query.from === "string" ? { from: request.query.from } : {}),
+      ...(typeof request.query.to === "string" ? { to: request.query.to } : {}),
+      ...(typeof request.query.limit === "string" ? { limit: Number(request.query.limit) } : {}),
+      ...(typeof request.query.offset === "string" ? { offset: Number(request.query.offset) } : {})
+    }) });
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : "invalid_mobile_fixture_request" });
+  }
 });
 
 mobileRouter.get("/clubs/:clubId", (request, response) => {
@@ -115,11 +153,16 @@ mobileRouter.get("/clubs/:clubId/live", (request, response) => {
 mobileRouter.get("/news", (request, response) => {
   try {
     const paging = parsePaging(request);
+    const teamIds = parseListQueryValue(request.query.teamIds ?? request.query.teamId);
+    const competitionIds = parseListQueryValue(request.query.competitionIds ?? request.query.competitionId);
+    const sportIds = parseListQueryValue(request.query.sportIds ?? request.query.sportId);
+    const mode = request.query.mode === "following" ? "following" : "all";
     response.json({ data: mobileNews({
       ...paging,
-      ...(typeof request.query.teamId === "string" ? { teamId: request.query.teamId } : {}),
-      ...(typeof request.query.competitionId === "string" ? { competitionId: request.query.competitionId } : {}),
-      ...(typeof request.query.sportId === "string" ? { sportId: request.query.sportId } : {}),
+      mode,
+      ...(teamIds.length === 1 ? { teamId: teamIds[0] } : teamIds.length ? { teamIds } : {}),
+      ...(competitionIds.length === 1 ? { competitionId: competitionIds[0] } : competitionIds.length ? { competitionIds } : {}),
+      ...(sportIds.length === 1 ? { sportId: sportIds[0] } : sportIds.length ? { sportIds } : {}),
       ...(typeof request.query.countryId === "string" ? { countryId: request.query.countryId } : {}),
       ...(typeof request.query.matchId === "string" ? { matchId: request.query.matchId } : {})
     }) });

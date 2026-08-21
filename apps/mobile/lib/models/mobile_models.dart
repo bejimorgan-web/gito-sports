@@ -150,6 +150,20 @@ class MobileNewsBodyBlock {
             enabled: json['enabled'] != false);
 }
 
+class MobileNewsCategory {
+  const MobileNewsCategory({required this.type, this.entityId, this.name});
+  final String type;
+  final String? entityId;
+  final String? name;
+
+  factory MobileNewsCategory.fromJson(Map<String, dynamic> json) =>
+      MobileNewsCategory(
+        type: '${json['type'] ?? json['categoryType'] ?? ''}',
+        entityId: json['entityId']?.toString() ?? json['entity_id']?.toString(),
+        name: json['name']?.toString(),
+      );
+}
+
 class MobileNewsArticle {
   const MobileNewsArticle(
       {required this.id,
@@ -160,8 +174,14 @@ class MobileNewsArticle {
       this.sourceName,
       this.sourceUrl,
       this.publishedAt,
-    this.imageUrl,
-    this.bodyBlocks = const []});
+      this.imageUrl,
+      this.bodyBlocks = const [],
+      this.categories = const [],
+      this.sport,
+      this.competition,
+      this.team,
+      this.country,
+      this.match});
   final String id;
   final String title;
   final String? summary;
@@ -171,7 +191,14 @@ class MobileNewsArticle {
   final String? sourceUrl;
   final String? publishedAt;
   final String? imageUrl;
-    final List<MobileNewsBodyBlock> bodyBlocks;
+  final List<MobileNewsBodyBlock> bodyBlocks;
+  final List<MobileNewsCategory> categories;
+  final MobileSport? sport;
+  final MobileCompetition? competition;
+  final MobileClub? team;
+  final MobileCountry? country;
+  final Map<String, dynamic>? match;
+
   factory MobileNewsArticle.fromJson(Map<String, dynamic> json) =>
       MobileNewsArticle(
           id: '${json['id'] ?? ''}',
@@ -190,7 +217,26 @@ class MobileNewsArticle {
           bodyBlocks: (json['bodyBlocks'] as List? ?? const [])
               .whereType<Map>()
               .map((item) => MobileNewsBodyBlock.fromJson(Map<String, dynamic>.from(item)))
-              .toList());
+              .toList(),
+          categories: (json['categories'] as List? ?? const [])
+              .whereType<Map>()
+              .map((item) => MobileNewsCategory.fromJson(Map<String, dynamic>.from(item)))
+              .toList(),
+          sport: json['sport'] is Map
+              ? MobileSport.fromJson(Map<String, dynamic>.from(json['sport'] as Map))
+              : null,
+          competition: json['competition'] is Map
+              ? MobileCompetition.fromJson(Map<String, dynamic>.from(json['competition'] as Map))
+              : null,
+          team: json['team'] is Map
+              ? MobileClub.fromJson(Map<String, dynamic>.from(json['team'] as Map))
+              : null,
+          country: json['country'] is Map
+              ? MobileCountry.fromJson(Map<String, dynamic>.from(json['country'] as Map))
+              : null,
+          match: json['match'] is Map
+              ? Map<String, dynamic>.from(json['match'] as Map)
+              : null);
 }
 
 class MobileFixture {

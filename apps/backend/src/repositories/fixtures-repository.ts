@@ -121,13 +121,16 @@ export function getCanonicalFixtureById(fixtureId: string) {
   };
 }
 
-export function listCanonicalFixtures(filters?: { sportId?: string; competitionId?: string; seasonId?: string; teamId?: string; status?: string; from?: string; to?: string; limit?: number; offset?: number }) {
+export function listCanonicalFixtures(filters?: { sportId?: string; sportIds?: string[]; competitionId?: string; competitionIds?: string[]; seasonId?: string; teamId?: string; teamIds?: string[]; status?: string; from?: string; to?: string; limit?: number; offset?: number }) {
   const conditions: string[] = [];
   const parameters: string[] = [];
-  if (filters?.sportId) { conditions.push("c.sport_id = ?"); parameters.push(filters.sportId); }
-  if (filters?.competitionId) { conditions.push("m.competition_id = ?"); parameters.push(filters.competitionId); }
+  const sportIds = [...new Set([...(filters?.sportIds ?? []), ...(filters?.sportId ? [filters.sportId] : [])])];
+  const competitionIds = [...new Set([...(filters?.competitionIds ?? []), ...(filters?.competitionId ? [filters.competitionId] : [])])];
+  const teamIds = [...new Set([...(filters?.teamIds ?? []), ...(filters?.teamId ? [filters.teamId] : [])])];
+  if (sportIds.length) { conditions.push(`c.sport_id IN (${sportIds.map(() => "?").join(",")})`); parameters.push(...sportIds); }
+  if (competitionIds.length) { conditions.push(`m.competition_id IN (${competitionIds.map(() => "?").join(",")})`); parameters.push(...competitionIds); }
   if (filters?.seasonId) { conditions.push("m.season_id = ?"); parameters.push(filters.seasonId); }
-  if (filters?.teamId) { conditions.push("(m.home_team_id = ? OR m.away_team_id = ?)"); parameters.push(filters.teamId, filters.teamId); }
+  if (teamIds.length) { conditions.push(`(m.home_team_id IN (${teamIds.map(() => "?").join(",")}) OR m.away_team_id IN (${teamIds.map(() => "?").join(",")}))`); parameters.push(...teamIds, ...teamIds); }
   if (filters?.status) { conditions.push("m.status = ?"); parameters.push(filters.status); }
   if (filters?.from) { conditions.push("m.starts_at >= ?"); parameters.push(filters.from); }
   if (filters?.to) { conditions.push("m.starts_at <= ?"); parameters.push(filters.to); }

@@ -173,13 +173,20 @@ newsRouter.post("/rss-sources/:id/fetch", protectedRoute, async (req, res) => {
   }
 });
 
-newsRouter.get("/articles", async (_req, res) => {
+newsRouter.get("/articles", async (req, res) => {
   try {
     const articles = newsService.listArticles({
-      status: (_req.query.status as any) ?? undefined,
-      search: (_req.query.search as string) ?? undefined,
-      limit: Number(_req.query.limit ?? 50),
-      offset: Number(_req.query.offset ?? 0)
+      status: (req.query.status as any) ?? undefined,
+      sportId: typeof req.query.sportId === "string" ? req.query.sportId : undefined,
+      competitionId: typeof req.query.competitionId === "string" ? req.query.competitionId : undefined,
+      teamId: typeof req.query.teamId === "string" ? req.query.teamId : undefined,
+      hostId: typeof req.query.hostId === "string" ? req.query.hostId : undefined,
+      countryId: typeof req.query.countryId === "string" ? req.query.countryId : undefined,
+      matchId: typeof req.query.matchId === "string" ? req.query.matchId : undefined,
+      sourceId: typeof req.query.sourceId === "string" ? req.query.sourceId : undefined,
+      search: (req.query.search as string) ?? undefined,
+      limit: Number(req.query.limit ?? 50),
+      offset: Number(req.query.offset ?? 0)
     });
     res.json(articles);
   } catch (error) {

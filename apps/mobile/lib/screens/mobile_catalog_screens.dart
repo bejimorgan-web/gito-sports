@@ -37,34 +37,147 @@ class MobileStateView<T> extends StatelessWidget {
       });
 }
 
-class ClubsScreen extends StatelessWidget {
+class _FollowPreferenceState {
+  static const String _sportsKey = 'gito_followed_sports';
+  static const String _competitionsKey = 'gito_followed_competitions';
+  static const String _teamsKey = 'gito_followed_teams';
+
+  static String _normalize(String? value) {
+    final text = (value ?? '').trim().toLowerCase();
+    if (text.isEmpty) return '';
+    return text
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .trim()
+        .replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  static Future<Set<String>> _readPrefs(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    final values = prefs.getStringList(key) ?? const <String>[];
+    return values
+        .map((value) => _normalize(value))
+        .where((value) => value.isNotEmpty)
+        .toSet();
+  }
+
+  static Future<Map<String, Set<String>>> load() async {
+    final sports = await _readPrefs(_sportsKey);
+    final competitions = await _readPrefs(_competitionsKey);
+    final teams = await _readPrefs(_teamsKey);
+    return {'sports': sports, 'competitions': competitions, 'teams': teams};
+  }
+
+  static bool matchesNews(
+      MobileNewsArticle article, Map<String, Set<String>> preferences) {
+    final sports = preferences['sports'] ?? const <String>{};
+    final competitions = preferences['competitions'] ?? const <String>{};
+    final teams = preferences['teams'] ?? const <String>{};
+
+    final searchable = <String>{
+      _normalize(article.title),
+      _normalize(article.summary),
+      _normalize(article.body),
+      _normalize(article.sport?.name),
+      _normalize(article.competition?.name),
+      _normalize(article.team?.name),
+      ...article.categories.map((category) =>
+          _normalize(category.name ?? category.entityId ?? category.type)),
+    };
+
+    if (sports.isNotEmpty &&
+        searchable.any((value) => sports.contains(value))) {
+      return true;
+    }
+    if (competitions.isNotEmpty &&
+        searchable.any((value) => competitions.contains(value))) {
+      return true;
+    }
+    if (teams.isNotEmpty && searchable.any((value) => teams.contains(value))) {
+      return true;
+    }
+    return false;
+  }
+
+  static bool matchesClub(
+      MobileClub club, Map<String, Set<String>> preferences) {
+    final sports = preferences['sports'] ?? const <String>{};
+    final teams = preferences['teams'] ?? const <String>{};
+    final values = <String>{
+      _normalize(club.name),
+      _normalize(club.shortName),
+      _normalize(club.slug),
+      _normalize(club.sport?.name),
+    };
+    return values
+        .any((value) => teams.contains(value) || sports.contains(value));
+  }
+}
+
+class ClubsScreen extends StatefulWidget {
   const ClubsScreen({super.key, this.api = const MobileApiService()});
   final MobileApiService api;
+
+  @override
+  State<ClubsScreen> createState() => _ClubsScreenState();
+}
+
+class _ClubsScreenState extends State<ClubsScreen> {
+  late Future<List<MobileClub>> _clubsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _clubsFuture = _loadClubs();
+  }
+
+  Future<List<MobileClub>> _loadClubs() async {
+    final following = await resolveMobileFollowingIds(widget.api);
+    return following.teams.isEmpty
+        ? widget.api.getClubs()
+        : widget.api.getClubs(teamIds: following.teams);
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('Clubs')),
-        body: MobileStateView<List<MobileClub>>(
-          future: api.getClubs(),
-          emptyText: 'No clubs available.',
-          builder: (context, clubs) => RefreshIndicator(
-            onRefresh: api.getClubs,
-            child: ListView.builder(
-              itemCount: clubs.length,
-              itemBuilder: (context, index) {
-                final club = clubs[index];
-                return ListTile(
-                  leading: _Logo(url: club.logoUrl, label: club.name),
-                  title: Text(club.name),
-                  subtitle: Text(
-                      '${club.country?.name ?? 'Unknown country'} · ${club.sport?.name ?? 'Sport'}'),
-                  onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                          builder: (_) =>
-                              ClubDetailScreen(clubId: club.id, api: api))),
-                );
+        body: FutureBuilder<List<MobileClub>>(
+          future: _clubsFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return Center(
+                  child: Text('Unable to load clubs.\n${snapshot.error}'));
+            }
+            final clubs = snapshot.data ?? const <MobileClub>[];
+            if (clubs.isEmpty) {
+              return const Center(child: Text('No clubs available.'));
+            }
+            return RefreshIndicator(
+              onRefresh: () async {
+                setState(() {
+                  _clubsFuture = _loadClubs();
+                });
               },
-            ),
-          ),
+              child: ListView.builder(
+                itemCount: clubs.length,
+                itemBuilder: (context, index) {
+                  final club = clubs[index];
+                  return ListTile(
+                    leading: _Logo(url: club.logoUrl, label: club.name),
+                    title: Text(club.name),
+                    subtitle: Text(
+                        '${club.country?.name ?? 'Unknown country'} · ${club.sport?.name ?? 'Sport'}'),
+                    onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                            builder: (_) => ClubDetailScreen(
+                                clubId: club.id, api: widget.api))),
+                  );
+                },
+              ),
+            );
+          },
         ),
       );
 }
@@ -90,7 +203,9 @@ class _ClubDetailScreenState extends State<ClubDetailScreen> {
 
   Future<void> _loadLiveFlag() async {
     final prefs = await SharedPreferences.getInstance();
-    final config = await RemoteConfigService(apiBaseUrl: widget.api.baseUrl, prefs: prefs).getNavigationConfig();
+    final config =
+        await RemoteConfigService(apiBaseUrl: widget.api.baseUrl, prefs: prefs)
+            .getNavigationConfig();
     if (mounted) {
       setState(() {
         liveEnabled = config.live;
@@ -159,19 +274,95 @@ class _ClubDetailScreenState extends State<ClubDetailScreen> {
           }));
 }
 
-class GlobalNewsScreen extends StatelessWidget {
+class GlobalNewsScreen extends StatefulWidget {
   const GlobalNewsScreen({super.key, this.api = const MobileApiService()});
   final MobileApiService api;
+
+  @override
+  State<GlobalNewsScreen> createState() => _GlobalNewsScreenState();
+}
+
+class _GlobalNewsScreenState extends State<GlobalNewsScreen> {
+  bool _followingMode = true;
+
+  Future<List<MobileNewsArticle>> _loadNews() async {
+    if (!_followingMode) {
+      return widget.api.getNews();
+    }
+
+    final preferences = await _FollowPreferenceState.load();
+    final followedSports = preferences['sports'] ?? const <String>{};
+    final followedCompetitions =
+        preferences['competitions'] ?? const <String>{};
+    final followedTeams = preferences['teams'] ?? const <String>{};
+    final catalogs = await Future.wait<dynamic>([
+      widget.api.getSports(),
+      widget.api.getCompetitions(),
+      widget.api.getClubs(),
+    ]);
+    final sports = (catalogs[0] as List<MobileSport>)
+        .where((sport) =>
+            followedSports
+                .contains(_FollowPreferenceState._normalize(sport.name)) ||
+            followedSports
+                .contains(_FollowPreferenceState._normalize(sport.slug)))
+        .map((sport) => sport.id)
+        .toList();
+    final competitions = (catalogs[1] as List<MobileCompetition>)
+        .where((competition) =>
+            followedCompetitions.contains(
+                _FollowPreferenceState._normalize(competition.name)) ||
+            followedCompetitions
+                .contains(_FollowPreferenceState._normalize(competition.slug)))
+        .map((competition) => competition.id)
+        .toList();
+    final teams = (catalogs[2] as List<MobileClub>)
+        .where((team) =>
+            followedTeams
+                .contains(_FollowPreferenceState._normalize(team.name)) ||
+            followedTeams
+                .contains(_FollowPreferenceState._normalize(team.shortName)) ||
+            followedTeams
+                .contains(_FollowPreferenceState._normalize(team.slug)))
+        .map((team) => team.id)
+        .toList();
+
+    return widget.api.getNews(
+      mode: 'following',
+      sportIds: sports,
+      competitionIds: competitions,
+      teamIds: teams,
+    );
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
-      appBar: AppBar(title: const Text('News')),
+      appBar: AppBar(
+        title: const Text('News'),
+        actions: [
+          SegmentedButton<bool>(
+            segments: const [
+              ButtonSegment(value: true, label: Text('Following')),
+              ButtonSegment(value: false, label: Text('All')),
+            ],
+            selected: {_followingMode},
+            onSelectionChanged: (selection) {
+              setState(() {
+                _followingMode = selection.first;
+              });
+            },
+          ),
+        ],
+      ),
       body: MobileStateView<List<MobileNewsArticle>>(
-          future: api.getNews(),
+          future: _loadNews(),
           emptyText: 'No news available.',
           builder: (context, articles) => RefreshIndicator(
-              onRefresh: api.getNews,
-              child: _NewsList(articles: articles, api: api))));
-      }
+              onRefresh: () async {
+                setState(() {});
+              },
+              child: _NewsList(articles: articles, api: widget.api))));
+}
 
 class NewsDetailScreen extends StatefulWidget {
   const NewsDetailScreen(
@@ -194,7 +385,8 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
     future = widget.api.getNewsArticle(widget.articleId);
   }
 
-  void retry() => setState(() => future = widget.api.getNewsArticle(widget.articleId));
+  void retry() =>
+      setState(() => future = widget.api.getNewsArticle(widget.articleId));
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -207,47 +399,47 @@ class _NewsDetailScreenState extends State<NewsDetailScreen> {
             }
             if (snapshot.hasError) {
               return Center(
-                  child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                    const Text('News article could not be loaded.'),
-                    const SizedBox(height: 12),
-                    FilledButton(onPressed: retry, child: const Text('Retry'))
-                  ]));
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Text('News article could not be loaded.'),
+                const SizedBox(height: 12),
+                FilledButton(onPressed: retry, child: const Text('Retry'))
+              ]));
             }
             final article = snapshot.data;
             if (article == null || article.title.isEmpty) {
-              return const Center(child: Text('News article could not be loaded.'));
+              return const Center(
+                  child: Text('News article could not be loaded.'));
             }
-            return ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  _NewsImage(url: article.imageUrl, height: 220),
-                  const SizedBox(height: 16),
-                  Text(article.title,
-                      style: Theme.of(context).textTheme.headlineSmall),
-                  const SizedBox(height: 8),
-                  Text('${article.sourceName ?? 'GiTO News'} · ${article.publishedAt ?? 'Date unavailable'}'),
-                  if (article.summary?.isNotEmpty == true) ...[
-                    const SizedBox(height: 16),
-                    Text(article.summary!,
-                        style: Theme.of(context).textTheme.titleMedium)
-                  ],
-                  if (article.bodyBlocks.isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    ...article.bodyBlocks.where((block) => block.enabled).map((block) => _NewsBodyBlockView(block: block)),
-                  ] else if (article.body?.isNotEmpty == true) ...[
-                    const SizedBox(height: 16),
-                    Text(article.body!, style: Theme.of(context).textTheme.bodyLarge)
-                  ] else ...[
-                    const SizedBox(height: 16),
-                    const Text('Article content is unavailable.')
-                  ]
-                ]);
+            return ListView(padding: const EdgeInsets.all(16), children: [
+              _NewsImage(url: article.imageUrl, height: 220),
+              const SizedBox(height: 16),
+              Text(article.title,
+                  style: Theme.of(context).textTheme.headlineSmall),
+              const SizedBox(height: 8),
+              Text(
+                  '${article.sourceName ?? 'GiTO News'} · ${article.publishedAt ?? 'Date unavailable'}'),
+              if (article.summary?.isNotEmpty == true) ...[
+                const SizedBox(height: 16),
+                Text(article.summary!,
+                    style: Theme.of(context).textTheme.titleMedium)
+              ],
+              if (article.bodyBlocks.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                ...article.bodyBlocks
+                    .where((block) => block.enabled)
+                    .map((block) => _NewsBodyBlockView(block: block)),
+              ] else if (article.body?.isNotEmpty == true) ...[
+                const SizedBox(height: 16),
+                Text(article.body!,
+                    style: Theme.of(context).textTheme.bodyLarge)
+              ] else ...[
+                const SizedBox(height: 16),
+                const Text('Article content is unavailable.')
+              ]
+            ]);
           },
         ),
       );
-
 }
 
 class _NewsBodyBlockView extends StatelessWidget {
@@ -257,29 +449,53 @@ class _NewsBodyBlockView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final caption = block.caption?.isNotEmpty == true
-        ? Padding(padding: const EdgeInsets.only(top: 6), child: Text(block.caption!, style: Theme.of(context).textTheme.bodySmall))
+        ? Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(block.caption!,
+                style: Theme.of(context).textTheme.bodySmall))
         : const SizedBox.shrink();
     if (block.type == 'paragraph') {
-      return Padding(padding: const EdgeInsets.only(bottom: 14), child: Text(block.text ?? '', style: Theme.of(context).textTheme.bodyLarge));
+      return Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: Text(block.text ?? '',
+              style: Theme.of(context).textTheme.bodyLarge));
     }
     if (block.type == 'image' && block.url?.isNotEmpty == true) {
-      return Padding(padding: const EdgeInsets.only(bottom: 14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(block.url!, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const _NewsInlineFallback(label: 'Image unavailable'))),
-        caption
-      ]));
+      return Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.network(block.url!,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) =>
+                        const _NewsInlineFallback(label: 'Image unavailable'))),
+            caption
+          ]));
     }
     if (block.type == 'video' && block.url?.isNotEmpty == true) {
-      return Padding(padding: const EdgeInsets.only(bottom: 14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const _NewsInlineFallback(label: 'Video available from source'),
-        SelectableText(block.url!),
-        caption
-      ]));
+      return Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const _NewsInlineFallback(label: 'Video available from source'),
+            SelectableText(block.url!),
+            caption
+          ]));
     }
     if (block.type == 'social' && block.url?.isNotEmpty == true) {
-      return Padding(padding: const EdgeInsets.only(bottom: 14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        ListTile(contentPadding: EdgeInsets.zero, leading: const Icon(Icons.public), title: Text('View on ${block.platform ?? 'social media'}'), subtitle: Text(block.url!)),
-        caption
-      ]));
+      return Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.public),
+                title: Text('View on ${block.platform ?? 'social media'}'),
+                subtitle: Text(block.url!)),
+            caption
+          ]));
     }
     return const _NewsInlineFallback(label: 'Media unavailable');
   }
@@ -289,7 +505,11 @@ class _NewsInlineFallback extends StatelessWidget {
   const _NewsInlineFallback({required this.label});
   final String label;
   @override
-  Widget build(BuildContext context) => Container(width: double.infinity, padding: const EdgeInsets.all(20), color: Theme.of(context).colorScheme.surfaceContainerHighest, child: Text(label));
+  Widget build(BuildContext context) => Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: Text(label));
 }
 
 class FixtureDetailScreen extends StatelessWidget {
@@ -331,11 +551,15 @@ class _NewsList extends StatelessWidget {
             clipBehavior: Clip.antiAlias,
             child: InkWell(
               onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                  builder: (_) => NewsDetailScreen(articleId: article.id, api: api))),
+                  builder: (_) =>
+                      NewsDetailScreen(articleId: article.id, api: api))),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _NewsImage(url: article.imageUrl, height: 180, width: double.infinity),
+                  _NewsImage(
+                      url: article.imageUrl,
+                      height: 180,
+                      width: double.infinity),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
                     child: Column(
@@ -381,7 +605,10 @@ class _NewsImage extends StatelessWidget {
         alignment: Alignment.center,
         child: const Icon(Icons.article_outlined));
     if (url == null || url!.isEmpty) return placeholder;
-    return Image.network(url!, height: height, width: width, fit: BoxFit.cover,
+    return Image.network(url!,
+        height: height,
+        width: width,
+        fit: BoxFit.cover,
         errorBuilder: (_, __, ___) => placeholder,
         loadingBuilder: (context, child, progress) =>
             progress == null ? child : placeholder);

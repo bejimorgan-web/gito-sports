@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../app_config.dart';
 import '../models/mobile_models.dart';
 
@@ -50,11 +52,23 @@ class MobileApiService {
           .whereType<Map>()
           .map((item) => MobileSport.fromJson(Map<String, dynamic>.from(item)))
           .toList();
-  Future<List<MobileClub>> getClubs() async =>
-      ((await _get('/mobile/clubs')) as List)
+  Future<List<MobileCompetition>> getCompetitions() async =>
+      ((await _get('/mobile/competitions')) as List)
           .whereType<Map>()
-          .map((item) => MobileClub.fromJson(Map<String, dynamic>.from(item)))
+          .map((item) =>
+              MobileCompetition.fromJson(Map<String, dynamic>.from(item)))
           .toList();
+  Future<List<MobileClub>> getClubs(
+      {List<String> teamIds = const <String>[]}) async {
+    final query = teamIds.isEmpty
+        ? ''
+        : '?teamIds=${Uri.encodeQueryComponent(teamIds.join(','))}';
+    return ((await _get('/mobile/clubs$query')) as List)
+        .whereType<Map>()
+        .map((item) => MobileClub.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+  }
+
   Future<MobileClubDetail> getClub(String clubId) async =>
       MobileClubDetail.fromJson(
           Map<String, dynamic>.from(await _get('/mobile/clubs/$clubId')));
@@ -71,16 +85,48 @@ class MobileApiService {
       String? competitionId,
       String? sportId,
       String? countryId,
-      String? matchId}) async {
+      String? matchId,
+      String? mode,
+      List<String> teamIds = const <String>[],
+      List<String> competitionIds = const <String>[],
+      List<String> sportIds = const <String>[]}) async {
     final query = <String, String>{
       if (teamId != null) 'teamId': teamId,
       if (competitionId != null) 'competitionId': competitionId,
       if (sportId != null) 'sportId': sportId,
       if (countryId != null) 'countryId': countryId,
-      if (matchId != null) 'matchId': matchId
+      if (matchId != null) 'matchId': matchId,
+      if (mode != null) 'mode': mode,
+      if (teamIds.isNotEmpty) 'teamIds': teamIds.join(','),
+      if (competitionIds.isNotEmpty) 'competitionIds': competitionIds.join(','),
+      if (sportIds.isNotEmpty) 'sportIds': sportIds.join(',')
     };
     return _news(
         '/mobile/news${query.isEmpty ? '' : '?${Uri(queryParameters: query).query}'}');
+  }
+
+  Future<List<MobileFixture>> getFixtures({
+    String? mode,
+    String? sportId,
+    List<String> teamIds = const <String>[],
+    List<String> competitionIds = const <String>[],
+    List<String> sportIds = const <String>[],
+    String? from,
+    String? to,
+    String? status,
+  }) async {
+    final query = <String, String>{
+      if (mode != null) 'mode': mode,
+      if (sportId != null) 'sportId': sportId,
+      if (teamIds.isNotEmpty) 'teamIds': teamIds.join(','),
+      if (competitionIds.isNotEmpty) 'competitionIds': competitionIds.join(','),
+      if (sportIds.isNotEmpty) 'sportIds': sportIds.join(','),
+      if (from != null) 'from': from,
+      if (to != null) 'to': to,
+      if (status != null) 'status': status,
+    };
+    return _fixtures(
+        '/mobile/fixtures${query.isEmpty ? '' : '?${Uri(queryParameters: query).query}'}');
   }
 
   Future<MobileNewsArticle> getNewsArticle(String articleId) async =>
@@ -125,4 +171,59 @@ class MobileApiService {
           .map(
               (item) => MobileFixture.fromJson(Map<String, dynamic>.from(item)))
           .toList();
+}
+
+class MobileFollowingIds {
+  const MobileFollowingIds(
+      {required this.sports, required this.competitions, required this.teams});
+  final List<String> sports;
+  final List<String> competitions;
+  final List<String> teams;
+}
+
+String _normalizeFollowingValue(String? value) => (value ?? '')
+    .trim()
+    .toLowerCase()
+    .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+    .trim()
+    .replaceAll(RegExp(r'\s+'), ' ');
+
+Future<MobileFollowingIds> resolveMobileFollowingIds(
+    MobileApiService api) async {
+  final prefs = await SharedPreferences.getInstance();
+  final followedSports =
+      (prefs.getStringList('gito_followed_sports') ?? const <String>[])
+          .map(_normalizeFollowingValue)
+          .toSet();
+  final followedCompetitions =
+      (prefs.getStringList('gito_followed_competitions') ?? const <String>[])
+          .map(_normalizeFollowingValue)
+          .toSet();
+  final followedTeams =
+      (prefs.getStringList('gito_followed_teams') ?? const <String>[])
+          .map(_normalizeFollowingValue)
+          .toSet();
+  final catalogs = await Future.wait<dynamic>(
+      [api.getSports(), api.getCompetitions(), api.getClubs()]);
+  final sports = (catalogs[0] as List<MobileSport>)
+      .where((item) =>
+          followedSports.contains(_normalizeFollowingValue(item.name)) ||
+          followedSports.contains(_normalizeFollowingValue(item.slug)))
+      .map((item) => item.id)
+      .toList();
+  final competitions = (catalogs[1] as List<MobileCompetition>)
+      .where((item) =>
+          followedCompetitions.contains(_normalizeFollowingValue(item.name)) ||
+          followedCompetitions.contains(_normalizeFollowingValue(item.slug)))
+      .map((item) => item.id)
+      .toList();
+  final teams = (catalogs[2] as List<MobileClub>)
+      .where((item) =>
+          followedTeams.contains(_normalizeFollowingValue(item.name)) ||
+          followedTeams.contains(_normalizeFollowingValue(item.shortName)) ||
+          followedTeams.contains(_normalizeFollowingValue(item.slug)))
+      .map((item) => item.id)
+      .toList();
+  return MobileFollowingIds(
+      sports: sports, competitions: competitions, teams: teams);
 }

@@ -4,6 +4,7 @@ import { getClubDetailById } from "../repositories/teams-repository.js";
 import { getCanonicalFixtureById, listCanonicalFixtures, listCanonicalFixturesForTeam } from "../repositories/fixtures-repository.js";
 import { NewsRepository } from "../repositories/news-repository.js";
 import { listSports } from "../repositories/sports-repository.js";
+import { listCompetitions } from "../repositories/competitions-repository.js";
 import { listSeasons, getSeasonById } from "../repositories/seasons-repository.js";
 
 export type MobileClub = Team & { sport: Pick<Sport, "id" | "name">; country: Pick<Country, "id" | "name"> | null };
@@ -80,7 +81,13 @@ export function mobileSports() {
   return listSports().filter((sport) => sport.status === "active").map((sport) => ({ id: sport.id, name: sport.name, slug: sport.slug, logoUrl: sport.logoUrl ?? null }));
 }
 
-export function mobileClubs(filters?: { sportId?: string; countryId?: string; status?: string }) {
+export function mobileCompetitions() {
+  return listCompetitions().filter((competition) => competition.status === "active").map((competition) => ({ id: competition.id, name: competition.name, slug: competition.slug, sportId: competition.sportId }));
+}
+
+export function mobileClubs(filters?: { sportId?: string; countryId?: string; status?: string; teamIds?: string[] }) {
+  const teamIds = uniqueIds(filters?.teamIds);
+  const teamClause = teamIds.length ? `AND t.id IN (${teamIds.map(() => "?").join(",")})` : "";
   const rows = getDatabase().prepare(`
     SELECT t.id, t.sport_id, t.country_id, t.name, t.short_name, t.slug, t.type, t.logo_url, t.status,
            sp.name AS sport_name, c.name AS country_name
@@ -91,9 +98,70 @@ export function mobileClubs(filters?: { sportId?: string; countryId?: string; st
       AND (? IS NULL OR t.sport_id = ?)
       AND (? IS NULL OR t.country_id = ?)
       AND (? IS NULL OR t.status = ?)
+      ${teamClause}
     ORDER BY t.name
-  `).all(filters?.sportId ?? null, filters?.sportId ?? null, filters?.countryId ?? null, filters?.countryId ?? null, filters?.status ?? null, filters?.status ?? null) as any[];
+  `).all(filters?.sportId ?? null, filters?.sportId ?? null, filters?.countryId ?? null, filters?.countryId ?? null, filters?.status ?? null, filters?.status ?? null, ...teamIds) as any[];
   return rows.map((row) => clubFromRow(row));
+}
+
+function uniqueIds(values?: string[]) {
+  return [...new Set((values ?? []).map((value) => value.trim()).filter(Boolean))];
+}
+
+function validateFixtureFilterIds(filters: { sportIds: string[]; competitionIds: string[]; teamIds: string[] }) {
+  const database = getDatabase();
+  for (const [table, ids] of [["sports", filters.sportIds], ["competitions", filters.competitionIds], ["teams", filters.teamIds]] as const) {
+    for (const id of ids) {
+      if (!database.prepare(`SELECT id FROM ${table} WHERE id = ? AND status = 'active'`).get(id)) {
+        throw new Error("invalid_fixture_filter_id");
+      }
+    }
+  }
+}
+
+export function mobileFixtures(filters?: {
+  mode?: "all" | "following";
+  sportId?: string;
+  sportIds?: string[];
+  competitionId?: string;
+  competitionIds?: string[];
+  teamId?: string;
+  teamIds?: string[];
+  status?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+  offset?: number;
+}) {
+  const selectedSportId = filters?.sportId?.trim() || undefined;
+  const followedSportIds = uniqueIds(filters?.sportIds);
+  const sportIds = uniqueIds([...(followedSportIds), ...(selectedSportId ? [selectedSportId] : [])]);
+  const competitionIds = uniqueIds([...(filters?.competitionIds ?? []), ...(filters?.competitionId ? [filters.competitionId] : [])]);
+  const teamIds = uniqueIds([...(filters?.teamIds ?? []), ...(filters?.teamId ? [filters.teamId] : [])]);
+  validateFixtureFilterIds({ sportIds, competitionIds, teamIds });
+
+  const common = { status: filters?.status, from: filters?.from, to: filters?.to, limit: 100, offset: 0 };
+  const following = filters?.mode === "following";
+  if (following && !sportIds.length && !competitionIds.length && !teamIds.length) return [];
+
+  const fixtureSets = following
+    ? [
+        ...followedSportIds
+          .filter((sportId) => !selectedSportId || sportId === selectedSportId)
+          .map((sportId) => listCanonicalFixtures({ ...common, sportId })),
+        ...competitionIds.map((competitionId) => listCanonicalFixtures({ ...common, sportId: selectedSportId, competitionId })),
+        ...teamIds.map((teamId) => listCanonicalFixtures({ ...common, sportId: selectedSportId, teamId }))
+      ]
+    : [listCanonicalFixtures({ ...common, sportId: selectedSportId, competitionIds, teamIds })];
+  const seen = new Set<string>();
+  const fixtures = fixtureSets.flat().filter((fixture): fixture is NonNullable<typeof fixture> => {
+    if (!fixture || seen.has(fixture.id)) return false;
+    seen.add(fixture.id);
+    return true;
+  });
+  const offset = Math.max(filters?.offset ?? 0, 0);
+  const limit = Math.min(Math.max(filters?.limit ?? 100, 1), 100);
+  return fixtures.slice(offset, offset + limit).map(mapMobileFixture);
 }
 
 export function mobileClubDetail(clubId: string) {
@@ -183,9 +251,87 @@ function toMobileNewsArticle(article: any, includeBody = false) {
   };
 }
 
-export function mobileNews(filters: { teamId?: string; competitionId?: string; sportId?: string; countryId?: string; matchId?: string; limit?: number; offset?: number }) {
+type MobileNewsFilterInput = {
+  mode?: "all" | "following";
+  teamId?: string;
+  competitionId?: string;
+  sportId?: string;
+  countryId?: string;
+  matchId?: string;
+  teamIds?: string[];
+  competitionIds?: string[];
+  sportIds?: string[];
+  limit?: number;
+  offset?: number;
+};
+
+function asUniqueList(values?: string[] | string): string[] {
+  const next = Array.isArray(values) ? values : values ? [values] : [];
+  return [...new Set(next.filter((value) => typeof value === "string" && value.trim().length > 0).map((value) => value.trim()))];
+}
+
+function dedupeMobileNewsArticles(items: any[]) {
+  const seen = new Set<string>();
+  const merged: any[] = [];
+  for (const item of items) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    merged.push(item);
+  }
+  return merged;
+}
+
+export function mobileNews(filters: MobileNewsFilterInput) {
+  const limit = filters.limit ?? 50;
+  const offset = filters.offset ?? 0;
+  const directTeamIds = asUniqueList(filters.teamIds ?? filters.teamId);
+  const directCompetitionIds = asUniqueList(filters.competitionIds ?? filters.competitionId);
+  const directSportIds = asUniqueList(filters.sportIds ?? filters.sportId);
+
+  const followingMode = filters.mode === "following";
+  if (followingMode && !(directTeamIds.length || directCompetitionIds.length || directSportIds.length)) {
+    return [];
+  }
+
+  if (followingMode) {
+    const queries = [] as Array<{ teamId?: string; competitionId?: string; sportId?: string }>;
+
+    for (const teamId of directTeamIds) {
+      queries.push({ teamId });
+    }
+    for (const competitionId of directCompetitionIds) {
+      queries.push({ competitionId });
+    }
+    for (const sportId of directSportIds) {
+      queries.push({ sportId });
+    }
+
+    if (queries.length === 0) {
+      return [];
+    }
+
+    const merged = dedupeMobileNewsArticles(
+      queries.flatMap((query) =>
+        new NewsRepository()
+          .listArticles({
+            status: "published",
+            teamId: query.teamId,
+            competitionId: query.competitionId,
+            sportId: query.sportId,
+            countryId: filters.countryId,
+            matchId: filters.matchId,
+            limit: limit,
+            offset: 0
+          })
+          .map((article) => toMobileNewsArticle(article))
+      )
+    );
+
+    return merged.slice(offset, offset + limit);
+  }
+
   return new NewsRepository()
-    .listArticles({ status: "published", teamId: filters.teamId, competitionId: filters.competitionId, sportId: filters.sportId, countryId: filters.countryId, matchId: filters.matchId, limit: filters.limit ?? 50, offset: filters.offset ?? 0 })
+    .listArticles({ status: "published", teamId: filters.teamId, competitionId: filters.competitionId, sportId: filters.sportId, countryId: filters.countryId, matchId: filters.matchId, limit, offset })
     .map((article) => toMobileNewsArticle(article));
 }
 

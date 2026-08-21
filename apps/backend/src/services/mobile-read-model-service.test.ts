@@ -17,6 +17,9 @@ const mobile = await import("./mobile-read-model-service.js");
 function seed() {
   const db = getDatabase();
   const now = new Date().toISOString();
+  for (const table of ["streams", "news_article_categories", "news_articles", "match_streams", "scheduling_matches", "matches", "competition_season_teams", "seasons", "competitions", "teams", "providers", "channels", "countries", "sports"]) {
+    db.prepare(`DELETE FROM ${table}`).run();
+  }
   db.prepare("INSERT INTO sports (id, name, slug, status, created_at, updated_at) VALUES (?, ?, ?, 'active', ?, ?)").run("sport-football", "Football", "football", now, now);
   db.prepare("INSERT INTO countries (id, name, iso2_code, iso3_code, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)").run("country-germany", "Germany", "DE", "DEU", now, now);
   db.prepare("INSERT INTO competitions (id, sport_id, country_id, name, slug, scope, competition_type, participant_type, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'domestic', 'league', 'clubs', 'active', ?, ?)").run("competition-bundesliga", "sport-football", "country-germany", "Bundesliga", "bundesliga", now, now);
@@ -63,6 +66,39 @@ test("mobile read model exposes stable club, fixture, News, season, and stream r
   assert.equal(mobile.mobileSeasonFixtures("season-2026")?.fixtures.length, 1);
   assert.equal(mobile.mobileSeasonTeams("season-2026")?.teams.length, 2);
   assert.equal(mobile.mobileFixture(fixture.id)?.score, null);
+
+  const dateWindow = { from: "2099-08-20T00:00:00.000Z", to: "2099-08-21T00:00:00.000Z" };
+  assert.equal(mobile.mobileFixtures({ mode: "all", sportId: "sport-football", ...dateWindow }).filter((item) => item.id === fixture.id).length, 1);
+  assert.equal(mobile.mobileFixtures({ mode: "following", sportId: "sport-football", teamIds: ["team-bayern"], ...dateWindow }).filter((item) => item.id === fixture.id).length, 1);
+  assert.equal(mobile.mobileFixtures({ mode: "following", sportId: "sport-football", competitionIds: ["competition-bundesliga"], ...dateWindow }).filter((item) => item.id === fixture.id).length, 1);
+  assert.equal(mobile.mobileFixtures({ mode: "following", sportId: "sport-football", sportIds: ["sport-football"], ...dateWindow }).filter((item) => item.id === fixture.id).length, 1);
+  assert.equal(mobile.mobileFixtures({ mode: "following", sportId: "sport-football", teamIds: ["team-bayern"], competitionIds: ["competition-bundesliga"], ...dateWindow }).filter((item) => item.id === fixture.id).length, 1);
+  assert.equal(mobile.mobileClubFixtures("team-bayern").filter((item) => item.id === fixture.id).length, 1);
+  assert.equal(mobile.mobileClubFixtures("team-dortmund").filter((item) => item.id === fixture.id).length, 1);
+
+  const byTeam = mobile.mobileNews({
+    mode: "following",
+    teamIds: ["team-bayern"],
+    competitionIds: [],
+    sportIds: []
+  });
+  const byCompetition = mobile.mobileNews({
+    mode: "following",
+    teamIds: [],
+    competitionIds: ["competition-bundesliga"],
+    sportIds: []
+  });
+  const mixed = mobile.mobileNews({
+    mode: "following",
+    teamIds: ["team-bayern"],
+    competitionIds: ["competition-bundesliga"],
+    sportIds: ["sport-football"]
+  });
+
+  assert.ok(byTeam.some((item) => item.id === article.id));
+  assert.ok(byCompetition.some((item) => item.id === article.id));
+  assert.equal(mixed.filter((item) => item.id === article.id).length, 1);
+  assert.equal(byTeam.filter((item) => item.id === article.id).length, 1);
 });
 
 test.after(() => {

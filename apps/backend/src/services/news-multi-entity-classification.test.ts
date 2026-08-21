@@ -10,11 +10,12 @@ function createDatabase() {
     CREATE TABLE sports (id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT, status TEXT NOT NULL, created_at TEXT, updated_at TEXT);
     CREATE TABLE countries (id TEXT PRIMARY KEY, name TEXT NOT NULL, iso2_code TEXT, iso3_code TEXT, status TEXT NOT NULL, created_at TEXT, updated_at TEXT);
     CREATE TABLE teams (id TEXT PRIMARY KEY, name TEXT NOT NULL, short_name TEXT, slug TEXT, sport_id TEXT, country_id TEXT, status TEXT NOT NULL, created_at TEXT, updated_at TEXT);
+    CREATE TABLE hosts (id TEXT PRIMARY KEY, sport_id TEXT NOT NULL, name TEXT NOT NULL, host_type TEXT NOT NULL, country_id TEXT, logo_url TEXT, status TEXT NOT NULL, created_at TEXT, updated_at TEXT);
     CREATE TABLE competitions (id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT, sport_id TEXT, country_id TEXT, status TEXT NOT NULL, created_at TEXT, updated_at TEXT);
     CREATE TABLE sport_countries (id TEXT PRIMARY KEY, sport_id TEXT, country_id TEXT);
     CREATE TABLE matches (id TEXT PRIMARY KEY, competition_id TEXT, season_id TEXT, home_team_id TEXT, away_team_id TEXT, starts_at TEXT, venue_name TEXT, status TEXT, created_at TEXT, updated_at TEXT);
     CREATE TABLE news_articles (id TEXT PRIMARY KEY, title TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, summary TEXT, body TEXT, status TEXT NOT NULL, sport_id TEXT, competition_id TEXT, team_id TEXT, country_id TEXT, match_id TEXT, source_id TEXT, source_name TEXT, source_url TEXT, external_id TEXT, author TEXT, categories_json TEXT, tags_json TEXT, content_availability TEXT, content_origin TEXT, fetched_body TEXT, fetched_at TEXT, fetch_status TEXT, fetch_error TEXT, created_by TEXT, published_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-    CREATE TABLE news_article_categories (id TEXT PRIMARY KEY, article_id TEXT NOT NULL, category_type TEXT NOT NULL, entity_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+    CREATE TABLE news_article_categories (id TEXT PRIMARY KEY, article_id TEXT NOT NULL, category_type TEXT NOT NULL CHECK (category_type IN ('sport', 'country', 'host', 'team', 'competition', 'match')), entity_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE TABLE news_article_media (id TEXT PRIMARY KEY, article_id TEXT, media_type TEXT, url TEXT, alt_text TEXT, sort_order INTEGER, created_at TEXT);
     CREATE TABLE news_article_links (id TEXT PRIMARY KEY, article_id TEXT, url TEXT, label TEXT, sort_order INTEGER, created_at TEXT);
     CREATE TABLE news_article_audit (id TEXT PRIMARY KEY, article_id TEXT, actor_id TEXT, action TEXT, note TEXT, created_at TEXT);
@@ -28,6 +29,7 @@ function createDatabase() {
   for (const [id, name, shortName] of [["team-bayern", "Bayern Munich", "Bayern"], ["team-dortmund", "Borussia Dortmund", "Dortmund"], ["team-leipzig", "RB Leipzig", "Leipzig"], ["team-leverkusen", "Bayer Leverkusen", "Leverkusen"]] as const) {
     db.prepare("INSERT INTO teams VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)").run(id, name, shortName, name.toLowerCase().replace(/[^a-z]+/g, "-"), "sport-football", "country-germany", now, now);
   }
+  db.prepare("INSERT INTO hosts VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)").run("host-uefa", "sport-football", "UEFA", "organization", null, null, now, now);
   for (const [id, name, slug] of [["competition-bundesliga", "Bundesliga", "bundesliga"], ["competition-champions", "UEFA Champions League", "champions-league"]]) {
     db.prepare("INSERT INTO competitions VALUES (?, ?, ?, ?, ?, 'active', ?, ?)").run(id, name, slug, "sport-football", "country-germany", now, now);
   }
@@ -98,4 +100,17 @@ test("published multi-team feeds use approved categories without duplicate artic
   assert.equal(repository.listArticles({ status: "published", teamId: "team-elche" }).some((item) => item.id === article.id), false);
   db.prepare("UPDATE news_article_categories SET classification_status = 'rejected' WHERE id = ?").run(barcelona.id);
   assert.equal(repository.listArticles({ status: "published", teamId: "team-barcelona" }).some((item) => item.id === article.id), false);
+});
+
+test("host categories are available through article relationships and host filters", () => {
+  const db = createDatabase();
+  const repository = new NewsRepository(db);
+  const article = repository.createArticle({ title: "UEFA conference preview", status: "published" });
+
+  repository.addManualCategory(article.id, "host", "host-uefa");
+
+  const articleById = repository.getArticleById(article.id)!;
+  assert.equal(articleById.host?.id, "host-uefa");
+  assert.equal(articleById.host?.name, "UEFA");
+  assert.equal(repository.listArticles({ status: "published", hostId: "host-uefa" }).some((item) => item.id === article.id), true);
 });
