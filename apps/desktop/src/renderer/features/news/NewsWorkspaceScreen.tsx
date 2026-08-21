@@ -17,7 +17,8 @@ import type {
   NewsSourceRightsAudit,
   NewsSourceType,
   Sport,
-  Team
+  Team,
+  Host
 } from "@gito/shared";
 
 import { apiClient } from "../../services/api-client";
@@ -235,6 +236,7 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
   const [countries, setCountries] = useState<Country[]>([]);
   const [competitions, setCompetitions] = useState<Competition[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
+  const [hosts, setHosts] = useState<Host[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
   const [competitionTeamIds, setCompetitionTeamIds] = useState<Record<string, string[]>>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -281,7 +283,7 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
   const loadData = async () => {
     try {
       setIsLoading(true);
-      const [articleData, sourceData, rssSourceData, generatedFeedData, sportData, countryData, competitionData, teamData, matchData] = await Promise.all([
+      const [articleData, sourceData, rssSourceData, generatedFeedData, sportData, countryData, competitionData, teamData, hostData, matchData] = await Promise.all([
         apiClient.listNewsArticles(),
         apiClient.listNewsSources(),
         apiClient.listNewsRssSources(accessToken),
@@ -290,6 +292,7 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
         apiClient.listCountries(),
         apiClient.listCompetitions(),
         apiClient.listTeams(),
+        apiClient.listHosts(),
         apiClient.listMatches()
       ] as const);
       setArticles(articleData);
@@ -300,6 +303,7 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
       setCountries(countryData);
       setCompetitions(competitionData);
       setTeams(teamData);
+      setHosts(hostData);
       setMatches(matchData as Match[]);
       setStatusMessage("News data loaded.");
     } catch (error) {
@@ -1260,6 +1264,7 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
                     team: teams.map((team) => ({ id: team.id, name: team.name })),
                     competition: competitions.map((competition) => ({ id: competition.id, name: competition.name })),
                     country: countries.map((country) => ({ id: country.id, name: country.name })),
+                    host: hosts.filter((host) => !selectedArticle.sportId || host.sportId === selectedArticle.sportId).map((host) => ({ id: host.id, name: `${host.name} (${host.type})` })),
                     sport: sports.map((sport) => ({ id: sport.id, name: sport.name })),
                     match: matches.map((match) => ({ id: match.id, name: `${match.homeTeamId} vs ${match.awayTeamId}` }))
                   }}
@@ -1500,6 +1505,7 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
                     competitions,
                     teams,
                     matches,
+                    hosts,
                     competitionTeamIds
                   });
 
@@ -1529,6 +1535,7 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
                             categories: sanitizeNewsCategoryRows(nextCategories, {
                               sports,
                               countries,
+                              hosts,
                               competitions,
                               teams,
                               matches,
@@ -1539,6 +1546,7 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
                       >
                         <option value="sport">Sport</option>
                         <option value="country">Country</option>
+                          <option value="host">Host</option>
                         <option value="team">Team</option>
                         <option value="competition">Competition</option>
                         <option value="match">Match</option>
@@ -1553,6 +1561,7 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
                             categories: sanitizeNewsCategoryRows(nextCategories, {
                               sports,
                               countries,
+                              hosts,
                               competitions,
                               teams,
                               matches,

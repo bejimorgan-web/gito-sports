@@ -183,6 +183,10 @@ function buildFetchMock(initialArticles: Array<any>, generatedCrawlerTier: "http
       return createJsonResponse([]);
     }
 
+    if (pathname === "/hosts" && method === "GET") {
+      return createJsonResponse([]);
+    }
+
     if (pathname === "/matches" && method === "GET") {
       return createJsonResponse([]);
     }

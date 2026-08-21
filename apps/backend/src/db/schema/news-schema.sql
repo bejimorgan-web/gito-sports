@@ -49,7 +49,7 @@ CREATE INDEX IF NOT EXISTS idx_news_articles_source_external_id ON news_articles
 CREATE TABLE IF NOT EXISTS news_article_categories (
   id TEXT PRIMARY KEY,
   article_id TEXT NOT NULL,
-  category_type TEXT NOT NULL CHECK (category_type IN ('sport', 'country', 'team', 'competition', 'match')),
+  category_type TEXT NOT NULL CHECK (category_type IN ('sport', 'country', 'host', 'team', 'competition', 'match')),
   entity_id TEXT NOT NULL,
   confidence INTEGER NOT NULL DEFAULT 100,
   reason TEXT,

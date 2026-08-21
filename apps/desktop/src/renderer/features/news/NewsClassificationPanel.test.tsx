@@ -26,9 +26,10 @@ test("classification panel separates approved relationships and suggestion actio
   const approvedIds: string[] = [];
   const rejectedIds: string[] = [];
   let rerunCount = 0;
-  const view = render(<NewsClassificationPanel classification={{ approved, suggestions }} labelFor={(item) => item.entityId} selectedIds={["suggested-dortmund"]} onToggle={() => undefined} onApprove={(id) => approvedIds.push(id)} onReject={(id) => rejectedIds.push(id)} onApproveSelected={() => approvedIds.push("bulk")} onRerun={() => { rerunCount += 1; }} />);
+  const view = render(<NewsClassificationPanel classification={{ approved, suggestions }} labelFor={(item) => item.entityId} selectedIds={["suggested-dortmund"]} onToggle={() => undefined} onApprove={(id) => approvedIds.push(id)} onReject={(id) => rejectedIds.push(id)} onApproveSelected={() => approvedIds.push("bulk")} onRerun={() => { rerunCount += 1; }} approvingCategoryId={null} entities={{ team: [], competition: [], country: [], host: [{ id: "host-fifa", name: "FIFA" }], sport: [], match: [] }} onAddManual={() => undefined} />);
   assert.ok(view.getByText("Approved"));
   assert.ok(view.getByText("Bayern Munich"));
+  assert.ok(view.getByText("+ Add host"));
   assert.ok(view.getByText("94%"));
   const suggestionElements = view.getAllByText((content) => content.includes("Exact normalized catalog name found in article text"));
   assert.equal(suggestionElements.length, 2);

@@ -504,6 +504,30 @@ function ensureNewsSchemaColumns(database: DatabaseSync) {
         database.exec(`ALTER TABLE news_article_categories ADD COLUMN ${columnName} ${columnType}`);
       }
     }
+    const categorySchema = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'news_article_categories'").get() as { sql?: string } | undefined;
+    if (categorySchema?.sql && !categorySchema.sql.includes("'host'")) {
+      database.exec(`
+        CREATE TABLE news_article_categories_new (
+          id TEXT PRIMARY KEY,
+          article_id TEXT NOT NULL,
+          category_type TEXT NOT NULL CHECK (category_type IN ('sport', 'country', 'host', 'team', 'competition', 'match')),
+          entity_id TEXT NOT NULL,
+          confidence INTEGER NOT NULL DEFAULT 100,
+          reason TEXT,
+          classification_source TEXT NOT NULL DEFAULT 'editorial',
+          classification_status TEXT NOT NULL DEFAULT 'approved' CHECK (classification_status IN ('suggested', 'approved', 'rejected')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (article_id) REFERENCES news_articles(id) ON DELETE CASCADE,
+          UNIQUE(article_id, category_type, entity_id)
+        );
+        INSERT OR IGNORE INTO news_article_categories_new
+          SELECT id, article_id, category_type, entity_id, confidence, reason, classification_source, classification_status, created_at, updated_at
+          FROM news_article_categories;
+        DROP TABLE news_article_categories;
+        ALTER TABLE news_article_categories_new RENAME TO news_article_categories;
+      `);
+    }
     database.exec("CREATE INDEX IF NOT EXISTS idx_news_article_categories_approved_entity ON news_article_categories(category_type, entity_id, classification_status);");
 
     if (!hasTable(database, "news_article_research_results")) {

@@ -968,7 +968,7 @@ export class NewsRepository {
   }
 
   addManualCategory(articleId: string, categoryType: NewsArticleCategory["categoryType"], entityId: string): NewsArticleCategory {
-    const validTables: Record<NewsArticleCategory["categoryType"], string> = { team: "teams", competition: "competitions", country: "countries", sport: "sports", match: "matches" };
+    const validTables: Record<NewsArticleCategory["categoryType"], string> = { team: "teams", competition: "competitions", country: "countries", host: "hosts", sport: "sports", match: "matches" };
     if (!this.db.prepare(`SELECT id FROM ${validTables[categoryType]} WHERE id = ?`).get(entityId)) throw new Error("classification_entity_not_found");
     const existing = this.db.prepare("SELECT id FROM news_article_categories WHERE article_id = ? AND category_type = ? AND entity_id = ?").get(articleId, categoryType, entityId) as { id: string } | undefined;
     if (existing) {

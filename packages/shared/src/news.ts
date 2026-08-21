@@ -16,7 +16,7 @@ export type NewsRightsAuditStatus = "unknown" | "full_republication_permitted" |
 export type NewsRightsEvidenceType = "rss_terms" | "terms_of_use" | "copyright_policy" | "republication_policy" | "syndication" | "licensing" | "other";
 export type NewsSourceRightsEvidenceOrigin = "publisher" | "feed_host" | "third_party";
 export type NewsSourcePublishingPermission = "full_article_republication" | "headline" | "summary_excerpt" | "original_link_reference" | "commercial_use" | "modification" | "attribution" | "image_reuse" | "video_reuse" | "ai_assisted_original_story";
-export type NewsArticleCategoryType = "sport" | "country" | "team" | "competition" | "match";
+export type NewsArticleCategoryType = "sport" | "country" | "host" | "team" | "competition" | "match";
 export type NewsClassificationStatus = "suggested" | "approved" | "rejected";
 export type NewsClassificationSource = "deterministic" | "editorial" | "ai" | "import";
 

@@ -1,4 +1,4 @@
-import type { Competition, Country, Match, Sport, Team } from "@gito/shared";
+import type { Competition, Country, Host, Match, Sport, Team } from "@gito/shared";
 import type { NewsArticleCategoryType } from "@gito/shared";
 
 export type NewsCategoryFormRow = {
@@ -12,6 +12,7 @@ export type NewsCategoryFilterInput = {
   rows: NewsCategoryFormRow[];
   sports: Pick<Sport, "id" | "name" | "countryIds">[];
   countries: Pick<Country, "id" | "name">[];
+  hosts: Pick<Host, "id" | "name" | "sportId" | "type">[];
   competitions: Pick<Competition, "id" | "name" | "sportId">[];
   teams: Pick<Team, "id" | "name" | "sportId" | "countryId">[];
   matches: Pick<Match, "id" | "competitionId" | "homeTeamId" | "awayTeamId">[];
@@ -51,6 +52,10 @@ export function getFilteredCategoryOptions(input: NewsCategoryFilterInput): Arra
         .filter((country) => sportCountryIds.has(country.id))
         .map((country) => ({ id: country.id, name: country.name }));
     }
+    case "host":
+      return input.hosts
+        .filter((host) => !selectedSportId || host.sportId === selectedSportId)
+        .map((host) => ({ id: host.id, name: host.name }));
     case "competition":
       return input.competitions
         .filter((competition) => !selectedSportId || competition.sportId === selectedSportId)
