@@ -187,31 +187,39 @@ export function assignChannelToMatch(input: MatchAssignmentRequest): MatchAssign
     );
   }
 
-  const sportId = ensureSport(input.sportName);
-  const competitionId = ensureCompetition(sportId, input.competitionName);
-  const homeTeamId = ensureTeam(sportId, input.homeTeamName);
-  const awayTeamId = ensureTeam(sportId, input.awayTeamName);
-  const matchId = crypto.randomUUID();
+  let competitionId: string;
+  let homeTeamId: string;
+  let awayTeamId: string;
+  let matchId: string;
+  if (input.canonicalFixtureId) {
+    const fixture = database.prepare("SELECT id, competition_id, home_team_id, away_team_id FROM matches WHERE id = ?").get(input.canonicalFixtureId) as { id: string; competition_id: string; home_team_id: string; away_team_id: string } | undefined;
+    if (!fixture) throw new WorkflowStateError("Canonical fixture was not found.", "fixture_not_found", 404);
+    competitionId = fixture.competition_id;
+    homeTeamId = fixture.home_team_id;
+    awayTeamId = fixture.away_team_id;
+    matchId = fixture.id;
+  } else {
+    const sportId = ensureSport(input.sportName);
+    competitionId = ensureCompetition(sportId, input.competitionName);
+    homeTeamId = ensureTeam(sportId, input.homeTeamName);
+    awayTeamId = ensureTeam(sportId, input.awayTeamName);
+    matchId = crypto.randomUUID();
+  }
   const streamId = crypto.randomUUID();
   const timestamp = now();
 
-  database
-    .prepare(
-      `INSERT INTO matches (
+  if (input.canonicalFixtureId) {
+    database.prepare("UPDATE matches SET status = 'assigned', updated_at = ? WHERE id = ?").run(timestamp, matchId);
+  } else {
+    database
+      .prepare(
+        `INSERT INTO matches (
         id, competition_id, home_team_id, away_team_id, starts_at, venue_name,
         status, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, 'assigned', ?, ?)`
-    )
-    .run(
-      matchId,
-      competitionId,
-      homeTeamId,
-      awayTeamId,
-      input.startsAt,
-      input.venueName ?? null,
-      timestamp,
-      timestamp
-    );
+      )
+      .run(matchId, competitionId, homeTeamId, awayTeamId, input.startsAt, input.venueName ?? null, timestamp, timestamp);
+  }
 
   database
     .prepare(

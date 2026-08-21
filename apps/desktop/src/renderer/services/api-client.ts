@@ -684,10 +684,17 @@ export const apiClient = {
   deleteMatch(matchId: string, accessToken: string) {
     return request<void>(`/matches/${matchId}`, { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } });
   },
-  listFixtures(opts?: { competitionId?: string; seasonId?: string }) {
+  listFixtures(opts?: { sportId?: string; competitionId?: string; seasonId?: string; teamId?: string; status?: string; from?: string; to?: string; limit?: number; offset?: number }) {
     const params = new URLSearchParams();
+    if (opts?.sportId) params.set('sportId', opts.sportId);
     if (opts?.competitionId) params.set('competitionId', opts.competitionId);
     if (opts?.seasonId) params.set('seasonId', opts.seasonId);
+    if (opts?.teamId) params.set('teamId', opts.teamId);
+    if (opts?.status) params.set('status', opts.status);
+    if (opts?.from) params.set('from', opts.from);
+    if (opts?.to) params.set('to', opts.to);
+    if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
+    if (opts?.offset !== undefined) params.set('offset', String(opts.offset));
     return request<any[]>(`/fixtures${params.toString() ? `?${params.toString()}` : ''}`);
   },
   listFixtureStreams(fixtureId: string) {

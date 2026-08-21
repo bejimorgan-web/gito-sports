@@ -56,6 +56,7 @@ export interface ProviderIngestionResult {
 }
 
 export interface MatchAssignmentRequest {
+  canonicalFixtureId?: EntityId;
   sportName: string;
   competitionName: string;
   homeTeamName: string;

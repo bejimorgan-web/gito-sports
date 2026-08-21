@@ -20,6 +20,7 @@ export function FixtureWorkspaceScreen({
   const [fixtures, setFixtures] = useState<any[]>([]);
   const [competitionId, setCompetitionId] = useState("");
   const [seasonId, setSeasonId] = useState("");
+  const [teamFilterId, setTeamFilterId] = useState("");
   const [homeTeamId, setHomeTeamId] = useState("");
   const [awayTeamId, setAwayTeamId] = useState("");
   const [kickoff, setKickoff] = useState("");
@@ -44,8 +45,8 @@ export function FixtureWorkspaceScreen({
   const loadFixtures = async () => {
     if (competitionId) {
       const filters = seasonId
-        ? { competitionId, seasonId }
-        : { competitionId };
+        ? { competitionId, seasonId, ...(teamFilterId ? { teamId: teamFilterId } : {}) }
+        : { competitionId, ...(teamFilterId ? { teamId: teamFilterId } : {}) };
       setFixtures(await apiClient.listFixtures(filters));
     }
   };
@@ -69,7 +70,7 @@ export function FixtureWorkspaceScreen({
   }, [competitionId]);
   useEffect(() => {
     void loadFixtures();
-  }, [competitionId, seasonId]);
+  }, [competitionId, seasonId, teamFilterId]);
 
   const createFixture = async () => {
     if (!kickoff.trim()) {
@@ -314,6 +315,15 @@ export function FixtureWorkspaceScreen({
                 <option key={club.id} value={club.id}>
                   {club.name}
                 </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Club filter
+            <select value={teamFilterId} onChange={(event) => setTeamFilterId(event.target.value)}>
+              <option value="">All clubs</option>
+              {clubs.map((club) => (
+                <option key={club.id} value={club.id}>{club.name}</option>
               ))}
             </select>
           </label>

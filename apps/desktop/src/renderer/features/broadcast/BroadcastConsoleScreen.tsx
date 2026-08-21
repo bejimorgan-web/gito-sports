@@ -307,6 +307,8 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
   const [selectedCompetitionId, setSelectedCompetitionId] = useState<string>("");
   const [selectedHomeTeamId, setSelectedHomeTeamId] = useState<string>("");
   const [selectedAwayTeamId, setSelectedAwayTeamId] = useState<string>("");
+  const [canonicalFixtures, setCanonicalFixtures] = useState<any[]>([]);
+  const [selectedCanonicalFixtureId, setSelectedCanonicalFixtureId] = useState("");
   const [startsAt, setStartsAt] = useState(new Date().toISOString().slice(0, 16));
   const [status, setStatus] = useState("Console ready");
   const [sports, setSports] = useState<Sport[]>([]);
@@ -570,6 +572,27 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
     }
   }, [selectedAwayTeam, selectedSportId]);
 
+  useEffect(() => {
+    if (!selectedCompetitionId) {
+      setCanonicalFixtures([]);
+      setSelectedCanonicalFixtureId("");
+      return;
+    }
+    void apiClient.listFixtures({ competitionId: selectedCompetitionId, limit: 100 }).then(setCanonicalFixtures).catch(() => setCanonicalFixtures([]));
+  }, [selectedCompetitionId]);
+
+  const selectedCanonicalFixture = useMemo(
+    () => canonicalFixtures.find((fixture) => fixture.id === selectedCanonicalFixtureId),
+    [canonicalFixtures, selectedCanonicalFixtureId]
+  );
+
+  useEffect(() => {
+    if (!selectedCanonicalFixture) return;
+    setSelectedHomeTeamId(selectedCanonicalFixture.homeTeamId);
+    setSelectedAwayTeamId(selectedCanonicalFixture.awayTeamId);
+    setStartsAt(new Date(selectedCanonicalFixture.startsAt).toISOString().slice(0, 16));
+  }, [selectedCanonicalFixture]);
+
   const filteredCompetitions = useMemo(
     () => (selectedSportId ? competitions.filter((competition) => competition.sportId === selectedSportId) : competitions),
     [competitions, selectedSportId]
@@ -794,6 +817,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
     setStatus("Assigning match stream...");
     try {
       await onAssignMatch({
+        ...(selectedCanonicalFixtureId ? { canonicalFixtureId: selectedCanonicalFixtureId } : {}),
         sportName: selectedSport?.name ?? "Unknown",
         competitionName: selectedCompetition.name,
         homeTeamName: selectedHomeTeam.name,
@@ -805,7 +829,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
     } catch {
       setStatus("Assignment was not confirmed. Check backend connection and try again.");
     }
-  }, [selectedChannel, canAssign, selectedCompetition, selectedHomeTeam, selectedAwayTeam, selectedSport, startsAt, onAssignMatch]);
+  }, [selectedChannel, canAssign, selectedCanonicalFixtureId, selectedCompetition, selectedHomeTeam, selectedAwayTeam, selectedSport, startsAt, onAssignMatch]);
 
   const handleApprove = useCallback(async (stream: Stream) => {
     setStatus("Approving stream...");
@@ -1167,6 +1191,20 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
                     {selectedSport ? (
                       <small>{filteredCompetitions.length} competition{filteredCompetitions.length === 1 ? "" : "s"} for {selectedSport.name}</small>
                     ) : null}
+                  </label>
+
+                  <label className="dropdown-label">
+                    <span>Canonical Season Fixture (optional)</span>
+                    <select value={selectedCanonicalFixtureId} onChange={(e) => setSelectedCanonicalFixtureId(e.target.value)} disabled={!selectedCompetitionId}>
+                      <option value="">No canonical fixture</option>
+                      {canonicalFixtures.map((fixture) => (
+                        <option key={fixture.id} value={fixture.id}>
+                          {fixture.homeTeam?.name} vs {fixture.awayTeam?.name} · {new Date(fixture.startsAt).toLocaleString()} · {fixture.season?.name ?? "Season unavailable"} · {fixture.status}
+                        </option>
+                      ))}
+                    </select>
+                    {!selectedCompetitionId ? <small>Select a competition to load canonical fixtures.</small> : null}
+                    {selectedCanonicalFixtureId ? <button type="button" className="secondary" onClick={() => setSelectedCanonicalFixtureId("")}>Clear fixture</button> : null}
                   </label>
 
                   <label className="dropdown-label">

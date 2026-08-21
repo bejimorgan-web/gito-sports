@@ -7,8 +7,15 @@ export const fixturesRouter = Router();
 
 fixturesRouter.get("/", (request, response) => {
   response.json({ data: listCanonicalFixtures({
+    sportId: typeof request.query.sportId === "string" ? request.query.sportId : undefined,
     competitionId: typeof request.query.competitionId === "string" ? request.query.competitionId : undefined,
-    seasonId: typeof request.query.seasonId === "string" ? request.query.seasonId : undefined
+    seasonId: typeof request.query.seasonId === "string" ? request.query.seasonId : undefined,
+    teamId: typeof request.query.teamId === "string" ? request.query.teamId : undefined,
+    status: typeof request.query.status === "string" ? request.query.status : undefined,
+    from: typeof request.query.from === "string" ? request.query.from : undefined,
+    to: typeof request.query.to === "string" ? request.query.to : undefined,
+    limit: typeof request.query.limit === "string" ? Number(request.query.limit) : undefined,
+    offset: typeof request.query.offset === "string" ? Number(request.query.offset) : undefined
   }) });
 });
 

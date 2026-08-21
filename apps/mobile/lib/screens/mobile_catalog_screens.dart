@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/mobile_models.dart';
 import '../services/mobile_api_service.dart';
+import '../services/remote_config_service.dart';
 
 class MobileStateView<T> extends StatelessWidget {
   const MobileStateView(
@@ -78,6 +80,27 @@ class ClubDetailScreen extends StatefulWidget {
 
 class _ClubDetailScreenState extends State<ClubDetailScreen> {
   int tab = 0;
+  bool liveEnabled = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLiveFlag();
+  }
+
+  Future<void> _loadLiveFlag() async {
+    final prefs = await SharedPreferences.getInstance();
+    final config = await RemoteConfigService(apiBaseUrl: widget.api.baseUrl, prefs: prefs).getNavigationConfig();
+    if (mounted) {
+      setState(() {
+        liveEnabled = config.live;
+        if (!liveEnabled && tab == 3) {
+          tab = 1;
+        }
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
       appBar: AppBar(title: Text(widget.clubId)),
@@ -91,6 +114,10 @@ class _ClubDetailScreenState extends State<ClubDetailScreen> {
               widget.api.getClubResults(widget.clubId),
               widget.api.getClubLive(widget.clubId)
             ];
+            final tabs = <String>['News', 'Fixtures', 'Results'];
+            if (liveEnabled) {
+              tabs.add('Live');
+            }
             return Column(children: [
               ListTile(
                   leading:
@@ -101,7 +128,7 @@ class _ClubDetailScreenState extends State<ClubDetailScreen> {
               SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
-                      children: ['News', 'Fixtures', 'Results', 'Live']
+                      children: tabs
                           .asMap()
                           .entries
                           .map((entry) => Padding(
@@ -118,7 +145,7 @@ class _ClubDetailScreenState extends State<ClubDetailScreen> {
                       future: futures[tab],
                       emptyText: tab == 0
                           ? 'No news available for this club.'
-                          : tab == 3
+                          : tab == 3 && liveEnabled
                               ? 'No live match right now.'
                               : 'No fixtures scheduled.',
                       builder: (context, value) => tab == 0

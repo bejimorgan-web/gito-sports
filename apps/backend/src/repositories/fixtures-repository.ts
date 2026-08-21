@@ -121,13 +121,20 @@ export function getCanonicalFixtureById(fixtureId: string) {
   };
 }
 
-export function listCanonicalFixtures(filters?: { competitionId?: string; seasonId?: string }) {
+export function listCanonicalFixtures(filters?: { sportId?: string; competitionId?: string; seasonId?: string; teamId?: string; status?: string; from?: string; to?: string; limit?: number; offset?: number }) {
   const conditions: string[] = [];
   const parameters: string[] = [];
+  if (filters?.sportId) { conditions.push("c.sport_id = ?"); parameters.push(filters.sportId); }
   if (filters?.competitionId) { conditions.push("m.competition_id = ?"); parameters.push(filters.competitionId); }
   if (filters?.seasonId) { conditions.push("m.season_id = ?"); parameters.push(filters.seasonId); }
+  if (filters?.teamId) { conditions.push("(m.home_team_id = ? OR m.away_team_id = ?)"); parameters.push(filters.teamId, filters.teamId); }
+  if (filters?.status) { conditions.push("m.status = ?"); parameters.push(filters.status); }
+  if (filters?.from) { conditions.push("m.starts_at >= ?"); parameters.push(filters.from); }
+  if (filters?.to) { conditions.push("m.starts_at <= ?"); parameters.push(filters.to); }
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-  const rows = getDatabase().prepare(`SELECT m.id FROM matches m ${where} ORDER BY m.starts_at ASC`).all(...parameters) as Array<{ id: string }>;
+  const limit = Math.min(Math.max(filters?.limit ?? 100, 1), 100);
+  const offset = Math.max(filters?.offset ?? 0, 0);
+  const rows = getDatabase().prepare(`SELECT m.id FROM matches m JOIN competitions c ON c.id = m.competition_id ${where} ORDER BY m.starts_at ASC LIMIT ? OFFSET ?`).all(...parameters, limit, offset) as Array<{ id: string }>;
   return rows.map((row) => getCanonicalFixtureById(row.id));
 }
 
