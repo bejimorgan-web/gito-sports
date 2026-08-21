@@ -67,6 +67,7 @@ export function IptvManagementScreen({
   const [operation, setOperation] = useState<IptvOperation>();
   const [providerAction, setProviderAction] = useState<"idle" | "validating" | "saving">("idle");
   const [statusChangingProviderId, setStatusChangingProviderId] = useState<string | null>(null);
+  const [deletingProviderId, setDeletingProviderId] = useState<string | null>(null);
   const [channelSearch, setChannelSearch] = useState("");
   const [channelCategory, setChannelCategory] = useState("");
   const [channelProviderFilter, setChannelProviderFilter] = useState("");
@@ -269,11 +270,12 @@ export function IptvManagementScreen({
   };
 
   const handleDeleteProvider = async (providerId: string) => {
-    if (!onDeleteProvider) return;
+    if (!onDeleteProvider || deletingProviderId) return;
 
     if (!window.confirm("Delete provider and its channels?")) return;
 
     setStatusMessage("Deleting provider...");
+    setDeletingProviderId(providerId);
 
     try {
       await onDeleteProvider(providerId);
@@ -283,6 +285,8 @@ export function IptvManagementScreen({
       }
     } catch (error) {
       setStatusMessage(getFriendlyErrorMessage(error) || "Delete failed.");
+    } finally {
+      setDeletingProviderId(null);
     }
   };
 
@@ -330,6 +334,7 @@ export function IptvManagementScreen({
           onCreateProvider={handleCreateOrUpdateProvider}
           onUpdateProvider={handleCreateOrUpdateProvider}
           onDeleteProvider={handleDeleteProvider}
+          deletingProviderId={deletingProviderId}
           onSetProviderStatus={handleSetProviderStatus}
           onTestProviderById={onTestProviderById}
           onValidateProvider={handleTestConnection}

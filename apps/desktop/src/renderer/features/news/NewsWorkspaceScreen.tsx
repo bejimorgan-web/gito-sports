@@ -265,6 +265,8 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
   const [approvingClassificationId, setApprovingClassificationId] = useState<string | null>(null);
   const [approvingMultipleClassifications, setApprovingMultipleClassifications] = useState(false);
   const [savingArticleStatus, setSavingArticleStatus] = useState<NewsArticleStatus | null>(null);
+  const [deletingArticleId, setDeletingArticleId] = useState<string | null>(null);
+  const [deletingArticles, setDeletingArticles] = useState(false);
   const [researchSourceArticleId, setResearchSourceArticleId] = useState<string | null>(null);
   const [researchResult, setResearchResult] = useState<NewsResearchResult | null>(null);
   const [researchLoading, setResearchLoading] = useState(false);
@@ -725,10 +727,12 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
   };
 
   const handleDeleteArticle = async (articleId: string) => {
-    if (!window.confirm("Delete this article?")) {
+    if (deletingArticleId || deletingArticles || !window.confirm("Delete this article?")) {
       return;
     }
 
+    setDeletingArticleId(articleId);
+    setStatusMessage("Deleting…");
     try {
       await apiClient.deleteNewsArticle(articleId, accessToken);
       setStatusMessage("Article deleted.");
@@ -749,11 +753,13 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to delete article.";
       setStatusMessage(message);
+    } finally {
+      setDeletingArticleId(null);
     }
   };
 
   const handleBulkDeleteArticles = async () => {
-    if (!selectedArticleIds.length) {
+    if (!selectedArticleIds.length || deletingArticleId || deletingArticles) {
       setStatusMessage("Select one or more articles before bulk deleting.");
       return;
     }
@@ -763,6 +769,8 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
     }
 
     try {
+      setDeletingArticles(true);
+      setStatusMessage("Deleting…");
       const result = await apiClient.bulkDeleteNewsArticles(selectedArticleIds, accessToken);
       setStatusMessage(`${result.deletedCount} article(s) deleted.`);
       if (shouldClearEditingArticleAfterDelete(editingArticleId, selectedArticleIds)) {
@@ -782,6 +790,8 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to delete selected articles.";
       setStatusMessage(message);
+    } finally {
+      setDeletingArticles(false);
     }
   };
 
@@ -1150,8 +1160,8 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
               <button type="button" onClick={() => setSelectedArticleIds([])}>
                 Clear selection
               </button>
-              <button type="button" onClick={() => void handleBulkDeleteArticles()} disabled={!selectedArticleIds.length}>
-                Delete selected
+              <button type="button" onClick={() => void handleBulkDeleteArticles()} disabled={!selectedArticleIds.length || deletingArticles || deletingArticleId !== null}>
+                {deletingArticles ? "Deleting…" : "Delete selected"}
               </button>
               <span>{selectedArticleIds.length} article{selectedArticleIds.length === 1 ? "" : "s"} selected</span>
             </div>
@@ -1368,8 +1378,8 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
                   <button type="button" onClick={() => void handleArchiveArticle(selectedArticle.id)}>
                     Archive
                   </button>
-                  <button type="button" onClick={() => void handleDeleteArticle(selectedArticle.id)}>
-                    Delete
+                  <button type="button" onClick={() => void handleDeleteArticle(selectedArticle.id)} disabled={deletingArticleId !== null || deletingArticles}>
+                    {deletingArticleId === selectedArticle.id ? "Deleting…" : "Delete"}
                   </button>
                 </div>
               </div>

@@ -26,6 +26,7 @@ export function LiveMatchApprovalScreen({
 }: LiveMatchApprovalScreenProps) {
   const FALLBACK_LOGO = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="100%" height="100%" fill="%23081018"/></svg>';
   const [reassignChannel, setReassignChannel] = useState<Record<string, string>>({});
+  const [deletingStreamId, setDeletingStreamId] = useState<string | null>(null);
   const selectableChannels = channels;
   const canApprove = assignment?.stream.status === "assigned" || assignment?.stream.status === "testing";
   const canPublish = assignment?.match.status === "approved" && assignment.stream.status === "approved";
@@ -157,13 +158,16 @@ export function LiveMatchApprovalScreen({
                   <button
                     type="button"
                     className="secondary"
+                    disabled={deletingStreamId !== null}
                     onClick={() => {
                       if (window.confirm(`Remove published stream from feed for "${liveMatch.channel.name}"?`)) {
-                        void onDelete(liveMatch.stream.id);
+                        if (deletingStreamId) return;
+                        setDeletingStreamId(liveMatch.stream.id);
+                        void onDelete(liveMatch.stream.id).finally(() => setDeletingStreamId(null));
                       }
                     }}
                   >
-                    Remove
+                    {deletingStreamId === liveMatch.stream.id ? "Deleting…" : "Remove"}
                   </button>
                 </div>
               </div>

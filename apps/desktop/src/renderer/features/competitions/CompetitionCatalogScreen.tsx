@@ -26,6 +26,7 @@ export function CompetitionCatalogScreen({ accessToken }: { accessToken: string 
   const [logoUrl, setLogoUrl] = useState("");
   const [status, setStatus] = useState("Ready");
   const [isLogoUploading, setIsLogoUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const selectedSport = sports.find((sport) => sport.id === sportId);
   const filteredHosts = selectedSport ? hosts.filter((host) => host.sportId === selectedSport.id) : [];
@@ -119,10 +120,12 @@ export function CompetitionCatalogScreen({ accessToken }: { accessToken: string 
   };
 
   const deleteSelectedCompetition = async () => {
-    if (!selectedCompetition) {
+    if (!selectedCompetition || deletingId) {
       return;
     }
 
+    setDeletingId(selectedCompetition.id);
+    setStatus("Deleting…");
     try {
       await apiClient.deleteCompetition(selectedCompetition.id, accessToken);
       setStatus("Competition deleted.");
@@ -130,14 +133,18 @@ export function CompetitionCatalogScreen({ accessToken }: { accessToken: string 
       resetForm();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Delete failed.");
+    } finally {
+      setDeletingId(null);
     }
   };
 
   const deleteCompetitionRow = async (competition: Competition) => {
-    if (!window.confirm(`Delete competition "${competition.name}"?`)) {
+    if (deletingId || !window.confirm(`Delete competition "${competition.name}"?`)) {
       return;
     }
 
+    setDeletingId(competition.id);
+    setStatus("Deleting…");
     try {
       await apiClient.deleteCompetition(competition.id, accessToken);
       setStatus("Competition deleted.");
@@ -147,6 +154,8 @@ export function CompetitionCatalogScreen({ accessToken }: { accessToken: string 
       }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Delete failed.");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -218,8 +227,8 @@ export function CompetitionCatalogScreen({ accessToken }: { accessToken: string 
         <div className="button-row">
           <button type="button" onClick={saveCompetition} disabled={isLogoUploading}>{selectedCompetition ? "Update Competition" : "Create Competition"}</button>
           {selectedCompetition ? (
-            <button type="button" className="secondary" onClick={deleteSelectedCompetition}>
-              Delete Competition
+            <button type="button" className="secondary" onClick={deleteSelectedCompetition} disabled={Boolean(deletingId)}>
+              {deletingId ? "Deleting…" : "Delete Competition"}
             </button>
           ) : null}
           <button type="button" className="secondary" onClick={resetForm}>
@@ -261,8 +270,8 @@ export function CompetitionCatalogScreen({ accessToken }: { accessToken: string 
                     <button type="button" onClick={() => selectCompetition(competition)}>
                       Edit
                     </button>
-                    <button type="button" className="secondary" onClick={() => deleteCompetitionRow(competition)}>
-                      Delete
+                    <button type="button" className="secondary" onClick={() => deleteCompetitionRow(competition)} disabled={Boolean(deletingId)}>
+                      {deletingId === competition.id ? "Deleting…" : "Delete"}
                     </button>
                   </td>
                 </tr>

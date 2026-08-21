@@ -13,6 +13,7 @@ export function CountriesManagementScreen({ accessToken }: { accessToken: string
   const [logoUrl, setLogoUrl] = useState("");
   const [status, setStatus] = useState("Ready");
   const [isLogoUploading, setIsLogoUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadCountries = async () => {
     try {
@@ -87,10 +88,12 @@ export function CountriesManagementScreen({ accessToken }: { accessToken: string
   };
 
   const deleteSelectedCountry = async () => {
-    if (!selectedCountry) {
+    if (!selectedCountry || deletingId) {
       return;
     }
 
+    setDeletingId(selectedCountry.id);
+    setStatus("Deleting…");
     try {
       await apiClient.deleteCountry(selectedCountry.id, accessToken);
       setStatus("Country deleted.");
@@ -98,14 +101,18 @@ export function CountriesManagementScreen({ accessToken }: { accessToken: string
       resetForm();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Delete failed.");
+    } finally {
+      setDeletingId(null);
     }
   };
 
   const deleteCountryRow = async (country: Country) => {
-    if (!window.confirm(`Delete country "${country.name}"?`)) {
+    if (deletingId || !window.confirm(`Delete country "${country.name}"?`)) {
       return;
     }
 
+    setDeletingId(country.id);
+    setStatus("Deleting…");
     try {
       await apiClient.deleteCountry(country.id, accessToken);
       setStatus("Country deleted.");
@@ -115,6 +122,8 @@ export function CountriesManagementScreen({ accessToken }: { accessToken: string
       }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Delete failed.");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -146,8 +155,8 @@ export function CountriesManagementScreen({ accessToken }: { accessToken: string
         <div className="button-row">
           <button type="button" onClick={saveCountry} disabled={isLogoUploading}>{selectedCountry ? "Update Country" : "Create Country"}</button>
           {selectedCountry ? (
-            <button type="button" className="secondary" onClick={deleteSelectedCountry}>
-              Delete Country
+            <button type="button" className="secondary" onClick={deleteSelectedCountry} disabled={Boolean(deletingId)}>
+              {deletingId ? "Deleting…" : "Delete Country"}
             </button>
           ) : null}
           <button type="button" className="secondary" onClick={resetForm}>
@@ -183,8 +192,8 @@ export function CountriesManagementScreen({ accessToken }: { accessToken: string
                     <button type="button" onClick={() => selectCountry(country)}>
                       Edit
                     </button>
-                    <button type="button" className="secondary" onClick={() => deleteCountryRow(country)}>
-                      Delete
+                    <button type="button" className="secondary" onClick={() => deleteCountryRow(country)} disabled={Boolean(deletingId)}>
+                      {deletingId === country.id ? "Deleting…" : "Delete"}
                     </button>
                   </td>
                 </tr>

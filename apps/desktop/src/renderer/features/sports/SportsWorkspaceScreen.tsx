@@ -79,6 +79,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
   const [viewMode, setViewMode] = useState<"legacy" | "catalog">("legacy");
   const [modalContext, setModalContext] = useState<WorkspaceModal | null>(null);
   const [deleteContext, setDeleteContext] = useState<DeleteContext | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const isCatalogView = viewMode === "catalog";
 
   type ToastItem = { id: string; message: string; type?: "success" | "error" | "info" };
@@ -97,7 +98,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
   const [sportCountryIds, setSportCountryIds] = useState<string[]>([]);
 
   const [hostName, setHostName] = useState("");
-  const [hostType, setHostType] = useState<HostType>("organization");
+  const [hostType, setHostType] = useState<HostType>("country");
   const [hostCountryId, setHostCountryId] = useState("");
   const [hostLogoUrl, setHostLogoUrl] = useState("");
   const [editingHostId, setEditingHostId] = useState<string | null>(null);
@@ -184,7 +185,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
     setSportLogoUrl("");
     setSportCountryIds([]);
     setHostName("");
-    setHostType("organization");
+    setHostType("country");
     setHostCountryId("");
     setHostLogoUrl("");
     setEditingHostId(null);
@@ -231,7 +232,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
       openModal({ kind: "host", action: "edit" });
     } else {
       setHostName("");
-      setHostType("organization");
+      setHostType("country");
       setHostCountryId("");
       setHostLogoUrl("");
       setEditingHostId(null);
@@ -296,10 +297,12 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
   };
 
   const executeDelete = async () => {
-    if (!deleteContext) {
+    if (!deleteContext || isDeleting) {
       return;
     }
 
+    setIsDeleting(true);
+    setStatus("Deleting…");
     try {
       switch (deleteContext.kind) {
         case "sport":
@@ -322,6 +325,8 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
       await loadData();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Delete failed.");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -847,7 +852,14 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
               </label>
               <label>
                 Host Type
-                <select value={hostType} onChange={(event) => setHostType(event.target.value as HostType)}>
+                <select
+                  value={hostType}
+                  onChange={(event) => {
+                    const nextType = event.target.value as HostType;
+                    setHostType(nextType);
+                    if (nextType !== "country") setHostCountryId("");
+                  }}
+                >
                   {hostTypes.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
                 </select>
               </label>
@@ -949,8 +961,8 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
               <button type="button" className="secondary" onClick={() => setDeleteContext(null)}>
                 Cancel
               </button>
-              <button type="button" onClick={executeDelete}>
-                Delete
+              <button type="button" onClick={executeDelete} disabled={isDeleting}>
+                {isDeleting ? "Deleting…" : "Delete"}
               </button>
             </div>
           }

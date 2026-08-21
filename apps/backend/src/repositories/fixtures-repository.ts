@@ -127,3 +127,20 @@ export function listCanonicalFixtures(filters?: { competitionId?: string; season
   const rows = getDatabase().prepare(`SELECT m.id FROM matches m ${where} ORDER BY m.starts_at ASC`).all(...parameters) as Array<{ id: string }>;
   return rows.map((row) => getCanonicalFixtureById(row.id));
 }
+
+export function deleteCanonicalFixture(fixtureId: string): boolean {
+  const database = getDatabase();
+  if (!database.prepare("SELECT id FROM matches WHERE id = ?").get(fixtureId)) return false;
+  const streamUsage = database.prepare("SELECT COUNT(*) AS count FROM streams WHERE match_id = ?").get(fixtureId) as { count: number };
+  if (streamUsage.count > 0) throw Object.assign(new Error("fixture_in_use"), { count: streamUsage.count });
+
+  database.exec("BEGIN TRANSACTION;");
+  try {
+    const result = database.prepare("DELETE FROM matches WHERE id = ?").run(fixtureId);
+    database.exec("COMMIT;");
+    return result.changes > 0;
+  } catch (error) {
+    database.exec("ROLLBACK;");
+    throw error;
+  }
+}

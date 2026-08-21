@@ -10,7 +10,7 @@ process.env.DATABASE_PATH = databasePath;
 process.env.AUTO_RESTORE_BACKUP = "false";
 
 const { getDatabase } = await import("../db/connection.js");
-const { createCanonicalFixture, findEquivalentCanonicalFixtures } = await import("./fixtures-repository.js");
+const { createCanonicalFixture, deleteCanonicalFixture, findEquivalentCanonicalFixtures, getCanonicalFixtureById } = await import("./fixtures-repository.js");
 const { createSeason } = await import("./seasons-repository.js");
 const { createSeasonTeamMembership } = await import("./competition-season-teams-repository.js");
 
@@ -37,6 +37,9 @@ test("canonical fixture setup requires season membership and never touches legac
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM scheduling_matches").get().count, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM match_streams").get().count, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM matches").get().count, 1);
+  assert.equal(deleteCanonicalFixture(fixture!.id), true);
+  assert.equal(getCanonicalFixtureById(fixture!.id), undefined);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM matches").get().count, 0);
 });
 
 test.after(() => {

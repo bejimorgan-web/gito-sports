@@ -16,6 +16,7 @@ import {
   updateMatchStreamAssignment
 } from "../repositories/match-streams-repository.js";
 import streamResolutionService from "../services/stream-resolution-service.js";
+import { protectedRoute } from "../middleware/protected.js";
 
 export const matchesRouter = Router();
 
@@ -236,8 +237,8 @@ matchesRouter.put("/:matchId", (request, response) => {
   response.json({ data: updated });
 });
 
-matchesRouter.delete("/:matchId", (request, response) => {
-  const ok = MatchService.deleteMatch(request.params.matchId);
+matchesRouter.delete("/:matchId", protectedRoute, (request, response) => {
+  const ok = MatchService.deleteMatch(String(request.params.matchId ?? ""));
 
   if (!ok) {
     response.status(404).json({ error: "match_not_found" });

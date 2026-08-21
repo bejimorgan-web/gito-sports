@@ -21,6 +21,7 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
   const [logoUrl, setLogoUrl] = useState("");
   const [status, setStatus] = useState("Ready");
   const [isLogoUploading, setIsLogoUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const selectedSport = sports.find((sport) => sport.id === sportId);
   const filteredCountries = selectedSport?.countryIds?.length
@@ -121,10 +122,12 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
   };
 
   const deleteSelectedTeam = async () => {
-    if (!selectedTeam) {
+    if (!selectedTeam || deletingId) {
       return;
     }
 
+    setDeletingId(selectedTeam.id);
+    setStatus("Deleting…");
     try {
       await apiClient.deleteTeam(selectedTeam.id, accessToken);
       setStatus("Team deleted.");
@@ -132,14 +135,18 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
       resetForm();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Delete failed.");
+    } finally {
+      setDeletingId(null);
     }
   };
 
   const deleteTeamRow = async (team: Team) => {
-    if (!window.confirm(`Delete team "${team.name}"?`)) {
+    if (deletingId || !window.confirm(`Delete team "${team.name}"?`)) {
       return;
     }
 
+    setDeletingId(team.id);
+    setStatus("Deleting…");
     try {
       await apiClient.deleteTeam(team.id, accessToken);
       setStatus("Team deleted.");
@@ -149,6 +156,8 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
       }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Delete failed.");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -214,8 +223,8 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
         <div className="button-row">
           <button type="button" onClick={saveTeam} disabled={isLogoUploading}>{selectedTeam ? "Update Team" : "Create Team"}</button>
           {selectedTeam ? (
-            <button type="button" className="secondary" onClick={deleteSelectedTeam}>
-              Delete Team
+            <button type="button" className="secondary" onClick={deleteSelectedTeam} disabled={Boolean(deletingId)}>
+              {deletingId ? "Deleting…" : "Delete Team"}
             </button>
           ) : null}
           <button type="button" className="secondary" onClick={resetForm}>
@@ -253,8 +262,8 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
                     <button type="button" onClick={() => selectTeam(team)}>
                       Edit
                     </button>
-                    <button type="button" className="secondary" onClick={() => deleteTeamRow(team)}>
-                      Delete
+                    <button type="button" className="secondary" onClick={() => deleteTeamRow(team)} disabled={Boolean(deletingId)}>
+                      {deletingId === team.id ? "Deleting…" : "Delete"}
                     </button>
                   </td>
                 </tr>

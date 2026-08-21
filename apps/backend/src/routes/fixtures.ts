@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { createCanonicalFixture, getCanonicalFixtureById, listCanonicalFixtures, updateCanonicalFixture } from "../repositories/fixtures-repository.js";
+import { createCanonicalFixture, deleteCanonicalFixture, getCanonicalFixtureById, listCanonicalFixtures, updateCanonicalFixture } from "../repositories/fixtures-repository.js";
 import { protectedRoute } from "../middleware/protected.js";
 import { createCanonicalStream, deleteCanonicalStream, listStreams, updateCanonicalStream } from "../repositories/streams-repository.js";
 
@@ -60,4 +60,17 @@ fixturesRouter.delete("/:fixtureId/streams/:streamId", protectedRoute, (request,
     if (!deleteCanonicalStream(String(request.params.fixtureId ?? ""), String(request.params.streamId ?? ""))) { response.status(404).json({ error: "stream_not_found" }); return; }
     response.status(204).send();
   } catch (error) { response.status(404).json({ error: error instanceof Error ? error.message : String(error) }); }
+});
+
+fixturesRouter.delete("/:fixtureId", protectedRoute, (request, response) => {
+  try {
+    if (!deleteCanonicalFixture(String(request.params.fixtureId ?? ""))) {
+      response.status(404).json({ error: "fixture_not_found" });
+      return;
+    }
+    response.status(204).send();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    response.status(message === "fixture_in_use" ? 409 : 400).json({ error: message, message });
+  }
 });

@@ -191,7 +191,8 @@ export interface CreateCountryRequest {
 export interface CreateHostRequest {
   sportId: EntityId;
   name: string;
-  type: HostType;
+  type?: HostType;
+  hostType?: HostType;
   countryId?: EntityId;
   logoUrl?: string;
 }
@@ -199,6 +200,7 @@ export interface CreateHostRequest {
 export interface UpdateHostRequest {
   name?: string;
   type?: HostType;
+  hostType?: HostType;
   countryId?: EntityId | null;
   logoUrl?: string | null;
   status?: EntityStatus;

@@ -16,6 +16,7 @@ export function SportsManagementScreen({ accessToken }: SportsManagementScreenPr
   const [logoUrl, setLogoUrl] = useState("");
   const [status, setStatus] = useState("Ready");
   const [isLogoUploading, setIsLogoUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadSports = async () => {
     try {
@@ -86,10 +87,12 @@ export function SportsManagementScreen({ accessToken }: SportsManagementScreenPr
   };
 
   const deleteSelectedSport = async () => {
-    if (!selectedSport) {
+    if (!selectedSport || deletingId) {
       return;
     }
 
+    setDeletingId(selectedSport.id);
+    setStatus("Deleting…");
     try {
       await apiClient.deleteSport(selectedSport.id, accessToken);
       setStatus("Sport deleted.");
@@ -97,14 +100,18 @@ export function SportsManagementScreen({ accessToken }: SportsManagementScreenPr
       resetForm();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Delete failed.");
+    } finally {
+      setDeletingId(null);
     }
   };
 
   const deleteSportRow = async (sport: Sport) => {
-    if (!window.confirm(`Delete sport "${sport.name}"?`)) {
+    if (deletingId || !window.confirm(`Delete sport "${sport.name}"?`)) {
       return;
     }
 
+    setDeletingId(sport.id);
+    setStatus("Deleting…");
     try {
       await apiClient.deleteSport(sport.id, accessToken);
       setStatus("Sport deleted.");
@@ -114,6 +121,8 @@ export function SportsManagementScreen({ accessToken }: SportsManagementScreenPr
       }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Delete failed.");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -169,8 +178,8 @@ export function SportsManagementScreen({ accessToken }: SportsManagementScreenPr
             {selectedSport ? "Update Sport" : "Create Sport"}
           </button>
           {selectedSport ? (
-            <button type="button" className="secondary" onClick={deleteSelectedSport}>
-              Delete Sport
+            <button type="button" className="secondary" onClick={deleteSelectedSport} disabled={Boolean(deletingId)}>
+              {deletingId ? "Deleting…" : "Delete Sport"}
             </button>
           ) : null}
           <button type="button" className="secondary" onClick={resetForm}>
@@ -206,8 +215,8 @@ export function SportsManagementScreen({ accessToken }: SportsManagementScreenPr
                     <button type="button" onClick={() => selectSport(sport)}>
                       Edit
                     </button>
-                    <button type="button" className="secondary" onClick={() => deleteSportRow(sport)}>
-                      Delete
+                    <button type="button" className="secondary" onClick={() => deleteSportRow(sport)} disabled={Boolean(deletingId)}>
+                      {deletingId === sport.id ? "Deleting…" : "Delete"}
                     </button>
                   </td>
                 </tr>

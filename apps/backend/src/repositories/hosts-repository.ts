@@ -75,7 +75,8 @@ export function getHostById(hostId: string): Host | undefined {
 export function createHost(input: CreateHostRequest): Host {
   const database = getDatabase();
   const name = input.name.trim();
-  validateHostInput(database, input.sportId, name, input.type, input.countryId);
+  const type = input.type ?? input.hostType;
+  validateHostInput(database, input.sportId, name, type as HostType, input.countryId);
   const duplicate = database.prepare("SELECT id FROM hosts WHERE sport_id = ? AND lower(name) = lower(?)").get(input.sportId, name);
   if (duplicate) throw new Error("host_duplicate");
 
@@ -83,7 +84,7 @@ export function createHost(input: CreateHostRequest): Host {
   const timestamp = now();
   database.prepare(
     "INSERT INTO hosts (id, sport_id, name, host_type, country_id, logo_url, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)"
-  ).run(id, input.sportId, name, input.type, input.countryId ?? null, input.logoUrl ?? null, timestamp, timestamp);
+  ).run(id, input.sportId, name, type, input.countryId ?? null, input.logoUrl ?? null, timestamp, timestamp);
   return getHost(id)!;
 }
 
@@ -95,8 +96,10 @@ export function updateHost(hostId: string, input: UpdateHostRequest): Host | und
   if (!existing) return undefined;
 
   const name = input.name?.trim() || existing.name;
-  const type = input.type ?? existing.host_type;
-  const countryId = input.countryId !== undefined ? input.countryId : existing.country_id;
+  const type = input.type ?? input.hostType ?? existing.host_type;
+  const countryId = type === "country"
+    ? input.countryId !== undefined ? input.countryId : existing.country_id
+    : null;
   validateHostInput(database, existing.sport_id, name, type, countryId);
   const duplicate = database.prepare("SELECT id FROM hosts WHERE sport_id = ? AND lower(name) = lower(?) AND id != ?").get(existing.sport_id, name, hostId);
   if (duplicate) throw new Error("host_duplicate");
@@ -110,8 +113,9 @@ export function updateHost(hostId: string, input: UpdateHostRequest): Host | und
 export function deleteHost(hostId: string): boolean {
   const database = getDatabase();
   if (!getHost(hostId)) return false;
-  if (database.prepare("SELECT id FROM competitions WHERE host_id = ? LIMIT 1").get(hostId)) {
-    throw new Error("host_in_use");
+  const usage = database.prepare("SELECT COUNT(*) AS count FROM competitions WHERE host_id = ?").get(hostId) as { count: number };
+  if (usage.count > 0) {
+    throw Object.assign(new Error("host_in_use"), { count: usage.count });
   }
   return database.prepare("DELETE FROM hosts WHERE id = ?").run(hostId).changes > 0;
 }

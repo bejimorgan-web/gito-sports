@@ -37,6 +37,7 @@ interface IptvProvidersScreenProps {
   onValidateProvider?: () => Promise<void>;
   providerAction?: "idle" | "validating" | "saving";
   statusChangingProviderId?: string | null;
+  deletingProviderId?: string | null;
 }
 
 export function IptvProvidersScreen({
@@ -62,7 +63,8 @@ export function IptvProvidersScreen({
   onTestProviderById,
   onValidateProvider,
   providerAction = "idle",
-  statusChangingProviderId = null
+  statusChangingProviderId = null,
+  deletingProviderId = null
 }: IptvProvidersScreenProps) {
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
   const activeProviders = useMemo(() => providers.filter((provider) => provider.status !== "inactive"), [providers]);
@@ -224,8 +226,8 @@ export function IptvProvidersScreen({
                     >
                       {statusChangingProviderId === provider.id ? (isActive ? "Deactivating…" : "Activating…") : (isActive ? "Deactivate" : "Activate")}
                     </button>
-                    <button type="button" onClick={() => onDeleteProvider(provider.id)}>
-                      Delete
+                    <button type="button" onClick={() => onDeleteProvider(provider.id)} disabled={Boolean(deletingProviderId)}>
+                      {deletingProviderId === provider.id ? "Deleting…" : "Delete"}
                     </button>
                   </div>
                 </article>

@@ -681,8 +681,8 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
-  deleteMatch(matchId: string) {
-    return request<void>(`/matches/${matchId}`, { method: 'DELETE' });
+  deleteMatch(matchId: string, accessToken: string) {
+    return request<void>(`/matches/${matchId}`, { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } });
   },
   listFixtures(opts?: { competitionId?: string; seasonId?: string }) {
     const params = new URLSearchParams();
@@ -710,6 +710,9 @@ export const apiClient = {
   },
   updateFixture(fixtureId: string, input: any, accessToken: string) {
     return request<any>(`/fixtures/${fixtureId}`, { method: 'PUT', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
+  },
+  deleteFixture(fixtureId: string, accessToken: string) {
+    return request<void>(`/fixtures/${fixtureId}`, { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } });
   },
   assignStream(input: MatchAssignmentRequest) {
     return request<MatchAssignmentResult>("/matches/assign-stream", {

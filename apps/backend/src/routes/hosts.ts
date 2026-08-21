@@ -55,6 +55,10 @@ hostsRouter.delete("/:hostId", protectedRoute, (request, response) => {
     response.status(204).send();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    response.status(message === "host_in_use" ? 409 : 400).json({ error: message, message });
+    const count = Number((error as { count?: number }).count ?? 0);
+    const friendlyMessage = message === "host_in_use"
+      ? `This host cannot be deleted because ${count || "existing"} competition${count === 1 ? " uses" : "s use"} it.`
+      : message;
+    response.status(message === "host_in_use" ? 409 : 400).json({ error: message, message: friendlyMessage });
   }
 });
