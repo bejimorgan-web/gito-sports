@@ -66,17 +66,21 @@ export function FixtureWorkspaceScreen({
   }, [competitionId, seasonId]);
 
   const createFixture = async () => {
-    const startsAt = localDateTimeToUtc(kickoffDate, kickoffTime);
-    if (
-      !competitionId ||
-      !seasonId ||
-      !homeTeamId ||
-      !awayTeamId ||
-      !startsAt
-    ) {
-      setStatus(
-        "Competition, season, clubs, and kickoff date/time are required.",
-      );
+    if (!kickoffDate) {
+      setStatus("Choose a kickoff date.");
+      return;
+    }
+    if (!kickoffTime) {
+      setStatus("Choose a kickoff time.");
+      return;
+    }
+    const startsAt = localDateTimeToUtc(kickoffDate, kickoffTime, timeZone);
+    if (!startsAt) {
+      setStatus("Kickoff time could not be interpreted for the selected timezone.");
+      return;
+    }
+    if (!competitionId || !seasonId || !homeTeamId || !awayTeamId) {
+      setStatus("Competition, season, home club, and away club are required.");
       return;
     }
     if (homeTeamId === awayTeamId) {
