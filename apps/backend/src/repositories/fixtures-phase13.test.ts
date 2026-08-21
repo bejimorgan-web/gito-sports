@@ -10,7 +10,7 @@ process.env.DATABASE_PATH = databasePath;
 process.env.AUTO_RESTORE_BACKUP = "false";
 
 const { getDatabase } = await import("../db/connection.js");
-const { createCanonicalFixture, deleteCanonicalFixture, findEquivalentCanonicalFixtures, getCanonicalFixtureById } = await import("./fixtures-repository.js");
+const { createCanonicalFixture, deleteCanonicalFixture, findEquivalentCanonicalFixtures, getCanonicalFixtureById, updateCanonicalFixture } = await import("./fixtures-repository.js");
 const { createSeason } = await import("./seasons-repository.js");
 const { createSeasonTeamMembership } = await import("./competition-season-teams-repository.js");
 
@@ -39,8 +39,14 @@ test("canonical fixture setup requires season membership and never touches legac
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM scheduling_matches").get().count, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM match_streams").get().count, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM matches").get().count, 1);
-  assert.equal(deleteCanonicalFixture(fixture!.id), true);
-  assert.equal(getCanonicalFixtureById(fixture!.id), undefined);
+  const fixtureId = fixture!.id;
+  const rescheduled = updateCanonicalFixture(fixtureId, { startsAt: "2026-09-22T18:00:00.000Z", venueName: "New Arena", status: "postponed" });
+  assert.equal(rescheduled?.id, fixtureId);
+  assert.equal(rescheduled?.startsAt, "2026-09-22T18:00:00.000Z");
+  assert.equal(rescheduled?.status, "postponed");
+  assert.equal(db.prepare("SELECT id FROM matches WHERE id = ?").get(fixtureId).id, fixtureId);
+  assert.equal(deleteCanonicalFixture(fixtureId), true);
+  assert.equal(getCanonicalFixtureById(fixtureId), undefined);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM matches").get().count, 0);
 });
 
