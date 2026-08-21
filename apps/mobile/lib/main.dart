@@ -1770,6 +1770,9 @@ class _CanonicalFixtureCard extends StatelessWidget {
                         .textTheme
                         .titleMedium
                         ?.copyWith(fontWeight: FontWeight.w800)),
+                if (fixture.liveStatusLabel.isNotEmpty)
+                  Text(fixture.liveStatusLabel,
+                      style: Theme.of(context).textTheme.labelSmall),
                 Text(fixture.awayClub.name, textAlign: TextAlign.center),
               ])),
               _FixtureLogo(url: fixture.awayClub.logoUrl),

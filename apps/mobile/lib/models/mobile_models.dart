@@ -131,23 +131,31 @@ class MobileStream {
 }
 
 class MobileNewsBodyBlock {
-    const MobileNewsBodyBlock({required this.type, this.text, this.url, this.platform, this.altText, this.caption, this.enabled = true});
-    final String type;
-    final String? text;
-    final String? url;
-    final String? platform;
-    final String? altText;
-    final String? caption;
-    final bool enabled;
+  const MobileNewsBodyBlock(
+      {required this.type,
+      this.text,
+      this.url,
+      this.platform,
+      this.altText,
+      this.caption,
+      this.enabled = true});
+  final String type;
+  final String? text;
+  final String? url;
+  final String? platform;
+  final String? altText;
+  final String? caption;
+  final bool enabled;
 
-    factory MobileNewsBodyBlock.fromJson(Map<String, dynamic> json) => MobileNewsBodyBlock(
-            type: '${json['type'] ?? 'paragraph'}',
-            text: json['text']?.toString(),
-            url: json['url']?.toString(),
-            platform: json['platform']?.toString(),
-            altText: json['altText']?.toString(),
-            caption: json['caption']?.toString(),
-            enabled: json['enabled'] != false);
+  factory MobileNewsBodyBlock.fromJson(Map<String, dynamic> json) =>
+      MobileNewsBodyBlock(
+          type: '${json['type'] ?? 'paragraph'}',
+          text: json['text']?.toString(),
+          url: json['url']?.toString(),
+          platform: json['platform']?.toString(),
+          altText: json['altText']?.toString(),
+          caption: json['caption']?.toString(),
+          enabled: json['enabled'] != false);
 }
 
 class MobileNewsCategory {
@@ -199,44 +207,48 @@ class MobileNewsArticle {
   final MobileCountry? country;
   final Map<String, dynamic>? match;
 
-  factory MobileNewsArticle.fromJson(Map<String, dynamic> json) =>
-      MobileNewsArticle(
-          id: '${json['id'] ?? ''}',
-          title: '${json['title'] ?? ''}',
-          summary: json['summary']?.toString(),
-          body: json['body']?.toString(),
-          status: '${json['status'] ?? ''}',
-          sourceName: json['sourceName']?.toString() ??
-              json['source']?['name']?.toString(),
-          sourceUrl: json['sourceUrl']?.toString(),
-          publishedAt: json['publishedAt']?.toString(),
-          imageUrl: json['imageUrl']?.toString() ??
-              ((json['media'] is List && (json['media'] as List).isNotEmpty)
-                  ? ((json['media'] as List).first as Map)['url']?.toString()
-                  : null),
-          bodyBlocks: (json['bodyBlocks'] as List? ?? const [])
-              .whereType<Map>()
-              .map((item) => MobileNewsBodyBlock.fromJson(Map<String, dynamic>.from(item)))
-              .toList(),
-          categories: (json['categories'] as List? ?? const [])
-              .whereType<Map>()
-              .map((item) => MobileNewsCategory.fromJson(Map<String, dynamic>.from(item)))
-              .toList(),
-          sport: json['sport'] is Map
-              ? MobileSport.fromJson(Map<String, dynamic>.from(json['sport'] as Map))
-              : null,
-          competition: json['competition'] is Map
-              ? MobileCompetition.fromJson(Map<String, dynamic>.from(json['competition'] as Map))
-              : null,
-          team: json['team'] is Map
-              ? MobileClub.fromJson(Map<String, dynamic>.from(json['team'] as Map))
-              : null,
-          country: json['country'] is Map
-              ? MobileCountry.fromJson(Map<String, dynamic>.from(json['country'] as Map))
-              : null,
-          match: json['match'] is Map
-              ? Map<String, dynamic>.from(json['match'] as Map)
-              : null);
+  factory MobileNewsArticle.fromJson(Map<String, dynamic> json) => MobileNewsArticle(
+      id: '${json['id'] ?? ''}',
+      title: '${json['title'] ?? ''}',
+      summary: json['summary']?.toString(),
+      body: json['body']?.toString(),
+      status: '${json['status'] ?? ''}',
+      sourceName:
+          json['sourceName']?.toString() ?? json['source']?['name']?.toString(),
+      sourceUrl: json['sourceUrl']?.toString(),
+      publishedAt: json['publishedAt']?.toString(),
+      imageUrl: json['imageUrl']?.toString() ??
+          ((json['media'] is List && (json['media'] as List).isNotEmpty)
+              ? ((json['media'] as List).first as Map)['url']?.toString()
+              : null),
+      bodyBlocks: (json['bodyBlocks'] as List? ?? const [])
+          .whereType<Map>()
+          .map((item) =>
+              MobileNewsBodyBlock.fromJson(Map<String, dynamic>.from(item)))
+          .toList(),
+      categories: (json['categories'] as List? ?? const [])
+          .whereType<Map>()
+          .map((item) =>
+              MobileNewsCategory.fromJson(Map<String, dynamic>.from(item)))
+          .toList(),
+      sport: json['sport'] is Map
+          ? MobileSport.fromJson(
+              Map<String, dynamic>.from(json['sport'] as Map))
+          : null,
+      competition: json['competition'] is Map
+          ? MobileCompetition.fromJson(
+              Map<String, dynamic>.from(json['competition'] as Map))
+          : null,
+      team: json['team'] is Map
+          ? MobileClub.fromJson(Map<String, dynamic>.from(json['team'] as Map))
+          : null,
+      country: json['country'] is Map
+          ? MobileCountry.fromJson(
+              Map<String, dynamic>.from(json['country'] as Map))
+          : null,
+      match: json['match'] is Map
+          ? Map<String, dynamic>.from(json['match'] as Map)
+          : null);
 }
 
 class MobileFixture {
@@ -252,6 +264,7 @@ class MobileFixture {
       required this.homeClub,
       required this.awayClub,
       this.score,
+      this.liveState,
       required this.live,
       required this.streams});
   final String id;
@@ -265,6 +278,7 @@ class MobileFixture {
   final MobileClub homeClub;
   final MobileClub awayClub;
   final Map<String, dynamic>? score;
+  final Map<String, dynamic>? liveState;
   final bool live;
   final List<MobileStream> streams;
   factory MobileFixture.fromJson(Map<String, dynamic> json) => MobileFixture(
@@ -293,16 +307,29 @@ class MobileFixture {
       score: json['score'] is Map
           ? Map<String, dynamic>.from(json['score'] as Map)
           : null,
+      liveState: json['liveState'] is Map
+          ? Map<String, dynamic>.from(json['liveState'] as Map)
+          : null,
       live: json['live'] == true,
-      streams: (json['streams'] as List? ?? const [])
-          .whereType<Map>()
-          .map((item) => MobileStream.fromJson(Map<String, dynamic>.from(item)))
-          .toList());
+      streams: (json['streams'] as List? ?? const []).whereType<Map>().map((item) => MobileStream.fromJson(Map<String, dynamic>.from(item))).toList());
   String get scoreLabel {
     if (score == null) return live ? 'LIVE' : status;
     final home = score?['home'];
     final away = score?['away'];
     return home == null || away == null ? status : '$home - $away';
+  }
+
+  String get liveStatusLabel {
+    final elapsed = liveState?['elapsed'];
+    if (liveState?['isLive'] == true) {
+      return elapsed is num ? "${elapsed.toInt()}' LIVE" : 'LIVE';
+    }
+    if (liveState?['status'] == 'FT' ||
+        status == 'ended' ||
+        status == 'completed') {
+      return 'FULL TIME';
+    }
+    return '';
   }
 }
 

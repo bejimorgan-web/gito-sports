@@ -6,6 +6,8 @@ import { NewsRepository } from "../repositories/news-repository.js";
 import { listSports } from "../repositories/sports-repository.js";
 import { listCompetitions } from "../repositories/competitions-repository.js";
 import { listSeasons, getSeasonById } from "../repositories/seasons-repository.js";
+import type { ScoreMatchSummary } from "./score-service.js";
+import { getCachedScoreSnapshot } from "./score-service.js";
 
 export type MobileClub = Team & { sport: Pick<Sport, "id" | "name">; country: Pick<Country, "id" | "name"> | null };
 export type MobileSeason = Season & { competition?: Pick<Competition, "id" | "name" | "slug"> };
@@ -21,7 +23,8 @@ export type MobileFixture = {
   country: { id: string; name: string } | null;
   homeClub: MobileClub;
   awayClub: MobileClub;
-  score: null;
+  score: { home: number | null; away: number | null; winner: string | null } | null;
+  liveState: { isLive: boolean; status: string; homeScore: number | null; awayScore: number | null; elapsed: number | null; updatedAt: string | null } | null;
   live: boolean;
   streams: MobileStream[];
 };
@@ -57,9 +60,21 @@ function safeStreams(matchId: string): MobileStream[] {
   return rows.map((row) => ({ id: row.id, matchId: row.match_id, channelId: row.channel_id, channelName: row.channel_name, providerId: row.provider_id, providerName: row.provider_name, status: row.status, approvalStatus: row.approval_status, healthStatus: row.health_status }));
 }
 
-export function mapMobileFixture(fixture: any): MobileFixture {
+export function mapMobileFixture(fixture: any, suppliedSnapshot?: ScoreMatchSummary | null): MobileFixture {
   const home = clubFromRow(fixture.homeTeam, { sport: fixture.sport, country: fixture.country });
   const away = clubFromRow(fixture.awayTeam, { sport: fixture.sport, country: fixture.country });
+  const snapshot = suppliedSnapshot ?? getCachedScoreSnapshot(fixture.externalMatchId);
+  const score = snapshot?.score && typeof snapshot.score === "object" ? snapshot.score : null;
+  const liveState = snapshot && score
+    ? {
+        isLive: ["1H", "2H", "HT", "ET", "BT", "P", "LIVE", "IN_PLAY", "PAUSED", "SUSPENDED"].includes(snapshot.status),
+        status: snapshot.status,
+        homeScore: score.home,
+        awayScore: score.away,
+        elapsed: snapshot.minute,
+        updatedAt: new Date().toISOString()
+      }
+    : null;
   return {
     id: fixture.id,
     startsAt: fixture.startsAt,
@@ -71,8 +86,9 @@ export function mapMobileFixture(fixture: any): MobileFixture {
     country: fixture.country ? { id: fixture.country.id, name: fixture.country.name } : null,
     homeClub: home,
     awayClub: away,
-    score: null,
-    live: fixture.status === "live",
+    score,
+    liveState,
+    live: liveState?.isLive ?? fixture.status === "live",
     streams: safeStreams(fixture.id)
   };
 }
@@ -161,25 +177,25 @@ export function mobileFixtures(filters?: {
   });
   const offset = Math.max(filters?.offset ?? 0, 0);
   const limit = Math.min(Math.max(filters?.limit ?? 100, 1), 100);
-  return fixtures.slice(offset, offset + limit).map(mapMobileFixture);
+  return fixtures.slice(offset, offset + limit).map((fixture) => mapMobileFixture(fixture));
 }
 
 export function mobileClubDetail(clubId: string) {
   const detail = getClubDetailById(clubId);
   if (!detail || detail.type !== "club") return undefined;
-  const fixtures = listCanonicalFixturesForTeam(clubId).map(mapMobileFixture);
+  const fixtures = listCanonicalFixturesForTeam(clubId).map((fixture) => mapMobileFixture(fixture));
   const nextFixture = fixtures.find((fixture) => !["ended", "completed", "cancelled"].includes(fixture.status) && Date.parse(fixture.startsAt) >= Date.now()) ?? null;
   const previousResult = [...fixtures].filter((fixture) => ["ended", "completed"].includes(fixture.status)).sort((a, b) => Date.parse(b.startsAt) - Date.parse(a.startsAt))[0] ?? null;
   return { club: clubFromRow(detail), competitions: detail.competitions, seasons: detail.seasons, nextFixture, previousResult };
 }
 
 function fixtureOptions(filters?: { seasonId?: string; competitionId?: string; status?: string; from?: string; to?: string }) {
-  const fixtures = listCanonicalFixtures({ competitionId: filters?.competitionId, seasonId: filters?.seasonId }).map(mapMobileFixture);
+  const fixtures = listCanonicalFixtures({ competitionId: filters?.competitionId, seasonId: filters?.seasonId }).map((fixture) => mapMobileFixture(fixture));
   return fixtures.filter((fixture) => (!filters?.status || fixture.status === filters.status) && (!filters?.from || fixture.startsAt >= filters.from) && (!filters?.to || fixture.startsAt <= filters.to));
 }
 
 export function mobileClubFixtures(clubId: string, filters?: { seasonId?: string; competitionId?: string; status?: string; from?: string; to?: string }) {
-  return listCanonicalFixturesForTeam(clubId, { seasonId: filters?.seasonId, competitionId: filters?.competitionId }).map(mapMobileFixture).filter((fixture) => (!filters?.status || fixture.status === filters.status) && (!filters?.from || fixture.startsAt >= filters.from) && (!filters?.to || fixture.startsAt <= filters.to));
+  return listCanonicalFixturesForTeam(clubId, { seasonId: filters?.seasonId, competitionId: filters?.competitionId }).map((fixture) => mapMobileFixture(fixture)).filter((fixture) => (!filters?.status || fixture.status === filters.status) && (!filters?.from || fixture.startsAt >= filters.from) && (!filters?.to || fixture.startsAt <= filters.to));
 }
 
 export function mobileFixture(fixtureId: string) {

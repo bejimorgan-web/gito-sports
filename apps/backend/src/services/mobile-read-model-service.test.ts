@@ -66,6 +66,34 @@ test("mobile read model exposes stable club, fixture, News, season, and stream r
   assert.equal(mobile.mobileSeasonFixtures("season-2026")?.fixtures.length, 1);
   assert.equal(mobile.mobileSeasonTeams("season-2026")?.teams.length, 2);
   assert.equal(mobile.mobileFixture(fixture.id)?.score, null);
+  assert.equal(mobile.mapMobileFixture(fixture).liveState, null);
+  const liveState = mobile.mapMobileFixture(fixture, {
+    id: "provider-fixture-1",
+    utcDate: fixture.startsAt,
+    status: "2H",
+    minute: 42,
+    competition: { id: "competition-bundesliga", name: "Bundesliga", logoUrl: null },
+    homeTeam: { id: "team-bayern", name: "Bayern Munich", logoUrl: null },
+    awayTeam: { id: "team-dortmund", name: "Borussia Dortmund", logoUrl: null },
+    score: { home: 2, away: 1, winner: "home" },
+    events: []
+  }).liveState!;
+  assert.equal(liveState.isLive, true);
+  assert.equal(liveState.homeScore, 2);
+  assert.equal(liveState.awayScore, 1);
+  assert.equal(liveState.elapsed, 42);
+  assert.equal(typeof liveState.updatedAt, "string");
+  assert.equal(mobile.mapMobileFixture(fixture, {
+    id: "provider-fixture-1",
+    utcDate: fixture.startsAt,
+    status: "FT",
+    minute: null,
+    competition: { id: "competition-bundesliga", name: "Bundesliga", logoUrl: null },
+    homeTeam: { id: "team-bayern", name: "Bayern Munich", logoUrl: null },
+    awayTeam: { id: "team-dortmund", name: "Borussia Dortmund", logoUrl: null },
+    score: { home: 2, away: 1, winner: "home" },
+    events: []
+  }).liveState?.isLive, false);
 
   const dateWindow = { from: "2099-08-20T00:00:00.000Z", to: "2099-08-21T00:00:00.000Z" };
   assert.equal(mobile.mobileFixtures({ mode: "all", sportId: "sport-football", ...dateWindow }).filter((item) => item.id === fixture.id).length, 1);

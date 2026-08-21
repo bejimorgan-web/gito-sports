@@ -402,6 +402,20 @@ function getStaleCacheEntry<T>(key: string, maxAgeMs: number): { value: T; ageMs
   };
 }
 
+export function getCachedScoreSnapshot(externalMatchId: string | null | undefined): ScoreMatchSummary | null {
+  if (!externalMatchId) return null;
+  const target = String(externalMatchId);
+  const candidates: ScoreMatchSummary[] = [];
+
+  for (const key of ["scores:live", ...[...cache.keys()].filter((cacheKey) => cacheKey.startsWith("scores:scheduled:") || cacheKey.startsWith("scores:match:"))]) {
+    const value = getCached<ScoreMatchSummary | ScoreMatchSummary[]>(key);
+    if (Array.isArray(value)) candidates.push(...value);
+    else if (value) candidates.push(value);
+  }
+
+  return candidates.find((snapshot) => String(snapshot.id) === target && snapshot.score && typeof snapshot.score === "object") ?? null;
+}
+
 function emitScoreEvent(event: "scores:updated" | "scores:cache:refreshed" | "scores:retry" | "scores:failed", payload?: unknown) {
   EventBus.emit(event, payload);
 }

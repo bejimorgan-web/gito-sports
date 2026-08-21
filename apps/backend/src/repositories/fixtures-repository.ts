@@ -72,7 +72,7 @@ export function listCanonicalFixturesForTeam(teamId: string, options?: { seasonI
   if (options?.seasonId) { conditions.push("m.season_id = ?"); params.push(options.seasonId); }
   if (options?.competitionId) { conditions.push("m.competition_id = ?"); params.push(options.competitionId); }
   const rows = getDatabase().prepare(`SELECT m.id FROM matches m WHERE ${conditions.join(" AND ")} ORDER BY m.starts_at ASC`).all(...params) as Array<{ id: string }>;
-  return rows.map((row) => getCanonicalFixtureById(row.id));
+  return rows.map((row) => getCanonicalFixtureById(row.id)).filter(Boolean);
 }
 
 export function getCanonicalFixtureById(fixtureId: string) {
@@ -138,7 +138,7 @@ export function listCanonicalFixtures(filters?: { sportId?: string; sportIds?: s
   const limit = Math.min(Math.max(filters?.limit ?? 100, 1), 100);
   const offset = Math.max(filters?.offset ?? 0, 0);
   const rows = getDatabase().prepare(`SELECT m.id FROM matches m JOIN competitions c ON c.id = m.competition_id ${where} ORDER BY m.starts_at ASC LIMIT ? OFFSET ?`).all(...parameters, limit, offset) as Array<{ id: string }>;
-  return rows.map((row) => getCanonicalFixtureById(row.id));
+  return rows.map((row) => getCanonicalFixtureById(row.id)).filter(Boolean);
 }
 
 export function deleteCanonicalFixture(fixtureId: string): boolean {
