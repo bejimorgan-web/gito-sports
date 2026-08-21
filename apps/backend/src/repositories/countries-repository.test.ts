@@ -21,9 +21,14 @@ test("country creation normalizes and rejects duplicate ISO2/ISO3 codes", () => 
     createCountry({ name: "France", iso2Code: "FR", iso3Code: "FRA" })
   ];
 
+  const database = getDatabase();
+  const now = new Date().toISOString();
+  database.prepare("INSERT INTO countries (id, name, iso2_code, iso3_code, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)").run("country-placeholder", "FIFA", "XX", "XXX", now, now);
+
   assert.deepEqual(countries.map((country) => country.name), ["Spain", "England", "Germany", "Italy", "France"]);
   assert.deepEqual(countries.map((country) => country.iso2Code), ["ES", "GB", "DE", "IT", "FR"]);
   assert.deepEqual(countries.map((country) => country.iso3Code), ["ESP", "GBR", "DEU", "ITA", "FRA"]);
+  assert.equal(listCountries().some((country) => country.name === "FIFA"), false);
 
   assert.throws(
     () => createCountry({ name: "Spain Duplicate", iso2Code: " es ", iso3Code: "USA" }),
@@ -48,9 +53,7 @@ test("country creation normalizes and rejects duplicate ISO2/ISO3 codes", () => 
   assert.equal(listCountries().length, 4);
 
   const country = listCountries()[0]!;
-  const db = getDatabase();
-  const now = new Date().toISOString();
-  db.prepare("INSERT INTO teams (id, sport_id, country_id, name, slug, type, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'club', 'active', ?, ?)").run("country-test-team", null, country.id, "Country Test FC", "country-test-fc", now, now);
+  database.prepare("INSERT INTO teams (id, sport_id, country_id, name, slug, type, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'club', 'active', ?, ?)").run("country-test-team", null, country.id, "Country Test FC", "country-test-fc", now, now);
   assert.throws(() => deleteCountry(country.id), (error: any) => error?.code === "country_in_use" && /clubs/i.test(error.message));
 });
 

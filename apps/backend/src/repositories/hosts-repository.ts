@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 import type { CreateHostRequest, Host, HostType, UpdateHostRequest } from "@gito/shared";
 import { getDatabase } from "../db/connection.js";
+import { findCountryByName } from "./countries-repository.js";
 
 const hostTypes: HostType[] = ["country", "organization", "federation", "association", "regional", "international", "other"];
 
@@ -46,7 +47,9 @@ function validateHostInput(database: ReturnType<typeof getDatabase>, sportId: st
     throw new Error("host_type_invalid");
   }
   if (type === "country") {
-    if (!countryId) throw new Error("country_host_country_required");
+    if (!countryId) {
+      throw Object.assign(new Error("Select an existing country or create the country first."), { code: "country_host_country_not_found" });
+    }
     if (!database.prepare("SELECT id FROM countries WHERE id = ?").get(countryId)) throw new Error("country_not_found");
   } else if (countryId) {
     throw new Error("non_country_host_cannot_reference_country");
@@ -76,7 +79,8 @@ export function createHost(input: CreateHostRequest): Host {
   const database = getDatabase();
   const name = input.name.trim();
   const type = input.type ?? input.hostType;
-  validateHostInput(database, input.sportId, name, type as HostType, input.countryId);
+  const countryId = type === "country" ? findCountryByName(name)?.id : undefined;
+  validateHostInput(database, input.sportId, name, type as HostType, countryId);
   const duplicate = database.prepare("SELECT id FROM hosts WHERE sport_id = ? AND lower(name) = lower(?)").get(input.sportId, name);
   if (duplicate) throw new Error("host_duplicate");
 
@@ -84,7 +88,7 @@ export function createHost(input: CreateHostRequest): Host {
   const timestamp = now();
   database.prepare(
     "INSERT INTO hosts (id, sport_id, name, host_type, country_id, logo_url, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)"
-  ).run(id, input.sportId, name, type, input.countryId ?? null, input.logoUrl ?? null, timestamp, timestamp);
+  ).run(id, input.sportId, name, type, countryId ?? null, input.logoUrl ?? null, timestamp, timestamp);
   return getHost(id)!;
 }
 
@@ -97,9 +101,7 @@ export function updateHost(hostId: string, input: UpdateHostRequest): Host | und
 
   const name = input.name?.trim() || existing.name;
   const type = input.type ?? input.hostType ?? existing.host_type;
-  const countryId = type === "country"
-    ? input.countryId !== undefined ? input.countryId : existing.country_id
-    : null;
+  const countryId = type === "country" ? findCountryByName(name)?.id : null;
   validateHostInput(database, existing.sport_id, name, type, countryId);
   const duplicate = database.prepare("SELECT id FROM hosts WHERE sport_id = ? AND lower(name) = lower(?) AND id != ?").get(existing.sport_id, name, hostId);
   if (duplicate) throw new Error("host_duplicate");

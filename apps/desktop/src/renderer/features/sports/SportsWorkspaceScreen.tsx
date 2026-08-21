@@ -149,7 +149,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
     try {
       const [sportsData, countriesData, hostsData, competitionData, teamData] = await Promise.all([
         apiClient.listSports(),
-        apiClient.listCountries(viewMode),
+        apiClient.listCountries(),
         apiClient.listHosts(),
         apiClient.listCompetitions(viewMode),
         apiClient.listTeams(viewMode)
@@ -386,16 +386,6 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
       return;
     }
 
-    if (hostType === "country" && !hostCountryId) {
-      setStatus("Country is required for a country host.");
-      return;
-    }
-
-    if (hostType !== "country" && hostCountryId) {
-      setStatus("Only country hosts can reference a country.");
-      return;
-    }
-
     if (isLogoUploading) {
       setStatus("Please wait for the logo upload to finish before saving.");
       return;
@@ -410,7 +400,6 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
       sportId: selectedSport.id,
       name: hostName,
       type: hostType,
-      ...(hostCountryId ? { countryId: hostCountryId } : {}),
       ...(hostLogoUrl ? { logoUrl: hostLogoUrl } : {})
     };
 
@@ -857,21 +846,12 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                   onChange={(event) => {
                     const nextType = event.target.value as HostType;
                     setHostType(nextType);
-                    if (nextType !== "country") setHostCountryId("");
+                    setHostCountryId("");
                   }}
                 >
                   {hostTypes.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
                 </select>
               </label>
-              {hostType === "country" ? (
-                <label>
-                  Country
-                  <select value={hostCountryId} onChange={(event) => setHostCountryId(event.target.value)}>
-                    <option value="">Select country</option>
-                    {countries.map((country) => <option key={country.id} value={country.id}>{country.name}</option>)}
-                  </select>
-                </label>
-              ) : null}
               <LogoUrlField label="Upload Logo / Flag" value={hostLogoUrl} onChange={setHostLogoUrl} />
             </div>
           ) : modalContext.kind === "competition" ? (

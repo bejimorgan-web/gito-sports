@@ -27,14 +27,17 @@ test("supports multiple typed hosts and host-owned competitions", () => {
   const caf = createHost({ sportId: "sport-football", name: "CAF", type: "federation" });
   const uefa = createHost({ sportId: "sport-football", name: "UEFA", hostType: "federation" });
   const other = createHost({ sportId: "sport-football", name: "Custom Host", type: "other" });
-  const england = createHost({ sportId: "sport-football", name: "England", type: "country", countryId: "country-england" });
+  const england = createHost({ sportId: "sport-football", name: "England", type: "country" });
   const fiba = createHost({ sportId: "sport-basketball", name: "FIBA", type: "federation" });
 
   assert.equal(listHosts("sport-football").length, 5);
   assert.equal(listHosts("sport-basketball").length, 1);
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM countries WHERE name IN ('FIFA', 'CAF')").get().count, 0);
   assert.throws(() => createHost({ sportId: "sport-football", name: "FIFA", type: "organization" }), /host_duplicate/);
-  assert.throws(() => createHost({ sportId: "sport-football", name: "Invalid", type: "country" }), /country_host_country_required/);
+  assert.throws(
+    () => createHost({ sportId: "sport-football", name: "Invalid", type: "country" }),
+    (error: any) => error?.code === "country_host_country_not_found" && /Select an existing country or create the country first/i.test(error.message)
+  );
   assert.equal(fifa.countryId, undefined);
   assert.equal(caf.countryId, undefined);
   assert.equal(other.countryId, undefined);
@@ -42,8 +45,7 @@ test("supports multiple typed hosts and host-owned competitions", () => {
 
   const changedToOrganization = updateHost(england.id, { type: "organization" });
   assert.equal(changedToOrganization?.countryId, undefined);
-  assert.throws(() => updateHost(england.id, { type: "country" }), /country_host_country_required/);
-  assert.equal(updateHost(england.id, { type: "country", countryId: "country-england" })?.countryId, "country-england");
+  assert.equal(updateHost(england.id, { type: "country" })?.countryId, "country-england");
 
   const worldCup = createCompetition({ sportId: "sport-football", hostId: fifa.id, name: "World Cup", scope: "international", type: "cup", participantType: "nationalTeams" });
   const premierLeague = createCompetition({ sportId: "sport-football", hostId: england.id, name: "Premier League", scope: "domestic", type: "league", participantType: "clubs" });

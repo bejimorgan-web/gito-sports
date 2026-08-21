@@ -111,18 +111,29 @@ export function listCountries(): Country[] {
   const rows = getDatabase()
     .prepare(
       `SELECT id, name, iso2_code, iso3_code, region_id, flag_url, status, created_at, updated_at
-       FROM countries ORDER BY name`
+      FROM countries WHERE iso2_code <> 'XX' AND iso3_code <> 'XXX' ORDER BY name`
     )
     .all() as CountryRow[];
 
   return rows.map(mapCountry);
 }
 
+export function findCountryByName(name: string): Country | undefined {
+  const row = getDatabase()
+    .prepare(
+      `SELECT id, name, iso2_code, iso3_code, region_id, flag_url, status, created_at, updated_at
+       FROM countries WHERE lower(trim(name)) = lower(trim(?)) AND status = 'active' LIMIT 1`
+    )
+    .get(name) as CountryRow | undefined;
+
+  return row ? mapCountry(row) : undefined;
+}
+
 export function getCountryById(countryId: string): Country | undefined {
   const row = getDatabase()
     .prepare(
       `SELECT id, name, iso2_code, iso3_code, region_id, flag_url, status, created_at, updated_at
-       FROM countries WHERE id = ?`
+      FROM countries WHERE id = ? AND iso2_code <> 'XX' AND iso3_code <> 'XXX'`
     )
     .get(countryId) as CountryRow | undefined;
 
