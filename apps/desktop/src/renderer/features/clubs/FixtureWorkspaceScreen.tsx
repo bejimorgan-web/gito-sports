@@ -3,9 +3,7 @@ import type { Competition, Season, Team } from "@gito/shared";
 import { apiClient } from "../../services/api-client";
 import {
   formatFixtureDateTime,
-  getBrowserTimeZone,
   localDateTimeToUtc,
-  parseOperatorKickoff,
   utcToOperatorKickoff,
 } from "./fixture-time";
 
@@ -24,7 +22,6 @@ export function FixtureWorkspaceScreen({
   const [homeTeamId, setHomeTeamId] = useState("");
   const [awayTeamId, setAwayTeamId] = useState("");
   const [kickoff, setKickoff] = useState("");
-  const timeZone = getBrowserTimeZone();
   const [venueName, setVenueName] = useState("");
   const [status, setStatus] = useState("Ready");
   const [selectedFixture, setSelectedFixture] = useState<any | null>(null);
@@ -77,12 +74,7 @@ export function FixtureWorkspaceScreen({
       setStatus("Choose a kickoff date and time.");
       return;
     }
-    const parsedKickoff = parseOperatorKickoff(kickoff);
-    if (!parsedKickoff) {
-      setStatus("Enter kickoff as DD/MM/YYYY HH:mm.");
-      return;
-    }
-    const startsAt = localDateTimeToUtc(parsedKickoff.date, parsedKickoff.time, timeZone);
+    const startsAt = localDateTimeToUtc(kickoff);
     if (!startsAt) {
       setStatus("Kickoff time could not be interpreted for the selected timezone.");
       return;
@@ -127,19 +119,14 @@ export function FixtureWorkspaceScreen({
 
   const beginEditFixture = (fixture: any) => {
     setEditingFixtureId(fixture.id);
-    setEditingKickoff(utcToOperatorKickoff(fixture.startsAt, timeZone));
+    setEditingKickoff(utcToOperatorKickoff(fixture.startsAt));
     setEditingVenue(fixture.venueName ?? "");
     setEditingStatus(fixture.status ?? "scheduled");
   };
 
   const saveFixture = async () => {
     if (!editingFixtureId || isSavingFixture) return;
-    const parsed = parseOperatorKickoff(editingKickoff);
-    if (!parsed) {
-      setStatus("Enter kickoff as DD/MM/YYYY HH:mm.");
-      return;
-    }
-    const startsAt = localDateTimeToUtc(parsed.date, parsed.time, timeZone);
+    const startsAt = localDateTimeToUtc(editingKickoff);
     if (!startsAt) {
       setStatus("Kickoff time could not be interpreted for your timezone.");
       return;
@@ -332,10 +319,9 @@ export function FixtureWorkspaceScreen({
             <input
               value={kickoff}
               onChange={(event) => setKickoff(event.target.value)}
-              placeholder="DD/MM/YYYY HH:mm"
               inputMode="numeric"
+              type="datetime-local"
             />
-            <small>Timezone: {timeZone}</small>
           </label>
           <label>
             Venue
@@ -399,8 +385,7 @@ export function FixtureWorkspaceScreen({
           <div className="form-grid two-column">
             <label>
               Kickoff
-              <input value={editingKickoff} onChange={(event) => setEditingKickoff(event.target.value)} placeholder="DD/MM/YYYY HH:mm" />
-              <small>Timezone: {timeZone}</small>
+              <input type="datetime-local" value={editingKickoff} onChange={(event) => setEditingKickoff(event.target.value)} />
             </label>
             <label>
               Venue

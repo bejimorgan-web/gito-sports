@@ -16,6 +16,7 @@ import type {
 import { StreamPreviewPanel } from "../preview/StreamPreviewPanel";
 import { apiClient } from "../../services/api-client";
 import { resolveAssetUrl } from "../../components/asset-url";
+import { localDateTimeToUtc, utcToOperatorKickoff } from "../clubs/fixture-time";
 
 const FALLBACK_LOGO = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="100%" height="100%" fill="%23081018"/></svg>';
 
@@ -590,7 +591,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
     if (!selectedCanonicalFixture) return;
     setSelectedHomeTeamId(selectedCanonicalFixture.homeTeamId);
     setSelectedAwayTeamId(selectedCanonicalFixture.awayTeamId);
-    setStartsAt(new Date(selectedCanonicalFixture.startsAt).toISOString().slice(0, 16));
+    setStartsAt(utcToOperatorKickoff(selectedCanonicalFixture.startsAt));
   }, [selectedCanonicalFixture]);
 
   const filteredCompetitions = useMemo(
@@ -822,7 +823,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
         competitionName: selectedCompetition.name,
         homeTeamName: selectedHomeTeam.name,
         awayTeamName: selectedAwayTeam.name,
-        startsAt: new Date(startsAt).toISOString(),
+        startsAt: localDateTimeToUtc(startsAt) ?? "",
         channelId: selectedChannel.id
       });
       setStatus("Stream assigned. Approval is now available.");

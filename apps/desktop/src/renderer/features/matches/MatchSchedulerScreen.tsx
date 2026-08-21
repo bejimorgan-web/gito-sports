@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import type { Competition, Country, Sport, Team } from "@gito/shared";
 import { apiClient } from "../../services/api-client";
-import { formatFixtureDateTime, getBrowserTimeZone, localDateTimeToUtc, parseOperatorKickoff } from "../clubs/fixture-time";
+import { formatFixtureDateTime, getBrowserTimeZone, localDateTimeToUtc } from "../clubs/fixture-time";
 import StreamStatusPanel from "./StreamStatusPanel";
 
 interface MatchSchedulerScreenProps {
@@ -97,13 +97,7 @@ export function MatchSchedulerScreen({ selectedMatchId: externalSelectedMatchId,
       return;
     }
 
-    const parsed = parseOperatorKickoff(kickoff);
-    if (!parsed) {
-      setStatus("Enter kickoff as DD/MM/YYYY HH:mm.");
-      return;
-    }
-
-    const startsAt = localDateTimeToUtc(parsed.date, parsed.time, timeZone);
+    const startsAt = localDateTimeToUtc(kickoff);
     if (!startsAt) {
       setStatus("Kickoff time could not be interpreted for your timezone.");
       return;
@@ -232,7 +226,7 @@ export function MatchSchedulerScreen({ selectedMatchId: externalSelectedMatchId,
               </label>
               <label>
                 Kickoff
-                <input value={kickoff} onChange={(e) => setKickoff(e.target.value)} placeholder="DD/MM/YYYY HH:mm" />
+                <input type="datetime-local" value={kickoff} onChange={(e) => setKickoff(e.target.value)} />
                 <small>Timezone: {timeZone}</small>
               </label>
             </div>
