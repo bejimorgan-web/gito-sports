@@ -28,6 +28,8 @@ function seed() {
 
 test("canonical fixture setup requires season membership and never touches legacy scheduling tables", () => {
   const { db, seasonId } = seed();
+  assert.throws(() => createCanonicalFixture({ competitionId: "competition-1", seasonId, homeTeamId: "team-1", awayTeamId: "team-2", startsAt: "" }), (error: any) => error?.code === "invalid_starts_at" && /required/i.test(error.message));
+  assert.throws(() => createCanonicalFixture({ competitionId: "competition-1", seasonId, homeTeamId: "team-1", awayTeamId: "team-2", startsAt: "2026-09-20T15:00" }), (error: any) => error?.code === "invalid_starts_at" && /explicit timezone/i.test(error.message));
   assert.throws(() => createCanonicalFixture({ competitionId: "competition-1", seasonId, homeTeamId: "team-1", awayTeamId: "missing", startsAt: "2026-09-20T15:00:00Z" }), /team_not_found/);
   const fixture = createCanonicalFixture({ competitionId: "competition-1", seasonId, homeTeamId: "team-1", awayTeamId: "team-2", startsAt: "2026-09-20T15:00:00Z", venueName: "Arena", externalProvider: "manual", externalMatchId: "fixture-1" });
   assert.ok(fixture);

@@ -20,7 +20,11 @@ fixturesRouter.get("/:fixtureId", (request, response) => {
 
 fixturesRouter.post("/", protectedRoute, (request, response) => {
   try { response.status(201).json({ data: createCanonicalFixture(request.body) }); }
-  catch (error) { response.status(409).json({ error: error instanceof Error ? error.message : String(error) }); }
+  catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const code = (error as { code?: string }).code ?? message;
+    response.status(code === "invalid_starts_at" ? 400 : 409).json({ error: code, message });
+  }
 });
 
 fixturesRouter.put("/:fixtureId", protectedRoute, (request, response) => {

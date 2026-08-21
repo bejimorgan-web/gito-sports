@@ -29,7 +29,10 @@ function validateFixtureInput(input: CanonicalFixtureInput) {
     const membershipCount = db.prepare("SELECT COUNT(*) AS count FROM competition_season_teams WHERE competition_id = ? AND season_id = ? AND team_id IN (?, ?)").get(input.competitionId, input.seasonId, input.homeTeamId, input.awayTeamId) as { count: number };
     if (Number(membershipCount.count) !== 2) throw new Error("season_team_membership_required");
   }
-  if (Number.isNaN(Date.parse(input.startsAt))) throw new Error("invalid_starts_at");
+  if (!input.startsAt) throw Object.assign(new Error("Kickoff date and time are required."), { code: "invalid_starts_at" });
+  if (!/T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.test(input.startsAt) || Number.isNaN(Date.parse(input.startsAt))) {
+    throw Object.assign(new Error("Kickoff must be a valid date and time with an explicit timezone."), { code: "invalid_starts_at" });
+  }
 }
 
 export function findEquivalentCanonicalFixtures(input: CanonicalFixtureInput) {
