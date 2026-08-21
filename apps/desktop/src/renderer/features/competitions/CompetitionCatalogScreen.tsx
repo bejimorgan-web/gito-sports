@@ -16,6 +16,7 @@ export function CompetitionCatalogScreen({ accessToken }: { accessToken: string 
   const [competitions, setCompetitions] = useState<Competition[]>([]);
   const [sports, setSports] = useState<Sport[]>([]);
   const [hosts, setHosts] = useState<Host[]>([]);
+  const [sportHosts, setSportHosts] = useState<Host[]>([]);
   const [selectedCompetition, setSelectedCompetition] = useState<Competition | null>(null);
   const [sportId, setSportId] = useState("");
   const [hostId, setHostId] = useState("");
@@ -29,7 +30,7 @@ export function CompetitionCatalogScreen({ accessToken }: { accessToken: string 
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const selectedSport = sports.find((sport) => sport.id === sportId);
-  const filteredHosts = selectedSport ? hosts.filter((host) => host.sportId === selectedSport.id) : [];
+  const filteredHosts = selectedSport ? sportHosts : [];
 
   const loadData = async () => {
     try {
@@ -49,6 +50,10 @@ export function CompetitionCatalogScreen({ accessToken }: { accessToken: string 
   useEffect(() => {
     void loadData();
   }, []);
+  useEffect(() => {
+    if (!sportId) { setSportHosts([]); return; }
+    void apiClient.listHosts(sportId).then(setSportHosts).catch(() => setSportHosts([]));
+  }, [sportId]);
 
   const resetForm = () => {
     setSelectedCompetition(null);

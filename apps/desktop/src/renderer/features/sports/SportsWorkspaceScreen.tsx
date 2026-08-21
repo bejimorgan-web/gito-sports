@@ -97,6 +97,11 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
   const [sportLogoUrl, setSportLogoUrl] = useState("");
   const [sportCountryIds, setSportCountryIds] = useState<string[]>([]);
   const [sportHostSearch, setSportHostSearch] = useState("");
+  const [assignedSportHosts, setAssignedSportHosts] = useState<Host[]>([]);
+  const [hostDialogOpen, setHostDialogOpen] = useState(false);
+  const [hostDialogSearch, setHostDialogSearch] = useState("");
+  const [selectedHostIds, setSelectedHostIds] = useState<string[]>([]);
+  const [hostActionId, setHostActionId] = useState<string | null>(null);
 
   const [hostName, setHostName] = useState("");
   const [hostType, setHostType] = useState<HostType>("country");
@@ -130,13 +135,18 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
   );
 
   const sportHosts = useMemo(
-    () => (selectedSport ? hosts.filter((host) => host.sportId === selectedSport.id) : []),
-    [hosts, selectedSport]
+    () => assignedSportHosts,
+    [assignedSportHosts]
   );
   const filteredSportHosts = useMemo(() => {
     const query = sportHostSearch.trim().toLowerCase();
     return query ? sportHosts.filter((host) => `${host.name} ${host.type}`.toLowerCase().includes(query)) : sportHosts;
   }, [sportHostSearch, sportHosts]);
+  const availableHosts = useMemo(() => {
+    const assignedIds = new Set(sportHosts.map((host) => host.id));
+    const query = hostDialogSearch.trim().toLowerCase();
+    return hosts.filter((host) => !assignedIds.has(host.id) && (!query || `${host.name} ${host.type} ${host.sportId}`.toLowerCase().includes(query)));
+  }, [hostDialogSearch, hosts, sportHosts]);
 
   const sportCompetitions = useMemo(
     () => (selectedSport ? competitions.filter((competition) => competition.sportId === selectedSport.id) : []),
@@ -164,6 +174,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
       setSports(sportsData);
       setCountries(countriesData);
       setHosts(hostsData);
+      if (selectedSport) setAssignedSportHosts(await apiClient.listHosts(selectedSport.id));
       setCompetitions(competitionData);
       setTeams(teamData);
 
@@ -179,6 +190,14 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
   useEffect(() => {
     void loadData();
   }, [viewMode]);
+
+  useEffect(() => {
+    if (!selectedSport) {
+      setAssignedSportHosts([]);
+      return;
+    }
+    void apiClient.listHosts(selectedSport.id).then(setAssignedSportHosts).catch(() => setAssignedSportHosts([]));
+  }, [selectedSport?.id]);
 
   const openModal = (modal: WorkspaceModal) => {
     setModalContext(modal);
@@ -248,6 +267,44 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
       setEditingHostId(null);
       openModal({ kind: "host", action: "create" });
     }
+  };
+
+  const openHostAssignment = () => {
+    setHostDialogSearch("");
+    setSelectedHostIds([]);
+    setHostDialogOpen(true);
+  };
+
+  const refreshAssignedHosts = async () => {
+    if (selectedSport) setAssignedSportHosts(await apiClient.listHosts(selectedSport.id));
+  };
+
+  const addSelectedHosts = async () => {
+    if (!selectedSport || !selectedHostIds.length || hostActionId) return;
+    setHostActionId("adding");
+    setStatus("Adding...");
+    try {
+      await Promise.all(selectedHostIds.map((hostId) => apiClient.addHostToSport(hostId, selectedSport.id, accessToken)));
+      await refreshAssignedHosts();
+      setSelectedHostIds([]);
+      setHostDialogOpen(false);
+      setStatus("Hosts added.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to add Hosts.");
+    } finally { setHostActionId(null); }
+  };
+
+  const removeAssignedHost = async (hostId: string) => {
+    if (!selectedSport || hostActionId) return;
+    setHostActionId(hostId);
+    setStatus("Removing...");
+    try {
+      await apiClient.removeHostFromSport(hostId, selectedSport.id, accessToken);
+      await refreshAssignedHosts();
+      setStatus("Host removed.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to remove Host.");
+    } finally { setHostActionId(null); }
   };
 
   const openCompetitionEditor = (competition?: Competition) => {
@@ -647,8 +704,8 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
             <article className="entity-panel">
               <div className="panel-heading">
                 <h3>Hosts</h3>
-                <button type="button" onClick={() => openHostEditor()} disabled={isCatalogView}>
-                  Add Host
+                <button type="button" onClick={openHostAssignment} disabled={isCatalogView}>
+                  + Add Host
                 </button>
               </div>
               <div className="entity-list">
@@ -663,11 +720,8 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                         </div>
                       </div>
                       <div className="entity-row-actions">
-                        <button type="button" onClick={() => openHostEditor(host)} disabled={isCatalogView}>
-                          Edit
-                        </button>
-                        <button type="button" className="secondary" onClick={() => queueDelete("host", host.id, host.name)} disabled={isCatalogView}>
-                          Delete
+                        <button type="button" className="secondary" onClick={() => void removeAssignedHost(host.id)} disabled={isCatalogView || Boolean(hostActionId)}>
+                          {hostActionId === host.id ? "Removing..." : "Remove"}
                         </button>
                       </div>
                     </article>
@@ -978,6 +1032,34 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
               <LogoUrlField label="Upload Logo" value={teamLogoUrl} onChange={setTeamLogoUrl} onUploadStateChange={setIsLogoUploading} />
             </div>
           )}
+        </Modal>
+      ) : null}
+
+      {hostDialogOpen && selectedSport ? (
+        <Modal
+          title={`Add Host to ${selectedSport.name}`}
+          onClose={() => setHostDialogOpen(false)}
+          footer={
+            <div className="button-row">
+              <button type="button" onClick={() => void addSelectedHosts()} disabled={!selectedHostIds.length || Boolean(hostActionId)}>
+                {hostActionId === "adding" ? "Adding..." : "Add Selected Hosts"}
+              </button>
+              <button type="button" className="secondary" onClick={() => setHostDialogOpen(false)} disabled={Boolean(hostActionId)}>Cancel</button>
+            </div>
+          }
+        >
+          <label>
+            Search Host
+            <input value={hostDialogSearch} onChange={(event) => setHostDialogSearch(event.target.value)} placeholder="Search FIFA, Spain..." autoFocus />
+          </label>
+          <div className="entity-list">
+            {availableHosts.length ? availableHosts.map((host) => (
+              <label className="checkbox-option" key={host.id}>
+                <input type="checkbox" checked={selectedHostIds.includes(host.id)} onChange={() => setSelectedHostIds((current) => current.includes(host.id) ? current.filter((id) => id !== host.id) : [...current, host.id])} />
+                <span><strong>{host.name}</strong> · {host.type} · {host.sportId}</span>
+              </label>
+            )) : <p className="field-note">No available Hosts match this search.</p>}
+          </div>
         </Modal>
       ) : null}
 

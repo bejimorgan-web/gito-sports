@@ -12,6 +12,7 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
   const [sports, setSports] = useState<Sport[]>([]);
   const [countries, setCountries] = useState<Country[]>([]);
   const [hosts, setHosts] = useState<Host[]>([]);
+  const [participatingHosts, setParticipatingHosts] = useState<Host[]>([]);
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [sportId, setSportId] = useState("");
   const [countryId, setCountryId] = useState("");
@@ -30,7 +31,10 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
   const [filterCountryId, setFilterCountryId] = useState("");
 
   const selectedSport = sports.find((sport) => sport.id === sportId);
-  const participatingHosts = hosts.filter((host) => host.sportId === sportId);
+  useEffect(() => {
+    if (!sportId) { setParticipatingHosts([]); return; }
+    void apiClient.listHosts(sportId).then(setParticipatingHosts).catch(() => setParticipatingHosts([]));
+  }, [sportId]);
   const filteredTeams = useMemo(() => teams.filter((team) =>
     (!filterSportId || team.sportId === filterSportId) &&
     (!filterHostId || team.hostId === filterHostId) &&

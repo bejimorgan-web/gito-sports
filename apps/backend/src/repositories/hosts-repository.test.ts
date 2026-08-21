@@ -9,7 +9,7 @@ process.env.NODE_ENV = "test";
 process.env.DATABASE_PATH = databasePath;
 process.env.AUTO_RESTORE_BACKUP = "false";
 
-const { createHost, deleteHost, listHosts, updateHost } = await import("./hosts-repository.js");
+const { addHostToSport, createHost, deleteHost, getHostById, listHosts, removeHostFromSport, updateHost } = await import("./hosts-repository.js");
 const { createCompetition } = await import("./competitions-repository.js");
 const { createSeason } = await import("./seasons-repository.js");
 const { createSeasonTeamMembership } = await import("./competition-season-teams-repository.js");
@@ -47,6 +47,11 @@ test("supports multiple typed hosts and host-owned competitions", () => {
   assert.equal(caf.countryId, undefined);
   assert.equal(other.countryId, undefined);
   assert.equal(uefa.type, "federation");
+  addHostToSport("sport-football", fiba.id);
+  assert.equal(listHosts("sport-football").some((host) => host.id === fiba.id), true);
+  assert.equal(removeHostFromSport("sport-football", fiba.id), true);
+  assert.equal(listHosts("sport-football").some((host) => host.id === fiba.id), false);
+  assert.equal(getHostById(fiba.id)?.name, "FIBA");
 
   const changedToOrganization = updateHost(england.id, { type: "organization" });
   assert.equal(changedToOrganization?.countryId, undefined);

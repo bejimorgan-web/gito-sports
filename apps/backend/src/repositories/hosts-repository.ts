@@ -62,10 +62,24 @@ function getHost(hostId: string): Host | undefined {
 
 export function listHosts(sportId?: string): Host[] {
   const database = getDatabase();
+  database.prepare("INSERT OR IGNORE INTO sport_host_links (id, sport_id, host_id, created_at) SELECT lower(hex(randomblob(16))), sport_id, id, datetime('now') FROM hosts WHERE sport_id IS NOT NULL").run();
   const rows = sportId
-    ? database.prepare("SELECT id, sport_id, name, host_type, country_id, logo_url, status, created_at, updated_at FROM hosts WHERE sport_id = ? ORDER BY name").all(sportId)
+    ? database.prepare("SELECT h.id, h.sport_id, h.name, h.host_type, h.country_id, h.logo_url, h.status, h.created_at, h.updated_at FROM hosts h JOIN sport_host_links l ON l.host_id = h.id WHERE l.sport_id = ? ORDER BY h.name").all(sportId)
     : database.prepare("SELECT id, sport_id, name, host_type, country_id, logo_url, status, created_at, updated_at FROM hosts ORDER BY sport_id, name").all();
   return (rows as HostRow[]).map(mapHost);
+}
+
+export function addHostToSport(sportId: string, hostId: string): Host | undefined {
+  const database = getDatabase();
+  if (!database.prepare("SELECT id FROM sports WHERE id = ?").get(sportId)) throw new Error("sport_not_found");
+  const host = getHost(hostId);
+  if (!host) throw new Error("host_not_found");
+  database.prepare("INSERT OR IGNORE INTO sport_host_links (id, sport_id, host_id, created_at) VALUES (?, ?, ?, ?)").run(crypto.randomUUID(), sportId, hostId, now());
+  return host;
+}
+
+export function removeHostFromSport(sportId: string, hostId: string): boolean {
+  return getDatabase().prepare("DELETE FROM sport_host_links WHERE sport_id = ? AND host_id = ?").run(sportId, hostId).changes > 0;
 }
 
 export function getHostById(hostId: string): Host | undefined {

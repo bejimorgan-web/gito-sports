@@ -2,7 +2,7 @@ import { Router } from "express";
 
 import type { CreateHostRequest, UpdateHostRequest } from "@gito/shared";
 import { protectedRoute } from "../middleware/protected.js";
-import { createHost, deleteHost, getHostById, listHosts, updateHost } from "../repositories/hosts-repository.js";
+import { addHostToSport, createHost, deleteHost, getHostById, listHosts, removeHostFromSport, updateHost } from "../repositories/hosts-repository.js";
 
 export const hostsRouter = Router();
 
@@ -18,6 +18,16 @@ hostsRouter.get("/:hostId", (request, response) => {
     return;
   }
   response.json({ data: host });
+});
+
+hostsRouter.post("/:hostId/sports/:sportId", protectedRoute, (request, response) => {
+  try { response.json({ data: addHostToSport(String(request.params.sportId), String(request.params.hostId)) }); }
+  catch (error) { const message = error instanceof Error ? error.message : String(error); response.status(message === "host_not_found" || message === "sport_not_found" ? 404 : 400).json({ error: message, message }); }
+});
+
+hostsRouter.delete("/:hostId/sports/:sportId", protectedRoute, (request, response) => {
+  if (!removeHostFromSport(String(request.params.sportId), String(request.params.hostId))) { response.status(404).json({ error: "host_sport_link_not_found" }); return; }
+  response.status(204).send();
 });
 
 hostsRouter.post("/", protectedRoute, (request, response) => {

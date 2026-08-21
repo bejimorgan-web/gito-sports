@@ -120,6 +120,7 @@ CREATE TABLE IF NOT EXISTS host_competition_links (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sport_host_links_sport ON sport_host_links(sport_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sport_host_links_unique ON sport_host_links(sport_id, host_id);
 CREATE INDEX IF NOT EXISTS idx_sport_competition_links_sport ON sport_competition_links(sport_id);
 CREATE INDEX IF NOT EXISTS idx_sport_club_links_sport ON sport_club_links(sport_id);
 CREATE INDEX IF NOT EXISTS idx_sport_national_team_links_sport ON sport_national_team_links(sport_id);

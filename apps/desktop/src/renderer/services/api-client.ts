@@ -548,6 +548,12 @@ export const apiClient = {
     const path = buildApiPath('/hosts', sportId ? { sportId } : undefined);
     return request<Host[]>(path);
   },
+  addHostToSport(hostId: string, sportId: string, accessToken: string) {
+    return request<Host>(`/hosts/${hostId}/sports/${sportId}`, { method: 'POST', headers: { authorization: `Bearer ${accessToken}` } });
+  },
+  removeHostFromSport(hostId: string, sportId: string, accessToken: string) {
+    return request<void>(`/hosts/${hostId}/sports/${sportId}`, { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } });
+  },
   createHost(input: CreateHostRequest, accessToken: string) {
     return request<Host>('/hosts', {
       method: 'POST',
