@@ -45,6 +45,19 @@ export function localDateTimeToUtc(date: string, time: string, timeZone = getBro
   return Number.isNaN(result.getTime()) ? undefined : result.toISOString();
 }
 
+export function parseOperatorKickoff(value: string): { date: string; time: string } | undefined {
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})$/.exec(value.trim());
+  if (!match) return undefined;
+  const [, day, month, year, hour, minute] = match;
+  const date = `${year}-${month}-${day}`;
+  const time = `${hour}:${minute}`;
+  const parsed = new Date(`${date}T${time}:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.getUTCFullYear() !== Number(year) || parsed.getUTCMonth() + 1 !== Number(month) || parsed.getUTCDate() !== Number(day) || Number(hour) > 23 || Number(minute) > 59) {
+    return undefined;
+  }
+  return { date, time };
+}
+
 export function formatFixtureDateTime(startsAt: string): string {
   const instant = new Date(startsAt);
   if (Number.isNaN(instant.getTime())) {

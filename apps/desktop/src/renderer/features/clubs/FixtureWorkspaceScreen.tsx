@@ -5,6 +5,7 @@ import {
   formatFixtureDateTime,
   getBrowserTimeZone,
   localDateTimeToUtc,
+  parseOperatorKickoff,
 } from "./fixture-time";
 
 export function FixtureWorkspaceScreen({
@@ -20,8 +21,7 @@ export function FixtureWorkspaceScreen({
   const [seasonId, setSeasonId] = useState("");
   const [homeTeamId, setHomeTeamId] = useState("");
   const [awayTeamId, setAwayTeamId] = useState("");
-  const [kickoffDate, setKickoffDate] = useState("");
-  const [kickoffTime, setKickoffTime] = useState("");
+  const [kickoff, setKickoff] = useState("");
   const [timeZone] = useState(getBrowserTimeZone);
   const [venueName, setVenueName] = useState("");
   const [status, setStatus] = useState("Ready");
@@ -66,15 +66,16 @@ export function FixtureWorkspaceScreen({
   }, [competitionId, seasonId]);
 
   const createFixture = async () => {
-    if (!kickoffDate) {
-      setStatus("Choose a kickoff date.");
+    if (!kickoff.trim()) {
+      setStatus("Choose a kickoff date and time.");
       return;
     }
-    if (!kickoffTime) {
-      setStatus("Choose a kickoff time.");
+    const parsedKickoff = parseOperatorKickoff(kickoff);
+    if (!parsedKickoff) {
+      setStatus("Enter kickoff as DD/MM/YYYY HH:mm.");
       return;
     }
-    const startsAt = localDateTimeToUtc(kickoffDate, kickoffTime, timeZone);
+    const startsAt = localDateTimeToUtc(parsedKickoff.date, parsedKickoff.time, timeZone);
     if (!startsAt) {
       setStatus("Kickoff time could not be interpreted for the selected timezone.");
       return;
@@ -104,8 +105,7 @@ export function FixtureWorkspaceScreen({
       setStatus("Canonical fixture created.");
       setHomeTeamId("");
       setAwayTeamId("");
-      setKickoffDate("");
-      setKickoffTime("");
+      setKickoff("");
       setVenueName("");
       await loadFixtures();
     } catch (error) {
@@ -261,19 +261,12 @@ export function FixtureWorkspaceScreen({
             </select>
           </label>
           <label>
-            Kickoff date
+            Kickoff
             <input
-              type="date"
-              value={kickoffDate}
-              onChange={(event) => setKickoffDate(event.target.value)}
-            />
-          </label>
-          <label>
-            Kickoff time
-            <input
-              type="time"
-              value={kickoffTime}
-              onChange={(event) => setKickoffTime(event.target.value)}
+              value={kickoff}
+              onChange={(event) => setKickoff(event.target.value)}
+              placeholder="DD/MM/YYYY HH:mm"
+              inputMode="numeric"
             />
           </label>
           <label>
