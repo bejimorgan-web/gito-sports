@@ -603,8 +603,8 @@ export const apiClient = {
   removeTeamFromCompetition(competitionId: string, teamId: string, accessToken: string) {
     return request<void>(`/competitions/${competitionId}/teams/${teamId}`, { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } });
   },
-  listTeams(mode?: 'legacy' | 'catalog') {
-    const path = buildApiPath('/teams', { mode });
+  listTeams(mode?: 'legacy' | 'catalog', filters?: { sportId?: string; hostId?: string; countryId?: string; type?: string; status?: string }) {
+    const path = buildApiPath('/teams', { mode, ...filters });
     return request<Team[]>(path);
   },
   getTeam(teamId: string, mode?: 'legacy' | 'catalog') {

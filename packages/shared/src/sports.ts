@@ -100,6 +100,7 @@ export interface Competition {
 export interface Team {
   id: EntityId;
   sportId: EntityId;
+  hostId?: EntityId;
   countryId?: EntityId;
   name: string;
   shortName?: string;
@@ -244,6 +245,7 @@ export interface UpdateCompetitionRequest {
 
 export interface CreateTeamRequest {
   sportId: EntityId;
+  hostId?: EntityId;
   countryId?: EntityId;
   name: string;
   shortName?: string;
@@ -254,6 +256,7 @@ export interface CreateTeamRequest {
 
 export interface UpdateTeamRequest {
   sportId?: EntityId;
+  hostId?: EntityId;
   countryId?: EntityId;
   name?: string;
   shortName?: string;

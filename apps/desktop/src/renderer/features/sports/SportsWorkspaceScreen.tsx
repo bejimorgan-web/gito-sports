@@ -118,6 +118,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
   const [teamLogoUrl, setTeamLogoUrl] = useState("");
   const [teamType, setTeamType] = useState<TeamType>("club");
   const [teamCountryId, setTeamCountryId] = useState("");
+  const [teamHostId, setTeamHostId] = useState("");
   const [editingTeamId, setEditingTeamId] = useState<string | null>(null);
 
   const supportedCountries = useMemo(
@@ -207,6 +208,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
     setTeamLogoUrl("");
     setTeamType("club");
     setTeamCountryId("");
+    setTeamHostId("");
     setEditingTeamId(null);
   };
 
@@ -286,6 +288,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
       setTeamLogoUrl(team.logoUrl ?? "");
       setTeamType(team.type);
       setTeamCountryId(team.countryId ?? "");
+      setTeamHostId(team.hostId ?? "");
       setEditingTeamId(team.id);
       openModal({ kind: "team", action: "edit" });
     } else {
@@ -295,6 +298,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
       setTeamLogoUrl("");
       setTeamType("club");
       setTeamCountryId("");
+      setTeamHostId("");
       setEditingTeamId(null);
       openModal({ kind: "team", action: "create" });
     }
@@ -511,6 +515,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
       sportId: selectedSport.id,
       name: teamName,
       type: teamType,
+      ...(teamHostId ? { hostId: teamHostId } : {}),
       ...(teamShortName ? { shortName: teamShortName } : {}),
       ...(teamSlug ? { slug: teamSlug } : {}),
       ...(teamCountryId ? { countryId: teamCountryId } : {}),
@@ -961,6 +966,13 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                   {supportedCountries.map((country) => (
                     <option key={country.id} value={country.id}>{country.name}</option>
                   ))}
+                </select>
+              </label>
+              <label>
+                Participating Host
+                <select value={teamHostId} onChange={(event) => setTeamHostId(event.target.value)}>
+                  <option value="">None</option>
+                  {sportHosts.map((host) => <option key={host.id} value={host.id}>{host.name} ({host.type})</option>)}
                 </select>
               </label>
               <LogoUrlField label="Upload Logo" value={teamLogoUrl} onChange={setTeamLogoUrl} onUploadStateChange={setIsLogoUploading} />

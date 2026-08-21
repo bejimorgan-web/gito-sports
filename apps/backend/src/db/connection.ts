@@ -1121,6 +1121,10 @@ function migrateExistingOperationalState(database: DatabaseSync) {
     database.exec("ALTER TABLE teams ADD COLUMN logo_url TEXT;");
   }
 
+  if (!hasColumn(database, "teams", "host_id")) {
+    database.exec("ALTER TABLE teams ADD COLUMN host_id TEXT REFERENCES hosts(id);");
+  }
+
   if (hasColumn(database, "competitions", "sport_id") && isColumnNotNullable(database, "competitions", "sport_id")) {
     database.exec("PRAGMA foreign_keys = OFF;");
     try {

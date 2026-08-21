@@ -16,6 +16,7 @@ interface CountryRow {
 interface TeamRow {
   id: string;
   sport_id: string;
+  host_id: string | null;
   country_id: string | null;
   name: string;
   short_name: string | null;
@@ -63,6 +64,7 @@ function mapTeam(row: TeamRow): Team {
   return {
     id: row.id,
     sportId: row.sport_id,
+    ...(row.host_id ? { hostId: row.host_id } : {}),
     name: row.name,
     type: row.type as Team["type"],
     status: row.status,
@@ -122,7 +124,7 @@ export function getHostCatalogById(hostId: string): Country | undefined {
   return row ? mapCountry(row) : undefined;
 }
 
-export function listCatalogTeams(filters?: { sportId?: string; countryId?: string }): Team[] {
+export function listCatalogTeams(filters?: { sportId?: string; hostId?: string; countryId?: string; type?: string; status?: string }): Team[] {
   const conditions: string[] = ["m.catalog_type IN ('clubs','nationalTeams')"];
   const parameters: Array<string> = [];
 
@@ -135,12 +137,15 @@ export function listCatalogTeams(filters?: { sportId?: string; countryId?: strin
     conditions.push("t.country_id = ?");
     parameters.push(filters.countryId);
   }
+  if (filters?.hostId) { conditions.push("t.host_id = ?"); parameters.push(filters.hostId); }
+  if (filters?.type) { conditions.push("t.type = ?"); parameters.push(filters.type); }
+  if (filters?.status) { conditions.push("t.status = ?"); parameters.push(filters.status); }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
   const rows = getDatabase()
     .prepare(
-      `SELECT t.id, t.sport_id, t.country_id, t.name, t.short_name, t.slug, t.type, t.logo_url, t.status, t.created_at, t.updated_at
+      `SELECT t.id, t.sport_id, t.host_id, t.country_id, t.name, t.short_name, t.slug, t.type, t.logo_url, t.status, t.created_at, t.updated_at
        FROM entity_catalog_mapping m
        JOIN teams t ON t.id = m.legacy_id
        ${where}
@@ -154,7 +159,7 @@ export function listCatalogTeams(filters?: { sportId?: string; countryId?: strin
 export function getCatalogTeamById(teamId: string): Team | undefined {
   const row = getDatabase()
     .prepare(
-      `SELECT t.id, t.sport_id, t.country_id, t.name, t.short_name, t.slug, t.type, t.logo_url, t.status, t.created_at, t.updated_at
+      `SELECT t.id, t.sport_id, t.host_id, t.country_id, t.name, t.short_name, t.slug, t.type, t.logo_url, t.status, t.created_at, t.updated_at
        FROM entity_catalog_mapping m
        JOIN teams t ON t.id = m.legacy_id
        WHERE m.catalog_type IN ('clubs','nationalTeams') AND m.legacy_id = ?`

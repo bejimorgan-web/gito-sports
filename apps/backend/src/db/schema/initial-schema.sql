@@ -202,6 +202,7 @@ CREATE TABLE IF NOT EXISTS seasons (
 CREATE TABLE IF NOT EXISTS teams (
   id TEXT PRIMARY KEY,
   sport_id TEXT,
+  host_id TEXT,
   country_id TEXT,
   name TEXT NOT NULL,
   short_name TEXT,
@@ -212,6 +213,7 @@ CREATE TABLE IF NOT EXISTS teams (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (sport_id) REFERENCES sports(id),
+  FOREIGN KEY (host_id) REFERENCES hosts(id),
   FOREIGN KEY (country_id) REFERENCES countries(id)
 );
 

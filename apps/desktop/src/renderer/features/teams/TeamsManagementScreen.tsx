@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import type { Country, CreateTeamRequest, Sport, Team, TeamType } from "@gito/shared";
+import type { Country, CreateTeamRequest, Host, Sport, Team, TeamType } from "@gito/shared";
 import { apiClient } from "../../services/api-client";
 import { isValidLogoSource, LogoUrlField } from "../../components/LogoUrlField";
 import { resolveAssetUrl } from "../../components/asset-url";
@@ -11,9 +11,11 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
   const [teams, setTeams] = useState<Team[]>([]);
   const [sports, setSports] = useState<Sport[]>([]);
   const [countries, setCountries] = useState<Country[]>([]);
+  const [hosts, setHosts] = useState<Host[]>([]);
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [sportId, setSportId] = useState("");
   const [countryId, setCountryId] = useState("");
+  const [hostId, setHostId] = useState("");
   const [name, setName] = useState("");
   const [shortName, setShortName] = useState("");
   const [slug, setSlug] = useState("");
@@ -22,22 +24,36 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
   const [status, setStatus] = useState("Ready");
   const [isLogoUploading, setIsLogoUploading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [filterSportId, setFilterSportId] = useState("");
+  const [filterHostId, setFilterHostId] = useState("");
+  const [filterType, setFilterType] = useState("");
+  const [filterCountryId, setFilterCountryId] = useState("");
 
   const selectedSport = sports.find((sport) => sport.id === sportId);
+  const participatingHosts = hosts.filter((host) => host.sportId === sportId);
+  const filteredTeams = useMemo(() => teams.filter((team) =>
+    (!filterSportId || team.sportId === filterSportId) &&
+    (!filterHostId || team.hostId === filterHostId) &&
+    (!filterType || team.type === filterType) &&
+    (!filterCountryId || team.countryId === filterCountryId)
+  ), [filterCountryId, filterHostId, filterSportId, filterType, teams]);
+  const filterHosts = hosts.filter((host) => !filterSportId || host.sportId === filterSportId);
   const filteredCountries = selectedSport?.countryIds?.length
     ? countries.filter((country) => selectedSport.countryIds?.includes(country.id))
     : countries;
 
   const loadData = async () => {
     try {
-      const [teamData, sportsData, countryData] = await Promise.all([
+      const [teamData, sportsData, countryData, hostData] = await Promise.all([
         apiClient.listTeams(),
         apiClient.listSports(),
-        apiClient.listCountries()
+        apiClient.listCountries(),
+        apiClient.listHosts()
       ]);
       setTeams(teamData);
       setSports(sportsData);
       setCountries(countryData);
+      setHosts(hostData);
     } catch {
       setStatus("Unable to load teams.");
     }
@@ -51,6 +67,7 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
     setSelectedTeam(null);
     setSportId("");
     setCountryId("");
+    setHostId("");
     setName("");
     setShortName("");
     setSlug("");
@@ -63,6 +80,7 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
     setSelectedTeam(team);
     setSportId(team.sportId);
     setCountryId(team.countryId ?? "");
+    setHostId(team.hostId ?? "");
     setName(team.name);
     setShortName(team.shortName ?? "");
     setSlug(team.slug ?? "");
@@ -91,6 +109,7 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
       if (selectedTeam) {
         const updatePayload: Partial<CreateTeamRequest> = {
           sportId,
+          ...(hostId ? { hostId } : {}),
           name,
           type,
           ...(slug ? { slug } : {}),
@@ -103,6 +122,7 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
       } else {
         const input: CreateTeamRequest = {
           sportId,
+          ...(hostId ? { hostId } : {}),
           name,
           type,
           ...(slug ? { slug } : {}),
@@ -190,7 +210,7 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
           </label>
           <label>
             Sport
-            <select value={sportId} onChange={(event) => setSportId(event.target.value)}>
+            <select value={sportId} onChange={(event) => { setSportId(event.target.value); setHostId(""); }}>
               <option value="">Select sport</option>
               {sports.map((sport) => (
                 <option key={sport.id} value={sport.id}>{sport.name}</option>
@@ -208,6 +228,14 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
             {selectedSport?.countryIds?.length ? (
               <small>{filteredCountries.length} supported country{filteredCountries.length === 1 ? "" : "ies"} for {selectedSport.name}</small>
             ) : null}
+          </label>
+          <label>
+            Participating Host
+            <select value={hostId} onChange={(event) => setHostId(event.target.value)} disabled={!sportId}>
+              <option value="">None</option>
+              {participatingHosts.map((host) => <option key={host.id} value={host.id}>{host.name} ({host.type})</option>)}
+            </select>
+            {sportId && participatingHosts.length === 0 ? <small>No Hosts are assigned to this Sport yet.</small> : null}
           </label>
           <label>
             Team Type
@@ -236,7 +264,13 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
       <section className="console-panel">
         <div className="panel-heading">
           <h3>Clubs & National Teams</h3>
-          <span>{teams.length} entities</span>
+          <span>{filteredTeams.length} of {teams.length} entities</span>
+        </div>
+        <div className="form-grid two-column">
+          <label>Sport<select value={filterSportId} onChange={(event) => { setFilterSportId(event.target.value); setFilterHostId(""); }}><option value="">All sports</option>{sports.map((sport) => <option key={sport.id} value={sport.id}>{sport.name}</option>)}</select></label>
+          <label>Participating Host<select value={filterHostId} onChange={(event) => setFilterHostId(event.target.value)}><option value="">All Hosts</option>{filterHosts.map((host) => <option key={host.id} value={host.id}>{host.name} ({host.type})</option>)}</select></label>
+          <label>Team Type<select value={filterType} onChange={(event) => setFilterType(event.target.value)}><option value="">All types</option>{teamTypes.map((teamType) => <option key={teamType} value={teamType}>{teamType}</option>)}</select></label>
+          <label>Country<select value={filterCountryId} onChange={(event) => setFilterCountryId(event.target.value)}><option value="">All countries</option>{countries.map((country) => <option key={country.id} value={country.id}>{country.name}</option>)}</select></label>
         </div>
         <div className="entity-table">
           <table>
@@ -245,17 +279,19 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
                 <th>Name</th>
                 <th>Sport</th>
                 <th>Country</th>
+                <th>Host</th>
                 <th>Type</th>
                 <th>Logo</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {teams.map((team) => (
+              {filteredTeams.map((team) => (
                 <tr key={team.id}>
                   <td>{team.name}</td>
                   <td>{sports.find((sport) => sport.id === team.sportId)?.name ?? team.sportId}</td>
                   <td>{countries.find((country) => country.id === team.countryId)?.name ?? team.countryId ?? "—"}</td>
+                  <td>{hosts.find((host) => host.id === team.hostId)?.name ?? team.hostId ?? "—"}</td>
                   <td>{team.type}</td>
                   <td>{team.logoUrl ? <img src={resolveAssetUrl(team.logoUrl)} alt={team.name} className="small-logo" /> : "—"}</td>
                   <td>

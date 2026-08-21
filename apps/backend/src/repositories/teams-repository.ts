@@ -8,6 +8,7 @@ import { getDatabase } from "../db/connection.js";
 interface TeamRow {
   id: string;
   sport_id: string;
+  host_id: string | null;
   country_id: string | null;
   name: string;
   short_name: string | null;
@@ -27,6 +28,7 @@ function mapTeam(row: TeamRow): Team {
   return {
     id: row.id,
     sportId: row.sport_id,
+    ...(row.host_id ? { hostId: row.host_id } : {}),
     name: row.name,
     type: row.type as Team["type"],
     status: row.status,
@@ -39,7 +41,7 @@ function mapTeam(row: TeamRow): Team {
   };
 }
 
-export function listTeams(filters?: { sportId?: string; countryId?: string }): Team[] {
+export function listTeams(filters?: { sportId?: string; hostId?: string; countryId?: string; type?: string; status?: string }): Team[] {
   const database = getDatabase();
   const conditions: string[] = [];
   const parameters: Array<string> = [];
@@ -53,12 +55,15 @@ export function listTeams(filters?: { sportId?: string; countryId?: string }): T
     conditions.push("country_id = ?");
     parameters.push(filters.countryId);
   }
+  if (filters?.hostId) { conditions.push("host_id = ?"); parameters.push(filters.hostId); }
+  if (filters?.type) { conditions.push("type = ?"); parameters.push(filters.type); }
+  if (filters?.status) { conditions.push("status = ?"); parameters.push(filters.status); }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
   const rows = database
     .prepare(
-      `SELECT id, sport_id, country_id, name, short_name, slug, type, logo_url, status, created_at, updated_at
+      `SELECT id, sport_id, host_id, country_id, name, short_name, slug, type, logo_url, status, created_at, updated_at
        FROM teams ${where} ORDER BY name`
     )
     .all(...parameters) as TeamRow[];
@@ -69,7 +74,7 @@ export function listTeams(filters?: { sportId?: string; countryId?: string }): T
 export function getTeamById(teamId: string): Team | undefined {
   const row = getDatabase()
     .prepare(
-      `SELECT id, sport_id, country_id, name, short_name, slug, type, logo_url, status, created_at, updated_at
+      `SELECT id, sport_id, host_id, country_id, name, short_name, slug, type, logo_url, status, created_at, updated_at
        FROM teams WHERE id = ?`
     )
     .get(teamId) as TeamRow | undefined;
@@ -82,17 +87,21 @@ export function createTeam(input: CreateTeamRequest): Team {
   const id = crypto.randomUUID();
   const timestamp = now();
   const slug = getUniqueTeamSlug(database, input.slug ?? input.name, input.sportId, input.countryId);
+  if (input.hostId && !database.prepare("SELECT id FROM hosts WHERE id = ? AND sport_id = ? AND status = 'active'").get(input.hostId, input.sportId)) {
+    throw new Error("team_host_sport_mismatch");
+  }
 
   database
     .prepare(
-      `INSERT INTO teams (id, sport_id, country_id, name, short_name, slug, type, logo_url, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`
+      `INSERT INTO teams (id, sport_id, host_id, country_id, name, short_name, slug, type, logo_url, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`
     )
-     .run(id, input.sportId, input.countryId ?? null, input.name, input.shortName ?? null, slug, input.type, input.logoUrl ?? null, timestamp, timestamp);
+    .run(id, input.sportId, input.hostId ?? null, input.countryId ?? null, input.name, input.shortName ?? null, slug, input.type, input.logoUrl ?? null, timestamp, timestamp);
 
   return {
     id,
     sportId: input.sportId,
+    ...(input.hostId ? { hostId: input.hostId } : {}),
     name: input.name,
     type: input.type,
     status: "active",
@@ -109,12 +118,13 @@ export function updateTeam(teamId: string, input: Partial<CreateTeamRequest> & {
   const database = getDatabase();
   const existing = database
     .prepare(
-      `SELECT sport_id, country_id, name, short_name, slug, type, logo_url, status
+      `SELECT sport_id, host_id, country_id, name, short_name, slug, type, logo_url, status
        FROM teams WHERE id = ?`
     )
     .get(teamId) as
     | {
         sport_id: string;
+        host_id: string | null;
         country_id: string | null;
         name: string;
         short_name: string | null;
@@ -132,16 +142,21 @@ export function updateTeam(teamId: string, input: Partial<CreateTeamRequest> & {
   const timestamp = now();
   const sportId = input.sportId ?? existing.sport_id;
   const countryId = input.countryId ?? existing.country_id;
+  const hostId = input.hostId ?? existing.host_id;
+  if (hostId && !database.prepare("SELECT id FROM hosts WHERE id = ? AND sport_id = ? AND status = 'active'").get(hostId, sportId)) {
+    throw new Error("team_host_sport_mismatch");
+  }
   const name = input.name ?? existing.name;
   const slug = getUniqueTeamSlug(database, input.slug ?? name, sportId, countryId ?? undefined, teamId);
 
   database
     .prepare(
-      `UPDATE teams SET sport_id = ?, country_id = ?, name = ?, short_name = ?, slug = ?, type = ?, logo_url = ?, status = ?, updated_at = ?
+      `UPDATE teams SET sport_id = ?, host_id = ?, country_id = ?, name = ?, short_name = ?, slug = ?, type = ?, logo_url = ?, status = ?, updated_at = ?
        WHERE id = ?`
     )
     .run(
       sportId,
+      hostId,
       countryId,
       name,
       input.shortName ?? existing.short_name,

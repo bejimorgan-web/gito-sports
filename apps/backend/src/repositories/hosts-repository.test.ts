@@ -13,6 +13,7 @@ const { createHost, deleteHost, listHosts, updateHost } = await import("./hosts-
 const { createCompetition } = await import("./competitions-repository.js");
 const { createSeason } = await import("./seasons-repository.js");
 const { createSeasonTeamMembership } = await import("./competition-season-teams-repository.js");
+const { createTeam, getTeamById } = await import("./teams-repository.js");
 const { getDatabase } = await import("../db/connection.js");
 const { migrateLegacyCompetitionHosts } = await import("../db/host-migration.js");
 
@@ -31,6 +32,10 @@ test("supports multiple typed hosts and host-owned competitions", () => {
   const spain = createHost({ sportId: "sport-football", name: "Spain", type: "country" });
   const germany = createHost({ sportId: "sport-football", name: "Germany", type: "country" });
   const fiba = createHost({ sportId: "sport-basketball", name: "FIBA", type: "federation" });
+  const hostLinkedTeam = createTeam({ sportId: "sport-football", hostId: spain.id, name: "Spain Club", type: "club" });
+  assert.equal(hostLinkedTeam.hostId, spain.id);
+  assert.equal(getTeamById(hostLinkedTeam.id)?.countryId, undefined);
+  assert.throws(() => createTeam({ sportId: "sport-football", hostId: fiba.id, name: "Wrong Sport Club", type: "club" }), /team_host_sport_mismatch/);
 
   assert.equal(listHosts("sport-football").length, 5);
   assert.equal(listHosts("sport-basketball").length, 1);

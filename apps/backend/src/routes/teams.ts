@@ -10,7 +10,7 @@ import { protectedRoute } from "../middleware/protected.js";
 export const teamsRouter = Router();
 
 teamsRouter.get("/", (request, response) => {
-  const filters: { sportId?: string; countryId?: string } = {};
+  const filters: { sportId?: string; hostId?: string; countryId?: string; type?: string; status?: string } = {};
   const mode = request.query.mode === "catalog" ? "catalog" : "legacy";
 
   if (typeof request.query.sportId === "string") {
@@ -20,6 +20,9 @@ teamsRouter.get("/", (request, response) => {
   if (typeof request.query.countryId === "string") {
     filters.countryId = request.query.countryId;
   }
+  if (typeof request.query.hostId === "string") filters.hostId = request.query.hostId;
+  if (typeof request.query.type === "string") filters.type = request.query.type;
+  if (typeof request.query.status === "string") filters.status = request.query.status;
 
   const teams = mode === "catalog" ? listCatalogTeams(filters) : listTeams(filters);
   response.json({ data: teams.map((team) => normalizeTeam(request, team)) });
