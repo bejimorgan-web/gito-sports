@@ -3,6 +3,7 @@ import type { AuthenticatedRequest } from "../middleware/protected.js";
 import { protectedRoute } from "../middleware/protected.js";
 import { createTeam, getClubDetailById, getTeamById, listTeams, updateTeam } from "../repositories/teams-repository.js";
 import { listCanonicalFixturesForTeam } from "../repositories/fixtures-repository.js";
+import { NewsRepository } from "../repositories/news-repository.js";
 import { getDatabase } from "../db/connection.js";
 
 export const clubsRouter = Router();
@@ -18,7 +19,7 @@ clubsRouter.get("/:clubId", (request, response) => {
   const club = getClubDetailById(clubId);
   if (!club || club.type !== "club") { response.status(404).json({ error: "club_not_found" }); return; }
   const fixtures = listCanonicalFixturesForTeam(clubId);
-  const news = getDatabase().prepare("SELECT DISTINCT a.* FROM news_articles a JOIN news_article_categories n ON n.article_id = a.id WHERE n.category_type = 'team' AND n.entity_id = ? AND n.classification_status = 'approved' ORDER BY a.created_at DESC").all(clubId);
+  const news = new NewsRepository().listArticles({ status: "published", teamId: clubId });
   const live = fixtures.filter((fixture: any) => fixture?.status === "live");
   const streams = fixtures.flatMap((fixture: any) => fixture?.streams ?? []);
   response.json({ data: { club, competitions: club.competitions, seasons: club.seasons, fixtures, results: fixtures.filter((fixture: any) => ["ended", "completed"].includes(fixture?.status)), news, live, streams } });

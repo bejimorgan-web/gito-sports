@@ -73,3 +73,29 @@ test("classification approvals are independent, reruns preserve decisions, and a
   assert.equal(afterRerun.find((item) => item.id === approved!.id)?.classificationStatus, "approved");
   assert.equal(afterRerun.find((item) => item.id === rejected!.id)?.classificationStatus, "rejected");
 });
+
+test("published multi-team feeds use approved categories without duplicate articles", () => {
+  const db = createDatabase();
+  db.prepare("INSERT INTO teams VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)").run("team-barcelona", "FC Barcelona", "Barcelona", "fc-barcelona", "sport-football", "country-germany", new Date().toISOString(), new Date().toISOString());
+  db.prepare("INSERT INTO teams VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)").run("team-elche", "Elche CF", "Elche", "elche-cf", "sport-football", "country-germany", new Date().toISOString(), new Date().toISOString());
+  db.prepare("INSERT INTO competitions VALUES (?, ?, ?, ?, ?, 'active', ?, ?)").run("competition-laliga", "LALIGA", "laliga", "sport-football", "country-germany", new Date().toISOString(), new Date().toISOString());
+  const repository = new NewsRepository(db);
+  const article = repository.createArticle({ title: "Why Hansi Flick Cancelled Barcelona Training Before Their La Liga Opener", status: "published" });
+  const barcelona = repository.addManualCategory(article.id, "team", "team-barcelona");
+  const elche = repository.addManualCategory(article.id, "team", "team-elche");
+  repository.addManualCategory(article.id, "competition", "competition-laliga");
+  repository.addManualCategory(article.id, "sport", "sport-football");
+
+  assert.equal(repository.listArticles({ status: "published", teamId: "team-barcelona" }).filter((item) => item.id === article.id).length, 1);
+  assert.equal(repository.listArticles({ status: "published", teamId: "team-elche" }).filter((item) => item.id === article.id).length, 1);
+  assert.equal(repository.listArticles({ status: "published", competitionId: "competition-laliga" }).filter((item) => item.id === article.id).length, 1);
+  assert.equal(repository.listArticles({ status: "published", sportId: "sport-football" }).filter((item) => item.id === article.id).length, 1);
+
+  db.prepare("INSERT INTO news_article_categories (id, article_id, category_type, entity_id, classification_status, created_at, updated_at) VALUES (?, ?, 'team', ?, 'approved', ?, ?)").run("duplicate-team-category", article.id, "team-elche", new Date().toISOString(), new Date().toISOString());
+  assert.equal(repository.listArticles({ status: "published", teamId: "team-elche" }).filter((item) => item.id === article.id).length, 1);
+
+  db.prepare("UPDATE news_article_categories SET classification_status = 'suggested' WHERE article_id = ? AND category_type = 'team' AND entity_id = 'team-elche'").run(article.id);
+  assert.equal(repository.listArticles({ status: "published", teamId: "team-elche" }).some((item) => item.id === article.id), false);
+  db.prepare("UPDATE news_article_categories SET classification_status = 'rejected' WHERE id = ?").run(barcelona.id);
+  assert.equal(repository.listArticles({ status: "published", teamId: "team-barcelona" }).some((item) => item.id === article.id), false);
+});
