@@ -96,6 +96,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
   const [sportName, setSportName] = useState("");
   const [sportLogoUrl, setSportLogoUrl] = useState("");
   const [sportCountryIds, setSportCountryIds] = useState<string[]>([]);
+  const [sportHostSearch, setSportHostSearch] = useState("");
 
   const [hostName, setHostName] = useState("");
   const [hostType, setHostType] = useState<HostType>("country");
@@ -131,6 +132,10 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
     () => (selectedSport ? hosts.filter((host) => host.sportId === selectedSport.id) : []),
     [hosts, selectedSport]
   );
+  const filteredSportHosts = useMemo(() => {
+    const query = sportHostSearch.trim().toLowerCase();
+    return query ? sportHosts.filter((host) => `${host.name} ${host.type}`.toLowerCase().includes(query)) : sportHosts;
+  }, [sportHostSearch, sportHosts]);
 
   const sportCompetitions = useMemo(
     () => (selectedSport ? competitions.filter((competition) => competition.sportId === selectedSport.id) : []),
@@ -184,6 +189,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
     setSportName("");
     setSportLogoUrl("");
     setSportCountryIds([]);
+    setSportHostSearch("");
     setHostName("");
     setHostType("country");
     setHostCountryId("");
@@ -209,11 +215,13 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
       setSportName(sport.name);
       setSportLogoUrl(sport.logoUrl ?? "");
       setSportCountryIds(sport.countryIds ?? []);
+      setSportHostSearch("");
       openModal({ kind: "sport", action: "edit" });
     } else {
       setSportName("");
       setSportLogoUrl("");
       setSportCountryIds([]);
+      setSportHostSearch("");
       openModal({ kind: "sport", action: "create" });
     }
   };
@@ -831,6 +839,35 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                     </label>
                   ))}
                 </div>
+              </label>
+              <label className="full-width">
+                Hosts for this Sport
+                <input
+                  value={sportHostSearch}
+                  onChange={(event) => setSportHostSearch(event.target.value)}
+                  placeholder="Search hosts"
+                  disabled={!selectedSport}
+                />
+                <div className="entity-list">
+                  {!selectedSport ? (
+                    <span className="field-note">Create the sport first, then add Hosts from this workspace.</span>
+                  ) : filteredSportHosts.length > 0 ? (
+                    filteredSportHosts.map((host) => (
+                      <div className="entity-list-item" key={host.id}>
+                        <strong>{host.name}</strong>
+                        <span>{host.type}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <span className="field-note">No Hosts match this search.</span>
+                  )}
+                </div>
+                <button type="button" className="secondary" onClick={() => {
+                  setModalContext(null);
+                  openHostEditor();
+                }} disabled={!selectedSport || isCatalogView}>
+                  Add Host
+                </button>
               </label>
             </div>
           ) : modalContext.kind === "host" ? (
