@@ -28,16 +28,16 @@ test("supports multiple typed hosts and host-owned competitions", () => {
   const uefa = createHost({ sportId: "sport-football", name: "UEFA", hostType: "federation" });
   const other = createHost({ sportId: "sport-football", name: "Custom Host", type: "other" });
   const england = createHost({ sportId: "sport-football", name: "England", type: "country" });
+  const spain = createHost({ sportId: "sport-football", name: "Spain", type: "country" });
+  const germany = createHost({ sportId: "sport-football", name: "Germany", type: "country" });
   const fiba = createHost({ sportId: "sport-basketball", name: "FIBA", type: "federation" });
 
   assert.equal(listHosts("sport-football").length, 5);
   assert.equal(listHosts("sport-basketball").length, 1);
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM countries WHERE name IN ('FIFA', 'CAF')").get().count, 0);
   assert.throws(() => createHost({ sportId: "sport-football", name: "FIFA", type: "organization" }), /host_duplicate/);
-  assert.throws(
-    () => createHost({ sportId: "sport-football", name: "Invalid", type: "country" }),
-    (error: any) => error?.code === "country_host_country_not_found" && /Select an existing country or create the country first/i.test(error.message)
-  );
+  assert.equal(spain.countryId, undefined);
+  assert.equal(germany.countryId, undefined);
   assert.equal(fifa.countryId, undefined);
   assert.equal(caf.countryId, undefined);
   assert.equal(other.countryId, undefined);

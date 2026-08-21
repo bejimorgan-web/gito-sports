@@ -2,7 +2,6 @@ import crypto from "node:crypto";
 
 import type { CreateHostRequest, Host, HostType, UpdateHostRequest } from "@gito/shared";
 import { getDatabase } from "../db/connection.js";
-import { findCountryByName } from "./countries-repository.js";
 
 const hostTypes: HostType[] = ["country", "organization", "federation", "association", "regional", "international", "other"];
 
@@ -46,12 +45,10 @@ function validateHostInput(database: ReturnType<typeof getDatabase>, sportId: st
   if (!hostTypes.includes(type)) {
     throw new Error("host_type_invalid");
   }
-  if (type === "country") {
-    if (!countryId) {
-      throw Object.assign(new Error("Select an existing country or create the country first."), { code: "country_host_country_not_found" });
-    }
-    if (!database.prepare("SELECT id FROM countries WHERE id = ?").get(countryId)) throw new Error("country_not_found");
-  } else if (countryId) {
+  if (countryId && !database.prepare("SELECT id FROM countries WHERE id = ?").get(countryId)) {
+    throw new Error("country_not_found");
+  }
+  if (type !== "country" && countryId) {
     throw new Error("non_country_host_cannot_reference_country");
   }
 }
@@ -79,7 +76,7 @@ export function createHost(input: CreateHostRequest): Host {
   const database = getDatabase();
   const name = input.name.trim();
   const type = input.type ?? input.hostType;
-  const countryId = type === "country" ? findCountryByName(name)?.id : undefined;
+  const countryId = input.countryId;
   validateHostInput(database, input.sportId, name, type as HostType, countryId);
   const duplicate = database.prepare("SELECT id FROM hosts WHERE sport_id = ? AND lower(name) = lower(?)").get(input.sportId, name);
   if (duplicate) throw new Error("host_duplicate");
@@ -101,7 +98,9 @@ export function updateHost(hostId: string, input: UpdateHostRequest): Host | und
 
   const name = input.name?.trim() || existing.name;
   const type = input.type ?? input.hostType ?? existing.host_type;
-  const countryId = type === "country" ? findCountryByName(name)?.id : null;
+  const countryId = type === "country"
+    ? input.countryId !== undefined ? input.countryId : existing.country_id
+    : null;
   validateHostInput(database, existing.sport_id, name, type, countryId);
   const duplicate = database.prepare("SELECT id FROM hosts WHERE sport_id = ? AND lower(name) = lower(?) AND id != ?").get(existing.sport_id, name, hostId);
   if (duplicate) throw new Error("host_duplicate");
