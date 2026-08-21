@@ -3,7 +3,7 @@ services:
     name: gito-backend
     runtime: node
     plan: starter
-    buildCommand: npm install && npm run build -w packages/shared && npm run build -w apps/backend && npx playwright install --with-deps chromium
+    buildCommand: npm ci && echo "[render] building commit $(git rev-parse HEAD)" && rm -rf apps/backend/dist && npm run build -w packages/shared && npm run build -w apps/backend && npx playwright install --with-deps chromium
     startCommand: node apps/backend/dist/server.js
     healthCheckPath: /health
     autoDeploy: true
