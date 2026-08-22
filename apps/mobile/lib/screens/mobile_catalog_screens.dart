@@ -529,6 +529,8 @@ class FixtureDetailScreen extends StatelessWidget {
               ListView(padding: const EdgeInsets.all(16), children: [
                 _FixtureTile(fixture: fixture),
                 const SizedBox(height: 16),
+                _MobileLineups(fixture: fixture),
+                const SizedBox(height: 16),
                 Text('Streams', style: Theme.of(context).textTheme.titleMedium),
                 ...fixture.streams.map((stream) => ListTile(
                     title: Text(stream.channelName),
@@ -537,6 +539,43 @@ class FixtureDetailScreen extends StatelessWidget {
                     trailing: Text(stream.status)))
               ])));
 }
+
+        class _MobileLineups extends StatelessWidget {
+          const _MobileLineups({required this.fixture});
+          final MobileFixture fixture;
+          @override
+          Widget build(BuildContext context) {
+            final lineups = fixture.lineups;
+            if (lineups.isEmpty) return const Card(child: ListTile(title: Text('Lineups'), subtitle: Text('Lineups not available yet.')));
+            return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Lineups', style: Theme.of(context).textTheme.titleLarge), ...lineups.map((lineup) => _MobileLineupCard(lineup: lineup, team: lineup.teamId == fixture.homeClub.id ? fixture.homeClub : fixture.awayClub))]);
+          }
+        }
+
+        class _MobileLineupCard extends StatelessWidget {
+          const _MobileLineupCard({required this.lineup, required this.team});
+          final MobileLineup lineup;
+          final MobileClub team;
+          @override
+          Widget build(BuildContext context) => Card(margin: const EdgeInsets.only(top: 12), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(team.name, style: Theme.of(context).textTheme.titleMedium), Text('${lineup.statusLabel} · ${lineup.formationName}'), const SizedBox(height: 8), _MobileLineupPitch(lineup: lineup), const SizedBox(height: 8), const Text('Substitutes', style: TextStyle(fontWeight: FontWeight.bold)), ...lineup.substitutes.map((player) => ListTile(dense: true, leading: Text('${player.shirtNumber ?? '-'}'), title: Text(player.name), subtitle: Text(player.position ?? '')))])));
+        }
+
+        class _MobileLineupPitch extends StatelessWidget {
+          const _MobileLineupPitch({required this.lineup});
+          final MobileLineup lineup;
+          @override
+          Widget build(BuildContext context) {
+            final bySlot = {for (final player in lineup.starters) player.slotIndex ?? -1: player};
+            return AspectRatio(aspectRatio: 1.25, child: Container(color: const Color(0xff2f8055), child: Stack(children: [for (var index = 0; index < lineup.positions.length; index++) Align(alignment: Alignment((((lineup.positions[index]['x'] as num?)?.toDouble() ?? 50) / 50) - 1, (((lineup.positions[index]['y'] as num?)?.toDouble() ?? 50) / 50) - 1), child: _MobileSlotMarker(player: bySlot[index], label: '${lineup.positions[index]['label'] ?? 'POS'}'))])));
+          }
+        }
+
+        class _MobileSlotMarker extends StatelessWidget {
+          const _MobileSlotMarker({required this.player, required this.label});
+          final MobileLineupPlayer? player;
+          final String label;
+          @override
+          Widget build(BuildContext context) => Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), color: Colors.white, child: Text(player == null ? label : '${player!.shirtNumber ?? '-'}\n${player!.name}', textAlign: TextAlign.center, style: const TextStyle(fontSize: 10, color: Colors.black)));
+        }
 
 class _NewsList extends StatelessWidget {
   const _NewsList({required this.articles, required this.api});

@@ -1844,6 +1844,12 @@ label {
   gap: 16px;
 }
 
+.lineup-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+.lineup-pitch-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin: 16px 0; padding: 16px; background: #2f8055; border: 2px solid rgba(255,255,255,.8); }
+.lineup-slot { color: #fff; }
+.lineup-slot span { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 700; }
+.fixture-lineup-editor select[multiple] { min-height: 110px; }
+
 .formation-list {
   display: grid;
   gap: 8px;

@@ -41,6 +41,8 @@ import type {
   ,FormationTemplate
   ,CreateFormationTemplateRequest
   ,UpdateFormationTemplateRequest
+  ,FixtureLineup
+  ,SaveFixtureLineupRequest
 } from "@gito/shared";
 
 // Prefer the standardized `VITE_API_URL` but keep backwards compatibility
@@ -711,6 +713,12 @@ export const apiClient = {
   },
   updateFormationTemplate(templateId: string, input: UpdateFormationTemplateRequest, accessToken: string) {
     return request<FormationTemplate>(`/catalog/formation-templates/${templateId}`, { method: 'PUT', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
+  },
+  listFixtureLineups(fixtureId: string) {
+    return request<FixtureLineup[]>(`/fixtures/${fixtureId}/lineups`);
+  },
+  saveFixtureLineup(fixtureId: string, input: SaveFixtureLineupRequest, accessToken: string) {
+    return request<FixtureLineup>(`/fixtures/${fixtureId}/lineups`, { method: 'PUT', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
   },
   deleteTeam(teamId: string, accessToken: string) {
     return request<void>(`/teams/${teamId}`, { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } });

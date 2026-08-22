@@ -291,6 +291,43 @@ CREATE TABLE IF NOT EXISTS formation_templates (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_formation_templates_key ON formation_templates(sport_id, key);
 
+CREATE TABLE IF NOT EXISTS fixture_lineups (
+  id TEXT PRIMARY KEY,
+  fixture_id TEXT NOT NULL,
+  team_id TEXT NOT NULL,
+  season_squad_id TEXT NOT NULL,
+  formation_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'not_available' CHECK (status IN ('not_available', 'possible', 'confirmed')),
+  captain_player_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(fixture_id, team_id),
+  FOREIGN KEY (fixture_id) REFERENCES matches(id),
+  FOREIGN KEY (team_id) REFERENCES teams(id),
+  FOREIGN KEY (season_squad_id) REFERENCES season_squads(id),
+  FOREIGN KEY (formation_id) REFERENCES formation_templates(id),
+  FOREIGN KEY (captain_player_id) REFERENCES players(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fixture_lineups_fixture ON fixture_lineups(fixture_id);
+
+CREATE TABLE IF NOT EXISTS lineup_player_assignments (
+  id TEXT PRIMARY KEY,
+  lineup_id TEXT NOT NULL,
+  player_id TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('starter', 'substitute')),
+  slot_index INTEGER,
+  order_index INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(lineup_id, player_id),
+  UNIQUE(lineup_id, role, slot_index),
+  FOREIGN KEY (lineup_id) REFERENCES fixture_lineups(id) ON DELETE CASCADE,
+  FOREIGN KEY (player_id) REFERENCES players(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_lineup_assignments_lineup ON lineup_player_assignments(lineup_id);
+
 CREATE TABLE IF NOT EXISTS matches (
   id TEXT PRIMARY KEY,
   competition_id TEXT NOT NULL,

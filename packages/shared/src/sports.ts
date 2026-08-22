@@ -196,6 +196,31 @@ export interface FormationTemplate { id: EntityId; sportId: EntityId; name: stri
 export interface CreateFormationTemplateRequest { sportId: EntityId; name: string; key?: string; formation: string; positions: FormationPositionPoint[]; }
 export interface UpdateFormationTemplateRequest { sportId?: EntityId; name?: string; key?: string; formation?: string; positions?: FormationPositionPoint[]; status?: EntityStatus; }
 
+export type LineupStatus = "not_available" | "possible" | "confirmed";
+export type LineupPlayerRole = "starter" | "substitute";
+export interface LineupPlayerAssignment { slotIndex?: number; playerId: EntityId; role: LineupPlayerRole; orderIndex: number; }
+export interface FixtureLineup {
+  id: EntityId;
+  fixtureId: EntityId;
+  teamId: EntityId;
+  seasonSquadId: EntityId;
+  formationId: EntityId;
+  status: LineupStatus;
+  players: LineupPlayerAssignment[];
+  captainPlayerId?: EntityId;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface SaveFixtureLineupRequest {
+  teamId: EntityId;
+  seasonSquadId: EntityId;
+  formationId: EntityId;
+  status: LineupStatus;
+  starters: Array<{ slotIndex: number; playerId: EntityId }>;
+  substitutes: EntityId[];
+  captainPlayerId?: EntityId | null;
+}
+
 export interface CompetitionSeasonTeam {
   id: EntityId;
   competitionId: EntityId;

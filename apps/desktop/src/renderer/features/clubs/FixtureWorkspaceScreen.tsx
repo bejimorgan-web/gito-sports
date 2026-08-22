@@ -6,6 +6,7 @@ import {
   localDateTimeToUtc,
   utcToOperatorKickoff,
 } from "./fixture-time";
+import { FixtureLineupEditor } from "./FixtureLineupEditor";
 
 export function FixtureWorkspaceScreen({
   accessToken,
@@ -421,6 +422,9 @@ export function FixtureWorkspaceScreen({
             </button>
           </div>
         </section>
+      ) : null}
+      {selectedFixture ? (
+        <FixtureLineupEditor fixture={selectedFixture} accessToken={accessToken} />
       ) : null}
       {selectedFixture ? (
         <section className="console-panel">

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { createCanonicalFixture, deleteCanonicalFixture, getCanonicalFixtureById, listCanonicalFixtures, updateCanonicalFixture } from "../repositories/fixtures-repository.js";
 import { protectedRoute } from "../middleware/protected.js";
 import { createCanonicalStream, deleteCanonicalStream, listStreams, updateCanonicalStream } from "../repositories/streams-repository.js";
+import { clearFixtureLineup, getFixtureLineups, saveFixtureLineup } from "../repositories/fixture-lineups-repository.js";
 
 export const fixturesRouter = Router();
 
@@ -84,4 +85,26 @@ fixturesRouter.delete("/:fixtureId", protectedRoute, (request, response) => {
     const message = error instanceof Error ? error.message : String(error);
     response.status(message === "fixture_in_use" ? 409 : 400).json({ error: message, message });
   }
+});
+
+fixturesRouter.get("/:fixtureId/lineups", (request, response) => {
+  const fixtureId = String(request.params.fixtureId ?? "");
+  if (!getCanonicalFixtureById(fixtureId)) { response.status(404).json({ error: "fixture_not_found" }); return; }
+  response.json({ data: getFixtureLineups(fixtureId) });
+});
+
+fixturesRouter.put("/:fixtureId/lineups", protectedRoute, (request, response) => {
+  try {
+    response.json({ data: saveFixtureLineup(String(request.params.fixtureId ?? ""), request.body) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const notFound = ["fixture_not_found", "season_squad_not_found", "formation_template_not_found"].includes(message);
+    response.status(notFound ? 404 : 409).json({ error: message, message });
+  }
+});
+
+fixturesRouter.delete("/:fixtureId/lineups/:teamId", protectedRoute, (request, response) => {
+  const removed = clearFixtureLineup(String(request.params.fixtureId ?? ""), String(request.params.teamId ?? ""));
+  if (!removed) { response.status(404).json({ error: "lineup_not_found" }); return; }
+  response.status(204).send();
 });
