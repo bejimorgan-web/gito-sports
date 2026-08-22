@@ -1,4 +1,5 @@
 :root {
+  --brand-primary: #efb33f;
   color: #e7edf4;
   background: #080d13;
   font-family:
@@ -1835,6 +1836,71 @@ label {
   color: #637385;
   background: #152233;
   cursor: not-allowed;
+}
+
+.catalog-split {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.7fr) minmax(420px, 1.3fr);
+  gap: 16px;
+}
+
+.formation-list {
+  display: grid;
+  gap: 8px;
+}
+
+.formation-list button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  text-align: left;
+  border: 1px solid var(--border-color);
+  background: var(--surface-muted);
+  color: var(--text-primary);
+}
+
+.formation-list button.selected,
+.formation-list button:hover {
+  border-color: var(--brand-primary);
+}
+
+.football-pitch {
+  position: relative;
+  min-height: 430px;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.8);
+  background: #2f8055;
+  background-image: linear-gradient(rgba(255,255,255,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.08) 1px, transparent 1px);
+  background-size: 10% 10%;
+}
+
+.pitch-slot {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  min-width: 42px;
+  padding: 8px 6px;
+  border-radius: 999px;
+  border: 2px solid var(--brand-primary);
+  background: #fff;
+  color: #16231c;
+  font-weight: 700;
+  font-size: 11px;
+}
+
+.slot-editor,
+.slot-list {
+  margin-top: 16px;
+}
+
+.slot-list > div {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+@media (max-width: 900px) {
+  .catalog-split { grid-template-columns: 1fr; }
 }
 
 .status-pill {

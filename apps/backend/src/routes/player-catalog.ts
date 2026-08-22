@@ -13,6 +13,7 @@ import {
   listPlayers,
   listSeasonSquads,
   listSquadPlayers,
+  removeSquadPlayer,
   updateFormationTemplate,
   updatePlayer,
   updateSeasonSquad,
@@ -61,6 +62,11 @@ playerCatalogRouter.get("/season-squads/:squadId/players", (request, response) =
 playerCatalogRouter.post("/season-squads/:squadId/players", protectedRoute, (request, response) => response.status(201).json({ data: createSquadPlayer({ ...request.body, squadId: request.params.squadId }) }));
 playerCatalogRouter.put("/season-squad-players/:memberId", protectedRoute, (request, response) => {
   const result = updateSquadPlayer(String(request.params.memberId ?? ""), request.body);
+  if (!result) return response.status(404).json({ error: "squad_player_not_found" });
+  return response.json({ data: result });
+});
+playerCatalogRouter.delete("/season-squad-players/:memberId", protectedRoute, (request, response) => {
+  const result = removeSquadPlayer(String(request.params.memberId ?? ""));
   if (!result) return response.status(404).json({ error: "squad_player_not_found" });
   return response.json({ data: result });
 });

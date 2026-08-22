@@ -676,6 +676,9 @@ export const apiClient = {
   createPlayer(input: CreatePlayerRequest, accessToken: string) {
     return request<Player>('/catalog/players', { method: 'POST', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
   },
+  getPlayer(playerId: string) {
+    return request<Player>(`/catalog/players/${playerId}`);
+  },
   updatePlayer(playerId: string, input: UpdatePlayerRequest, accessToken: string) {
     return request<Player>(`/catalog/players/${playerId}`, { method: 'PUT', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
   },
@@ -696,6 +699,9 @@ export const apiClient = {
   },
   updateSquadPlayer(memberId: string, input: UpdateSquadPlayerRequest, accessToken: string) {
     return request<SquadPlayer>(`/catalog/season-squad-players/${memberId}`, { method: 'PUT', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
+  },
+  removeSquadPlayer(memberId: string, accessToken: string) {
+    return request<SquadPlayer>(`/catalog/season-squad-players/${memberId}`, { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } });
   },
   listFormationTemplates(filters?: { sportId?: string; status?: string }) {
     return request<FormationTemplate[]>(buildApiPath('/catalog/formation-templates', filters));

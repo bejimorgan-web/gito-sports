@@ -313,6 +313,9 @@ function hasTable(database: DatabaseSync, tableName: string): boolean {
 }
 
 function ensureNewsSchemaColumns(database: DatabaseSync) {
+    if (hasTable(database, "players") && !hasColumn(database, "players", "photo_url")) {
+      database.exec("ALTER TABLE players ADD COLUMN photo_url TEXT");
+    }
   database.exec(`
     CREATE TABLE IF NOT EXISTS news_generated_rss_sources (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, source_url TEXT NOT NULL, feed_token TEXT NOT NULL UNIQUE,

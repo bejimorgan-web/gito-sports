@@ -13,7 +13,9 @@ export type NavigationKey =
   | "matches"
   | "mobileFeatures"
   | "news"
-  | "clubs";
+  | "clubs"
+  | "squads"
+  | "formations";
   
 
 export interface NavigationItem {
@@ -42,6 +44,16 @@ export const navigationItems: NavigationItem[] = [
     key: "sports",
     label: "Manage",
     description: "Manage sports, countries, competitions, and clubs"
+  },
+  {
+    key: "squads",
+    label: "Squads & Players",
+    description: "Manage team season squads and players"
+  },
+  {
+    key: "formations",
+    label: "Formations",
+    description: "Manage reusable formation templates"
   },
   {
     key: "mobileFeatures",

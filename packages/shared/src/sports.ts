@@ -121,6 +121,7 @@ export interface Player {
   firstName: string;
   lastName: string;
   displayName: string;
+  photoUrl?: string;
   position?: PlayerPosition;
   jerseyNumber?: number;
   heightCm?: number;
@@ -137,6 +138,7 @@ export interface CreatePlayerRequest {
   firstName: string;
   lastName: string;
   displayName?: string;
+  photoUrl?: string;
   position?: PlayerPosition;
   jerseyNumber?: number;
   heightCm?: number;
@@ -150,6 +152,7 @@ export interface UpdatePlayerRequest {
   firstName?: string;
   lastName?: string;
   displayName?: string;
+  photoUrl?: string | null;
   position?: PlayerPosition;
   jerseyNumber?: number | null;
   heightCm?: number | null;

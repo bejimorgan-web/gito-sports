@@ -227,6 +227,7 @@ CREATE TABLE IF NOT EXISTS players (
   first_name TEXT NOT NULL,
   last_name TEXT NOT NULL,
   display_name TEXT NOT NULL,
+  photo_url TEXT,
   position TEXT,
   jersey_number INTEGER,
   height_cm REAL,

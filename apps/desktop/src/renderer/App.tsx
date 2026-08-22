@@ -20,6 +20,8 @@ import { MobileFeatureControlScreen } from "./features/mobile/MobileFeatureContr
 import { NewsWorkspaceScreen } from "./features/news/NewsWorkspaceScreen";
 import { ClubManagementScreen } from "./features/clubs/ClubManagementScreen";
 import { FixtureWorkspaceScreen } from "./features/clubs/FixtureWorkspaceScreen";
+import { SquadManagementScreen } from "./features/teams/SquadManagementScreen";
+import { FormationManagementScreen } from "./features/sports/FormationManagementScreen";
 import { AuthenticatedLayout } from "./layouts/AuthenticatedLayout";
 import { LoginScreen } from "./screens/LoginScreen";
 import { apiClient, API_BASE_URL } from "./services/api-client";
@@ -178,6 +180,10 @@ function renderScreen(
       return <NewsWorkspaceScreen accessToken={state.accessToken} />;
     case "clubs":
       return <><ClubManagementScreen accessToken={state.accessToken} /><FixtureWorkspaceScreen accessToken={state.accessToken} /></>;
+    case "squads":
+      return <SquadManagementScreen accessToken={state.accessToken} />;
+    case "formations":
+      return <FormationManagementScreen accessToken={state.accessToken} />;
     case "dashboard":
       return (
         <DashboardShell
