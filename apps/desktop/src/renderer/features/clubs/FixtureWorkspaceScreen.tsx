@@ -6,7 +6,7 @@ import {
   localDateTimeToUtc,
   utcToOperatorKickoff,
 } from "./fixture-time";
-import { FixtureLineupEditor } from "./FixtureLineupEditor";
+import { FootballLineupEditor } from "./FootballLineupEditor";
 
 export function FixtureWorkspaceScreen({
   accessToken,
@@ -424,7 +424,7 @@ export function FixtureWorkspaceScreen({
         </section>
       ) : null}
       {selectedFixture ? (
-        <FixtureLineupEditor fixture={selectedFixture} accessToken={accessToken} />
+        <FootballLineupEditor fixture={selectedFixture} accessToken={accessToken} />
       ) : null}
       {selectedFixture ? (
         <section className="console-panel">

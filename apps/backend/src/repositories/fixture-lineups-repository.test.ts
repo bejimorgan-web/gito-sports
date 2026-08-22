@@ -11,7 +11,7 @@ process.env.AUTO_RESTORE_BACKUP = "false";
 
 const { getDatabase } = await import("../db/connection.js");
 const { createCanonicalFixture } = await import("./fixtures-repository.js");
-const { createFormationTemplate } = await import("./player-catalog-repository.js");
+const { createFormationTemplate, listFormationTemplates } = await import("./player-catalog-repository.js");
 const { createPlayer, createSeasonSquad, createSquadPlayer } = await import("./player-catalog-repository.js");
 const { clearFixtureLineup, getFixtureLineups, saveFixtureLineup } = await import("./fixture-lineups-repository.js");
 
@@ -50,6 +50,17 @@ test("canonical lineups persist independently and enforce squad, slot, and confi
   assert.throws(() => saveFixtureLineup(fixture.id, { teamId: "team-home", seasonSquadId: homeSquad.id, formationId: formation.id, status: "possible", starters: [{ slotIndex: 0, playerId: awayPlayer.id }], substitutes: [] }), /lineup_player_not_in_squad/);
   assert.equal(clearFixtureLineup(fixture.id, "team-home"), true);
   assert.equal(getFixtureLineups(fixture.id).some((lineup) => lineup.teamId === "team-away"), true);
+});
+
+test("football formation catalog provides standard presets with eleven normalized slots", () => {
+  const database = getDatabase();
+  const timestamp = new Date().toISOString();
+  database.prepare("INSERT OR IGNORE INTO sports (id, name, slug, status, created_at, updated_at) VALUES (?, ?, ?, 'active', ?, ?)").run("sport-football-presets", "Football Presets", "football-presets", timestamp, timestamp);
+  const sport = database.prepare("SELECT id FROM sports WHERE slug = 'football'").get() as { id: string };
+  const formations = listFormationTemplates({ sportId: sport.id });
+  assert.ok(formations.some((formation) => formation.name === "4-3-3"));
+  assert.equal(formations.find((formation) => formation.name === "4-3-3")?.positions.length, 11);
+  assert.ok(formations.find((formation) => formation.name === "4-3-3")?.positions.every((position) => position.x >= 0 && position.x <= 100 && position.y >= 0 && position.y <= 100));
 });
 
 test.after(() => {
