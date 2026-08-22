@@ -133,9 +133,9 @@ class MobileApiService {
       MobileNewsArticle.fromJson(
           Map<String, dynamic>.from(await _get('/mobile/news/$articleId')));
 
-  Future<MobileFixture> getFixture(String fixtureId) async =>
+    Future<MobileFixture> getFixture(String fixtureId, {String? clubId}) async =>
       MobileFixture.fromJson(
-          Map<String, dynamic>.from(await _get('/mobile/fixtures/$fixtureId')));
+                    Map<String, dynamic>.from(await _get('/mobile/fixtures/$fixtureId${clubId == null ? '' : '?clubId=${Uri.encodeQueryComponent(clubId)}'}')));
   Future<List<MobileNewsArticle>> getCompetitionNews(
           String competitionId) async =>
       _news('/mobile/competitions/$competitionId/news');

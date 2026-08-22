@@ -18,7 +18,7 @@ export type MobileFixture = {
   startsAt: string;
   status: string;
   venue: string | null;
-  competition: { id: string; name: string; slug: string };
+  competition: { id: string; name: string; slug: string; logoUrl: string | null };
   season: { id: string; name: string } | null;
   sport: { id: string; name: string } | null;
   country: { id: string; name: string } | null;
@@ -109,7 +109,7 @@ export function mapMobileFixture(fixture: any, suppliedSnapshot?: ScoreMatchSumm
     startsAt: fixture.startsAt,
     status: fixture.status,
     venue: fixture.venueName ?? null,
-    competition: { id: fixture.competition.id, name: fixture.competition.name, slug: fixture.competition.slug },
+    competition: { id: fixture.competition.id, name: fixture.competition.name, slug: fixture.competition.slug, logoUrl: fixture.competition.logoUrl ?? null },
     season: fixture.season ? { id: fixture.season.id, name: fixture.season.name } : null,
     sport: fixture.sport ? { id: fixture.sport.id, name: fixture.sport.name } : null,
     country: fixture.country ? { id: fixture.country.id, name: fixture.country.name } : null,
@@ -230,11 +230,12 @@ export function mobileClubFixtures(clubId: string, filters?: { seasonId?: string
   return listCanonicalFixturesForTeam(clubId, { seasonId: filters?.seasonId, competitionId: filters?.competitionId }).map((fixture) => mapMobileFixture(fixture)).filter((fixture) => (!filters?.status || fixture.status === filters.status) && (!filters?.from || fixture.startsAt >= filters.from) && (!filters?.to || fixture.startsAt <= filters.to));
 }
 
-export function mobileFixture(fixtureId: string) {
+export function mobileFixture(fixtureId: string, clubId?: string) {
   const fixture = getCanonicalFixtureById(fixtureId);
   if (!fixture) return undefined;
   const news = new NewsRepository().listArticles({ matchId: fixtureId, status: "published" });
-  return { ...mapMobileFixture(fixture), news };
+  const result = { ...mapMobileFixture(fixture), news };
+  return clubId ? { ...result, lineups: result.lineups.filter((lineup) => lineup.teamId === clubId) } : result;
 }
 
 function safeAbsoluteUrl(value: string | null | undefined, baseUrl?: string): string | null {

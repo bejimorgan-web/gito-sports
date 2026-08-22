@@ -63,18 +63,20 @@ class MobileClub {
 }
 
 class MobileCompetition {
-  const MobileCompetition(
-      {required this.id, required this.name, this.slug, this.sportId});
+    const MobileCompetition(
+            {required this.id, required this.name, this.slug, this.sportId, this.logoUrl});
   final String id;
   final String name;
   final String? slug;
   final String? sportId;
+    final String? logoUrl;
   factory MobileCompetition.fromJson(Map<String, dynamic> json) =>
       MobileCompetition(
           id: '${json['id'] ?? ''}',
           name: '${json['name'] ?? ''}',
           slug: json['slug']?.toString(),
-          sportId: json['sportId']?.toString());
+          sportId: json['sportId']?.toString(),
+          logoUrl: json['logoUrl']?.toString());
 }
 
 class MobileSeason {

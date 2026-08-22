@@ -267,9 +267,14 @@ class _ClubDetailScreenState extends State<ClubDetailScreen> {
                           ? _NewsList(
                               articles: value as List<MobileNewsArticle>,
                               api: widget.api)
-                          : _FixtureList(
-                              fixtures: value as List<MobileFixture>,
-                              api: widget.api)))
+                            : tab == 1
+                              ? _ClubFixtureList(
+                                fixtures: value as List<MobileFixture>,
+                                clubId: widget.clubId,
+                                api: widget.api)
+                              : _FixtureList(
+                                fixtures: value as List<MobileFixture>,
+                                api: widget.api)))
             ]);
           }));
 }
@@ -516,18 +521,20 @@ class FixtureDetailScreen extends StatelessWidget {
   const FixtureDetailScreen(
       {required this.fixtureId,
       super.key,
+        this.clubId,
       this.api = const MobileApiService()});
   final String fixtureId;
+      final String? clubId;
   final MobileApiService api;
   @override
   Widget build(BuildContext context) => Scaffold(
       appBar: AppBar(title: const Text('Fixture')),
       body: MobileStateView<MobileFixture>(
-          future: api.getFixture(fixtureId),
+          future: api.getFixture(fixtureId, clubId: clubId),
           emptyText: 'Fixture not found.',
           builder: (context, fixture) =>
               ListView(padding: const EdgeInsets.all(16), children: [
-                _FixtureTile(fixture: fixture),
+                _FixtureHeroCard(fixture: fixture),
                 const SizedBox(height: 16),
                 _MobileLineups(fixture: fixture),
                 const SizedBox(height: 16),
@@ -701,6 +708,45 @@ class _FixtureList extends StatelessWidget {
                   fixtureId: fixtures[index].id, api: api)))));
 }
 
+class _ClubFixtureList extends StatefulWidget {
+  const _ClubFixtureList({required this.fixtures, required this.clubId, required this.api});
+  final List<MobileFixture> fixtures;
+  final String clubId;
+  final MobileApiService api;
+  @override
+  State<_ClubFixtureList> createState() => _ClubFixtureListState();
+}
+
+class _ClubFixtureListState extends State<_ClubFixtureList> {
+  String? competitionId;
+  @override
+  Widget build(BuildContext context) {
+    final competitions = <String, MobileCompetition>{};
+    for (final fixture in widget.fixtures) competitions[fixture.competition.id] = fixture.competition;
+    final fixtures = widget.fixtures.where((fixture) => competitionId == null || fixture.competition.id == competitionId).toList()..sort((a, b) => (a.startsAt ?? DateTime(9999)).compareTo(b.startsAt ?? DateTime(9999)));
+    return Column(children: [Padding(padding: const EdgeInsets.fromLTRB(16, 8, 16, 4), child: DropdownButtonFormField<String?>(value: competitionId, decoration: const InputDecoration(labelText: 'Competition'), items: [const DropdownMenuItem<String?>(value: null, child: Text('All Competitions')), ...competitions.values.map((competition) => DropdownMenuItem<String?>(value: competition.id, child: Text(competition.name)))], onChanged: (value) => setState(() => competitionId = value)),), Expanded(child: ListView.builder(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), itemCount: fixtures.length, itemBuilder: (context, index) { final fixture = fixtures[index]; return _FixtureHeroCard(fixture: fixture, onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => FixtureDetailScreen(fixtureId: fixture.id, clubId: widget.clubId, api: widget.api)))); }))]);
+  }
+}
+
+class _FixtureHeroCard extends StatelessWidget {
+  const _FixtureHeroCard({required this.fixture, this.onTap});
+  final MobileFixture fixture;
+  final VoidCallback? onTap;
+  String _date() => fixture.startsAt == null ? 'Date unavailable' : '${fixture.startsAt!.toLocal().day.toString().padLeft(2, '0')} ${_months[fixture.startsAt!.toLocal().month - 1]} ${fixture.startsAt!.toLocal().year}';
+  String _time() => fixture.startsAt == null ? 'Time unavailable' : '${fixture.startsAt!.toLocal().hour.toString().padLeft(2, '0')}:${fixture.startsAt!.toLocal().minute.toString().padLeft(2, '0')}';
+  @override
+  Widget build(BuildContext context) => Card(margin: const EdgeInsets.symmetric(vertical: 8), clipBehavior: Clip.antiAlias, child: InkWell(onTap: onTap, child: Padding(padding: const EdgeInsets.all(14), child: Column(children: [Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [_Logo(url: fixture.competition.logoUrl, label: fixture.competition.name), Text(_date(), style: Theme.of(context).textTheme.labelLarge)]), const SizedBox(height: 12), Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, crossAxisAlignment: CrossAxisAlignment.start, children: [_HeroTeam(team: fixture.homeClub), Padding(padding: const EdgeInsets.only(top: 30), child: Text('VS', style: Theme.of(context).textTheme.titleMedium)), _HeroTeam(team: fixture.awayClub)]), const SizedBox(height: 10), Text(fixture.liveStatusLabel.isNotEmpty ? fixture.liveStatusLabel : _time(), style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)), Text('${fixture.competition.name} · ${fixture.season?.name ?? 'Season unavailable'}', style: Theme.of(context).textTheme.bodySmall), if (fixture.venue != null) Text(fixture.venue!, style: Theme.of(context).textTheme.bodySmall)]))));
+}
+
+class _HeroTeam extends StatelessWidget {
+  const _HeroTeam({required this.team});
+  final MobileClub team;
+  @override
+  Widget build(BuildContext context) => SizedBox(width: 110, child: Column(children: [_Logo(url: team.logoUrl, label: team.name, radius: 34), const SizedBox(height: 6), Text(team.name, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold))]));
+}
+
+const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 class _FixtureTile extends StatelessWidget {
   const _FixtureTile({required this.fixture, this.onTap});
   final MobileFixture fixture;
@@ -716,11 +762,13 @@ class _FixtureTile extends StatelessWidget {
 }
 
 class _Logo extends StatelessWidget {
-  const _Logo({required this.url, required this.label});
+  const _Logo({required this.url, required this.label, this.radius = 22});
   final String? url;
   final String label;
+  final double radius;
   @override
   Widget build(BuildContext context) => CircleAvatar(
+      radius: radius,
       backgroundImage: url == null ? null : NetworkImage(url!),
       child: url == null ? Text(label.isEmpty ? '?' : label[0]) : null);
 }

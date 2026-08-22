@@ -179,7 +179,7 @@ mobileRouter.get("/news/:articleId", (request, response) => {
 });
 
 mobileRouter.get("/fixtures/:fixtureId", (request, response) => {
-  const fixture = mobileFixture(String(request.params.fixtureId ?? ""));
+  const fixture = mobileFixture(String(request.params.fixtureId ?? ""), typeof request.query.clubId === "string" ? request.query.clubId : undefined);
   if (!fixture) { response.status(404).json({ error: "fixture_not_found" }); return; }
   response.json({ data: fixture });
 });
