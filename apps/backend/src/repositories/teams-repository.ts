@@ -24,6 +24,14 @@ function now() {
   return new Date().toISOString();
 }
 
+function countryIdForHost(database: ReturnType<typeof getDatabase>, host: { host_type: string; country_id: string | null; name?: string }) {
+  if (host.host_type !== "country") return null;
+  if (host.country_id) return host.country_id;
+  if (!host.name) return null;
+  const country = database.prepare("SELECT id FROM countries WHERE lower(name) = lower(?) AND status = 'active'").get(host.name) as { id: string } | undefined;
+  return country?.id ?? null;
+}
+
 function mapTeam(row: TeamRow): Team {
   return {
     id: row.id,
@@ -86,17 +94,19 @@ export function createTeam(input: CreateTeamRequest): Team {
   const database = getDatabase();
   const id = crypto.randomUUID();
   const timestamp = now();
-  const slug = getUniqueTeamSlug(database, input.slug ?? input.name, input.sportId, input.countryId);
-  if (input.hostId && !database.prepare("SELECT id FROM hosts WHERE id = ? AND sport_id = ? AND status = 'active'").get(input.hostId, input.sportId)) {
-    throw new Error("team_host_sport_mismatch");
-  }
+  const host = input.hostId ? database.prepare("SELECT sport_id, host_type, country_id, name FROM hosts WHERE id = ? AND status = 'active'").get(input.hostId) as { sport_id: string; host_type: string; country_id: string | null; name: string } | undefined : undefined;
+  if (input.hostId && (!host || host.sport_id !== input.sportId)) throw new Error("team_host_sport_mismatch");
+  if ((input.type === "club" || input.type === "national") && (!host || host.host_type !== "country")) throw new Error("team_country_host_required");
+  if (input.countryId && host?.host_type === "country" && input.countryId !== host.country_id) throw new Error("team_country_host_mismatch");
+  const countryId = host ? countryIdForHost(database, host) : input.countryId;
+  const slug = getUniqueTeamSlug(database, input.slug ?? input.name, input.sportId, countryId ?? undefined);
 
   database
     .prepare(
       `INSERT INTO teams (id, sport_id, host_id, country_id, name, short_name, slug, type, logo_url, status, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`
     )
-    .run(id, input.sportId, input.hostId ?? null, input.countryId ?? null, input.name, input.shortName ?? null, slug, input.type, input.logoUrl ?? null, timestamp, timestamp);
+    .run(id, input.sportId, input.hostId ?? null, countryId ?? null, input.name, input.shortName ?? null, slug, input.type, input.logoUrl ?? null, timestamp, timestamp);
 
   return {
     id,
@@ -107,7 +117,7 @@ export function createTeam(input: CreateTeamRequest): Team {
     status: "active",
     createdAt: timestamp,
     updatedAt: timestamp,
-    ...(input.countryId ? { countryId: input.countryId } : {}),
+    ...(countryId ? { countryId } : {}),
     ...(input.shortName ? { shortName: input.shortName } : {}),
     slug,
     ...(input.logoUrl ? { logoUrl: input.logoUrl } : {})
@@ -141,11 +151,13 @@ export function updateTeam(teamId: string, input: Partial<CreateTeamRequest> & {
 
   const timestamp = now();
   const sportId = input.sportId ?? existing.sport_id;
-  const countryId = input.countryId ?? existing.country_id;
   const hostId = input.hostId ?? existing.host_id;
-  if (hostId && !database.prepare("SELECT id FROM hosts WHERE id = ? AND sport_id = ? AND status = 'active'").get(hostId, sportId)) {
-    throw new Error("team_host_sport_mismatch");
-  }
+  const host = hostId ? database.prepare("SELECT sport_id, host_type, country_id, name FROM hosts WHERE id = ? AND status = 'active'").get(hostId) as { sport_id: string; host_type: string; country_id: string | null; name: string } | undefined : undefined;
+  if (hostId && (!host || host.sport_id !== sportId)) throw new Error("team_host_sport_mismatch");
+  const type = input.type ?? existing.type;
+  if ((type === "club" || type === "national") && (!host || host.host_type !== "country")) throw new Error("team_country_host_required");
+  if (input.countryId && host?.host_type === "country" && input.countryId !== host.country_id) throw new Error("team_country_host_mismatch");
+  const countryId = host ? countryIdForHost(database, host) : input.countryId ?? existing.country_id;
   const name = input.name ?? existing.name;
   const slug = getUniqueTeamSlug(database, input.slug ?? name, sportId, countryId ?? undefined, teamId);
 
@@ -161,7 +173,7 @@ export function updateTeam(teamId: string, input: Partial<CreateTeamRequest> & {
       name,
       input.shortName ?? existing.short_name,
       slug,
-      input.type ?? existing.type,
+      type,
       input.logoUrl ?? existing.logo_url,
       input.status ?? existing.status,
       timestamp,

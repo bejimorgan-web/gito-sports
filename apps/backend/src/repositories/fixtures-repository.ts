@@ -80,8 +80,8 @@ export function getCanonicalFixtureById(fixtureId: string) {
     SELECT m.id, m.competition_id, m.season_id, m.home_team_id, m.away_team_id,
            m.starts_at, m.venue_name, m.status, m.external_provider, m.external_match_id,
            m.created_at, m.updated_at,
-           h.name AS home_team_name, h.short_name AS home_team_short_name, h.logo_url AS home_team_logo_url,
-           a.name AS away_team_name, a.short_name AS away_team_short_name, a.logo_url AS away_team_logo_url,
+           h.name AS home_team_name, h.short_name AS home_team_short_name, h.logo_url AS home_team_logo_url, h.host_id AS home_team_host_id,
+           a.name AS away_team_name, a.short_name AS away_team_short_name, a.logo_url AS away_team_logo_url, a.host_id AS away_team_host_id,
            c.name AS competition_name, c.slug AS competition_slug,
            s.name AS season_name,
            sp.id AS sport_id, sp.name AS sport_name,
@@ -115,8 +115,8 @@ export function getCanonicalFixtureById(fixtureId: string) {
     country: row.country_id ? { id: row.country_id, name: row.country_name } : null,
     competition: { id: row.competition_id, name: row.competition_name, slug: row.competition_slug },
     season: row.season_id ? { id: row.season_id, name: row.season_name } : null,
-    homeTeam: { id: row.home_team_id, name: row.home_team_name, shortName: row.home_team_short_name, logoUrl: row.home_team_logo_url },
-    awayTeam: { id: row.away_team_id, name: row.away_team_name, shortName: row.away_team_short_name, logoUrl: row.away_team_logo_url },
+    homeTeam: { id: row.home_team_id, name: row.home_team_name, shortName: row.home_team_short_name, logoUrl: row.home_team_logo_url, ...(row.home_team_host_id ? { hostId: row.home_team_host_id } : {}) },
+    awayTeam: { id: row.away_team_id, name: row.away_team_name, shortName: row.away_team_short_name, logoUrl: row.away_team_logo_url, ...(row.away_team_host_id ? { hostId: row.away_team_host_id } : {}) },
     streams
   };
 }

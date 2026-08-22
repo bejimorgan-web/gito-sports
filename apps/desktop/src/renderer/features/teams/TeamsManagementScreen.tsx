@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 import type { Country, CreateTeamRequest, Host, Sport, Team, TeamType } from "@gito/shared";
 import { apiClient } from "../../services/api-client";
@@ -42,6 +42,7 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
     (!filterCountryId || team.countryId === filterCountryId)
   ), [filterCountryId, filterHostId, filterSportId, filterType, teams]);
   const filterHosts = hosts.filter((host) => !filterSportId || host.sportId === filterSportId);
+  const teamHosts = participatingHosts.filter((host) => type === "club" || type === "national" ? host.type === "country" : true);
   const filteredCountries = selectedSport?.countryIds?.length
     ? countries.filter((country) => selectedSport.countryIds?.includes(country.id))
     : countries;
@@ -117,7 +118,7 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
           name,
           type,
           ...(slug ? { slug } : {}),
-          ...(countryId ? { countryId } : {}),
+          ...(type === "custom" && countryId ? { countryId } : {}),
           ...(shortName ? { shortName } : {}),
           ...(logoUrl ? { logoUrl } : {})
         };
@@ -130,7 +131,7 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
           name,
           type,
           ...(slug ? { slug } : {}),
-          ...(countryId ? { countryId } : {}),
+          ...(type === "custom" && countryId ? { countryId } : {}),
           ...(shortName ? { shortName } : {}),
           ...(logoUrl ? { logoUrl } : {})
         };
@@ -222,24 +223,12 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
             </select>
           </label>
           <label>
-            Country
-            <select value={countryId} onChange={(event) => setCountryId(event.target.value)}>
-              <option value="">None</option>
-              {filteredCountries.map((country) => (
-                <option key={country.id} value={country.id}>{country.name}</option>
-              ))}
-            </select>
-            {selectedSport?.countryIds?.length ? (
-              <small>{filteredCountries.length} supported country{filteredCountries.length === 1 ? "" : "ies"} for {selectedSport.name}</small>
-            ) : null}
-          </label>
-          <label>
-            Participating Host
+            Participating Host / Country
             <select value={hostId} onChange={(event) => setHostId(event.target.value)} disabled={!sportId}>
               <option value="">None</option>
-              {participatingHosts.map((host) => <option key={host.id} value={host.id}>{host.name} ({host.type})</option>)}
+              {teamHosts.map((host) => <option key={host.id} value={host.id}>{host.name}</option>)}
             </select>
-            {sportId && participatingHosts.length === 0 ? <small>No Hosts are assigned to this Sport yet.</small> : null}
+            {sportId && teamHosts.length === 0 ? <small>No Country Hosts are assigned to this Sport yet.</small> : null}
           </label>
           <label>
             Team Type

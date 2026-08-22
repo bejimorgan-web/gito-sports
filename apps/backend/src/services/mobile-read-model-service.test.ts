@@ -22,11 +22,13 @@ function seed() {
   }
   db.prepare("INSERT INTO sports (id, name, slug, status, created_at, updated_at) VALUES (?, ?, ?, 'active', ?, ?)").run("sport-football", "Football", "football", now, now);
   db.prepare("INSERT INTO countries (id, name, iso2_code, iso3_code, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)").run("country-germany", "Germany", "DE", "DEU", now, now);
+  db.prepare("INSERT INTO hosts (id, sport_id, name, host_type, country_id, status, created_at, updated_at) VALUES (?, ?, ?, 'country', ?, 'active', ?, ?)").run("host-germany", "sport-football", "Germany", "country-germany", now, now);
   db.prepare("INSERT INTO competitions (id, sport_id, country_id, name, slug, scope, competition_type, participant_type, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'domestic', 'league', 'clubs', 'active', ?, ?)").run("competition-bundesliga", "sport-football", "country-germany", "Bundesliga", "bundesliga", now, now);
   db.prepare("INSERT INTO seasons (id, competition_id, name, status) VALUES (?, ?, ?, 'active')").run("season-2026", "competition-bundesliga", "2026/27");
   for (const [id, name, slug] of [["team-bayern", "Bayern Munich", "bayern-munich"], ["team-dortmund", "Borussia Dortmund", "borussia-dortmund"], ["team-other", "Another Club", "another-club"]] as const) {
     db.prepare("INSERT INTO teams (id, sport_id, country_id, name, slug, type, status, created_at, updated_at) VALUES (?, 'sport-football', 'country-germany', ?, ?, 'club', 'active', ?, ?)").run(id, name, slug, now, now);
   }
+  db.prepare("UPDATE teams SET host_id = ?, country_id = NULL WHERE id = ?").run("host-germany", "team-bayern");
   db.prepare("INSERT INTO competition_season_teams (id, competition_id, season_id, team_id, membership_status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)").run("membership-bayern", "competition-bundesliga", "season-2026", "team-bayern", now, now);
   db.prepare("INSERT INTO competition_season_teams (id, competition_id, season_id, team_id, membership_status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)").run("membership-dortmund", "competition-bundesliga", "season-2026", "team-dortmund", now, now);
   db.prepare("INSERT INTO providers (id, name, base_url, type, auth_type, status, created_at, updated_at) VALUES (?, ?, ?, 'manual', 'none', 'active', ?, ?)").run("provider-1", "Public Provider", "https://provider.example", now, now);

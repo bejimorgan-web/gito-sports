@@ -52,6 +52,13 @@ function fixtureLineups(fixtureId: string): MobileLineup[] {
 }
 
 function clubFromRow(row: any, fallback?: { sport?: { id: string; name: string } | null; country?: { id: string; name: string } | null }): MobileClub {
+  const hostId = row.hostId ?? row.host_id;
+  const host = hostId
+    ? getDatabase().prepare("SELECT host_type, country_id, name FROM hosts WHERE id = ?").get(hostId) as { host_type: string; country_id: string | null; name: string } | undefined
+    : undefined;
+  const hostCountry = host?.host_type === "country"
+    ? getDatabase().prepare("SELECT id, name FROM countries WHERE id = COALESCE(?, (SELECT id FROM countries WHERE lower(name) = lower(?) AND status = 'active'))").get(host.country_id, host.name) as { id: string; name: string } | undefined
+    : undefined;
   return {
     id: row.id,
     name: row.name,
@@ -65,7 +72,7 @@ function clubFromRow(row: any, fallback?: { sport?: { id: string; name: string }
     createdAt: row.createdAt ?? row.created_at ?? "",
     updatedAt: row.updatedAt ?? row.updated_at ?? "",
     sport: row.sport?.id || row.sportId || row.sport_id ? { id: row.sport?.id ?? row.sportId ?? row.sport_id, name: row.sport?.name ?? row.sport_name ?? fallback?.sport?.name ?? "" } : fallback?.sport ?? { id: "", name: "" },
-    country: row.country?.id || row.country_id ? { id: row.country?.id ?? row.country_id, name: row.country?.name ?? row.country_name ?? fallback?.country?.name ?? "" } : fallback?.country ?? null
+    country: hostCountry ?? (row.country?.id || row.country_id ? { id: row.country?.id ?? row.country_id, name: row.country?.name ?? row.country_name ?? fallback?.country?.name ?? "" } : fallback?.country ?? null)
   };
 }
 
@@ -129,7 +136,7 @@ export function mobileClubs(filters?: { sportId?: string; countryId?: string; st
   validateFixtureFilterIds({ sportIds: [], competitionIds: [], teamIds });
   const teamClause = teamIds.length ? `AND t.id IN (${teamIds.map(() => "?").join(",")})` : "";
   const rows = getDatabase().prepare(`
-    SELECT t.id, t.sport_id, t.country_id, t.name, t.short_name, t.slug, t.type, t.logo_url, t.status,
+    SELECT t.id, t.sport_id, t.host_id, t.country_id, t.name, t.short_name, t.slug, t.type, t.logo_url, t.status,
            sp.name AS sport_name, c.name AS country_name
     FROM teams t
     JOIN sports sp ON sp.id = t.sport_id

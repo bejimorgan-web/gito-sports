@@ -77,6 +77,16 @@ function mapTeam(row: TeamRow): Team {
   };
 }
 
+function normalizeTeamCountry(team: Team): Team {
+  if (!team.hostId) return team;
+  const host = getDatabase().prepare("SELECT host_type, country_id, name FROM hosts WHERE id = ?").get(team.hostId) as { host_type: string; country_id: string | null; name: string } | undefined;
+  if (host?.host_type !== "country") return team;
+  const country = host.country_id
+    ? { id: host.country_id }
+    : getDatabase().prepare("SELECT id FROM countries WHERE lower(name) = lower(?) AND status = 'active'").get(host.name) as { id: string } | undefined;
+  return country ? { ...team, countryId: country.id } : team;
+}
+
 function mapCompetition(row: CompetitionRow): Competition {
   return {
     id: row.id,
@@ -153,7 +163,7 @@ export function listCatalogTeams(filters?: { sportId?: string; hostId?: string; 
     )
     .all(...parameters) as TeamRow[];
 
-  return rows.map(mapTeam);
+  return rows.map(mapTeam).map(normalizeTeamCountry);
 }
 
 export function getCatalogTeamById(teamId: string): Team | undefined {
@@ -166,7 +176,7 @@ export function getCatalogTeamById(teamId: string): Team | undefined {
     )
     .get(teamId) as TeamRow | undefined;
 
-  return row ? mapTeam(row) : undefined;
+  return row ? normalizeTeamCountry(mapTeam(row)) : undefined;
 }
 
 export function listCatalogCompetitions(filters?: { sportId?: string; countryId?: string; hostId?: string }): Competition[] {

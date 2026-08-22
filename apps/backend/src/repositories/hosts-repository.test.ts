@@ -32,9 +32,11 @@ test("supports multiple typed hosts and host-owned competitions", () => {
   const spain = createHost({ sportId: "sport-football", name: "Spain", type: "country" });
   const germany = createHost({ sportId: "sport-football", name: "Germany", type: "country" });
   const fiba = createHost({ sportId: "sport-basketball", name: "FIBA", type: "federation" });
-  const hostLinkedTeam = createTeam({ sportId: "sport-football", hostId: spain.id, name: "Spain Club", type: "club" });
-  assert.equal(hostLinkedTeam.hostId, spain.id);
-  assert.equal(getTeamById(hostLinkedTeam.id)?.countryId, undefined);
+  const hostLinkedTeam = createTeam({ sportId: "sport-football", hostId: england.id, name: "England Club", type: "club" });
+  assert.equal(hostLinkedTeam.hostId, england.id);
+  assert.equal(getTeamById(hostLinkedTeam.id)?.countryId, "country-england");
+  assert.throws(() => createTeam({ sportId: "sport-football", hostId: fifa.id, name: "FIFA Club", type: "club" }), /team_country_host_required/);
+  assert.throws(() => createTeam({ sportId: "sport-football", hostId: caf.id, name: "CAF Club", type: "club" }), /team_country_host_required/);
   assert.throws(() => createTeam({ sportId: "sport-football", hostId: fiba.id, name: "Wrong Sport Club", type: "club" }), /team_host_sport_mismatch/);
 
   assert.equal(listHosts("sport-football").length, 5);

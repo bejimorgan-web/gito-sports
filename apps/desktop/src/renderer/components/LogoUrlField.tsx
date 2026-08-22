@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import React, { useEffect, useRef, useState, type ChangeEvent } from "react";
 
 import { apiClient } from "../services/api-client";
 import { resolveAssetUrl } from "./asset-url";

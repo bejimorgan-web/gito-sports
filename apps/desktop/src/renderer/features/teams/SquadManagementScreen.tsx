@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import type { Player, PlayerPosition, SeasonSquad, Sport, Team } from "@gito/shared";
+import type { Player, PlayerPosition, Season, SeasonSquad, Sport, Team } from "@gito/shared";
 import { apiClient } from "../../services/api-client";
 
 const positions: PlayerPosition[] = ["goalkeeper", "defender", "midfielder", "forward", "winger", "striker", "fullback", "center-back", "attacking-midfielder", "defensive-midfielder", "custom"];
@@ -8,9 +8,12 @@ export function SquadManagementScreen({ accessToken }: { accessToken: string }) 
   const [teams, setTeams] = useState<Team[]>([]);
   const [sports, setSports] = useState<Sport[]>([]);
   const [squads, setSquads] = useState<SeasonSquad[]>([]);
+  const [seasons, setSeasons] = useState<Season[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
   const [teamId, setTeamId] = useState("");
+  const [teamSearch, setTeamSearch] = useState("");
   const [squadId, setSquadId] = useState("");
+  const [seasonId, setSeasonId] = useState("");
   const [search, setSearch] = useState("");
   const [position, setPosition] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
@@ -28,6 +31,8 @@ export function SquadManagementScreen({ accessToken }: { accessToken: string }) 
   const selectedTeam = teams.find((team) => team.id === teamId);
   const selectedSport = sports.find((sport) => sport.id === selectedTeam?.sportId);
   const selectedSquad = squads.find((squad) => squad.id === squadId);
+  const selectedSeason = seasons.find((season) => season.id === seasonId);
+  const visibleTeams = teams.filter((team) => team.name.toLowerCase().includes(teamSearch.trim().toLowerCase()));
 
   const loadPlayers = async (nextSquadId = squadId) => {
     if (!nextSquadId) { setPlayers([]); return; }
@@ -42,14 +47,41 @@ export function SquadManagementScreen({ accessToken }: { accessToken: string }) 
   };
 
   useEffect(() => {
-    void Promise.all([apiClient.listTeams("catalog"), apiClient.listSports()]).then(([teamData, sportData]) => { setTeams(teamData); setSports(sportData); }).catch(() => setMessage("Failed to load teams"));
+    setMessage("Loading teams...");
+    void Promise.all([apiClient.listTeams(), apiClient.listSports()]).then(([teamData, sportData]) => { setTeams(teamData); setSports(sportData); setMessage("Select a team"); }).catch(() => setMessage("Failed to load teams"));
   }, []);
   useEffect(() => {
-    setSquadId(""); setPlayers([]);
-    if (!teamId) { setSquads([]); return; }
-    void apiClient.listSeasonSquads({ teamId }).then((data) => { setSquads(data); setSquadId(data[0]?.id ?? ""); }).catch(() => setMessage("Failed to load season squads"));
+    setSeasonId(""); setSquadId(""); setSeasons([]); setSquads([]); setPlayers([]);
+    if (!teamId) return;
+    setMessage("Loading seasons...");
+    void apiClient.listCompetitions().then(async (competitions) => {
+      const contexts = (await Promise.all(competitions.map(async (competition) => {
+        const competitionSeasons = await apiClient.listSeasons(competition.id);
+        const validSeasons = (await Promise.all(competitionSeasons.map(async (season) => {
+          const members = await apiClient.listSeasonTeams(competition.id, season.id);
+          return members.some((member) => member.teamId === teamId) ? season : null;
+        }))).filter((season): season is Season => Boolean(season));
+        return validSeasons;
+      }))).flat();
+      const uniqueSeasons = [...new Map(contexts.map((season) => [season.id, season])).values()];
+      setSeasons(uniqueSeasons); setSeasonId(uniqueSeasons[0]?.id ?? ""); setMessage(uniqueSeasons.length ? "Select a season" : "No seasons available for this team");
+    }).catch(() => setMessage("Failed to load seasons"));
   }, [teamId]);
+  useEffect(() => {
+    setSquadId(""); setSquads([]); setPlayers([]);
+    if (!teamId || !seasonId) return;
+    setMessage("Loading squad...");
+    void apiClient.listSeasonSquads({ teamId, seasonId }).then((data) => { setSquads(data); setSquadId(data[0]?.id ?? ""); if (!data.length) setMessage("No squad exists for this season"); }).catch(() => setMessage("Failed to load season squad"));
+  }, [seasonId, teamId]);
   useEffect(() => { void loadPlayers(); }, [squadId]);
+
+  const createSquad = async () => {
+    if (!teamId || !seasonId || !selectedSeason || isSaving) return;
+    setIsSaving(true); setMessage("Saving...");
+    try { const created = await apiClient.createSeasonSquad({ teamId, seasonId, competitionId: selectedSeason.competitionId, name: `${selectedTeam?.name ?? "Team"} ${selectedSeason.name} Squad` }, accessToken); setSquads([created]); setSquadId(created.id); setMessage("Squad created"); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "Squad creation failed"); }
+    finally { setIsSaving(false); }
+  };
 
   const visiblePlayers = useMemo(() => players.filter((player) =>
     (!search || `${player.displayName} ${player.firstName} ${player.lastName}`.toLowerCase().includes(search.toLowerCase())) &&
@@ -87,10 +119,13 @@ export function SquadManagementScreen({ accessToken }: { accessToken: string }) 
     <section className="console-panel">
       <div className="panel-heading"><h3>Squad context</h3><span className="status-pill">{message}</span></div>
       <div className="form-grid two-column">
-        <label>Team<select value={teamId} onChange={(event) => setTeamId(event.target.value)}><option value="">Select team</option>{teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
-        <label>Season Squad<select value={squadId} onChange={(event) => setSquadId(event.target.value)} disabled={!teamId}><option value="">Select season squad</option>{squads.map((squad) => <option key={squad.id} value={squad.id}>{squad.name}</option>)}</select></label>
+        <label>Team Search<input value={teamSearch} onChange={(event) => setTeamSearch(event.target.value)} placeholder="Search teams" /></label>
+        <label>Team<select value={teamId} onChange={(event) => setTeamId(event.target.value)}><option value="">Select team</option>{visibleTeams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label>
+        <label>Season<select value={seasonId} onChange={(event) => setSeasonId(event.target.value)} disabled={!teamId}><option value="">Select season</option>{seasons.map((season) => <option key={season.id} value={season.id}>{season.name}</option>)}</select></label>
+        <label>Season Squad<select value={squadId} onChange={(event) => setSquadId(event.target.value)} disabled={!seasonId}><option value="">Select season squad</option>{squads.map((squad) => <option key={squad.id} value={squad.id}>{squad.name}</option>)}</select></label>
       </div>
-      <small>{selectedSport?.name ?? "Sport unavailable"} {selectedSquad ? `· ${selectedSquad.name}` : ""}</small>
+      <small>{selectedSport?.name ?? "Sport unavailable"} {selectedSeason ? `· ${selectedSeason.name}` : ""} {selectedSquad ? `· ${selectedSquad.name}` : ""}</small>
+      {teamId && seasonId && !squads.length ? <div className="button-row"><button type="button" onClick={() => void createSquad()} disabled={isSaving}>{isSaving ? "Saving..." : "Create squad"}</button></div> : null}
     </section>
     <section className="console-panel">
       <div className="panel-heading"><h3>{editing ? "Edit Player" : "Add Player"}</h3><button type="button" onClick={clearEditor} className="secondary">Clear</button></div>
