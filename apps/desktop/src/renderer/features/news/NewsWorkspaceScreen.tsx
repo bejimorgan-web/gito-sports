@@ -634,6 +634,7 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
       team: teams,
       sport: sports,
       country: countries,
+      host: hosts.map((host) => ({ id: host.id, name: `${host.name} (${host.type})` })),
       competition: competitions,
       match: matches.map((match) => ({ id: match.id, name: `${match.homeTeamId} vs ${match.awayTeamId}` }))
     };
@@ -1264,7 +1265,7 @@ export function NewsWorkspaceScreen({ accessToken }: { accessToken: string }) {
                     team: teams.map((team) => ({ id: team.id, name: team.name })),
                     competition: competitions.map((competition) => ({ id: competition.id, name: competition.name })),
                     country: countries.map((country) => ({ id: country.id, name: country.name })),
-                    host: hosts.filter((host) => !selectedArticle.sportId || host.sportId === selectedArticle.sportId).map((host) => ({ id: host.id, name: `${host.name} (${host.type})` })),
+                    host: hosts.filter((host) => !selectedArticle.sportId || host.sportId === selectedArticle.sportId).map((host) => ({ id: host.id, name: `${host.name} (${host.type} · ${sports.find((sport) => sport.id === host.sportId)?.name ?? "Sport"})` })),
                     sport: sports.map((sport) => ({ id: sport.id, name: sport.name })),
                     match: matches.map((match) => ({ id: match.id, name: `${match.homeTeamId} vs ${match.awayTeamId}` }))
                   }}

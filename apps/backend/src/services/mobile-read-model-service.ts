@@ -103,6 +103,7 @@ export function mobileCompetitions() {
 
 export function mobileClubs(filters?: { sportId?: string; countryId?: string; status?: string; teamIds?: string[] }) {
   const teamIds = uniqueIds(filters?.teamIds);
+  validateFixtureFilterIds({ sportIds: [], competitionIds: [], teamIds });
   const teamClause = teamIds.length ? `AND t.id IN (${teamIds.map(() => "?").join(",")})` : "";
   const rows = getDatabase().prepare(`
     SELECT t.id, t.sport_id, t.country_id, t.name, t.short_name, t.slug, t.type, t.logo_url, t.status,
@@ -111,6 +112,7 @@ export function mobileClubs(filters?: { sportId?: string; countryId?: string; st
     JOIN sports sp ON sp.id = t.sport_id
     LEFT JOIN countries c ON c.id = t.country_id
     WHERE t.type = 'club'
+      AND t.status = 'active'
       AND (? IS NULL OR t.sport_id = ?)
       AND (? IS NULL OR t.country_id = ?)
       AND (? IS NULL OR t.status = ?)

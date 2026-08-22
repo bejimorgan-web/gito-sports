@@ -29,6 +29,18 @@ import type {
   Stream,
   Team,
   UpdateHostRequest
+  ,Player
+  ,CreatePlayerRequest
+  ,UpdatePlayerRequest
+  ,SeasonSquad
+  ,CreateSeasonSquadRequest
+  ,UpdateSeasonSquadRequest
+  ,SquadPlayer
+  ,CreateSquadPlayerRequest
+  ,UpdateSquadPlayerRequest
+  ,FormationTemplate
+  ,CreateFormationTemplateRequest
+  ,UpdateFormationTemplateRequest
 } from "@gito/shared";
 
 // Prefer the standardized `VITE_API_URL` but keep backwards compatibility
@@ -657,6 +669,42 @@ export const apiClient = {
   },
   removeSeasonTeam(competitionId: string, seasonId: string, teamId: string, accessToken: string) {
     return request<void>(`/competitions/${competitionId}/seasons/${seasonId}/teams/${teamId}`, { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } });
+  },
+  listPlayers(filters?: { teamId?: string; countryId?: string; status?: string }) {
+    return request<Player[]>(buildApiPath('/catalog/players', filters));
+  },
+  createPlayer(input: CreatePlayerRequest, accessToken: string) {
+    return request<Player>('/catalog/players', { method: 'POST', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
+  },
+  updatePlayer(playerId: string, input: UpdatePlayerRequest, accessToken: string) {
+    return request<Player>(`/catalog/players/${playerId}`, { method: 'PUT', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
+  },
+  listSeasonSquads(filters?: { teamId?: string; competitionId?: string; seasonId?: string; status?: string }) {
+    return request<SeasonSquad[]>(buildApiPath('/catalog/season-squads', filters));
+  },
+  createSeasonSquad(input: CreateSeasonSquadRequest, accessToken: string) {
+    return request<SeasonSquad>('/catalog/season-squads', { method: 'POST', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
+  },
+  updateSeasonSquad(squadId: string, input: UpdateSeasonSquadRequest, accessToken: string) {
+    return request<SeasonSquad>(`/catalog/season-squads/${squadId}`, { method: 'PUT', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
+  },
+  listSquadPlayers(squadId: string) {
+    return request<SquadPlayer[]>(`/catalog/season-squads/${squadId}/players`);
+  },
+  createSquadPlayer(squadId: string, input: Omit<CreateSquadPlayerRequest, 'squadId'>, accessToken: string) {
+    return request<SquadPlayer>(`/catalog/season-squads/${squadId}/players`, { method: 'POST', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
+  },
+  updateSquadPlayer(memberId: string, input: UpdateSquadPlayerRequest, accessToken: string) {
+    return request<SquadPlayer>(`/catalog/season-squad-players/${memberId}`, { method: 'PUT', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
+  },
+  listFormationTemplates(filters?: { sportId?: string; status?: string }) {
+    return request<FormationTemplate[]>(buildApiPath('/catalog/formation-templates', filters));
+  },
+  createFormationTemplate(input: CreateFormationTemplateRequest, accessToken: string) {
+    return request<FormationTemplate>('/catalog/formation-templates', { method: 'POST', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
+  },
+  updateFormationTemplate(templateId: string, input: UpdateFormationTemplateRequest, accessToken: string) {
+    return request<FormationTemplate>(`/catalog/formation-templates/${templateId}`, { method: 'PUT', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
   },
   deleteTeam(teamId: string, accessToken: string) {
     return request<void>(`/teams/${teamId}`, { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } });

@@ -220,6 +220,76 @@ CREATE TABLE IF NOT EXISTS teams (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_sport_country_slug ON teams(sport_id, country_id, slug);
 
+CREATE TABLE IF NOT EXISTS players (
+  id TEXT PRIMARY KEY,
+  team_id TEXT NOT NULL,
+  country_id TEXT,
+  first_name TEXT NOT NULL,
+  last_name TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  position TEXT,
+  jersey_number INTEGER,
+  height_cm REAL,
+  weight_kg REAL,
+  birth_date TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (team_id) REFERENCES teams(id),
+  FOREIGN KEY (country_id) REFERENCES countries(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_players_team ON players(team_id);
+
+CREATE TABLE IF NOT EXISTS season_squads (
+  id TEXT PRIMARY KEY,
+  team_id TEXT NOT NULL,
+  competition_id TEXT,
+  season_id TEXT,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (team_id) REFERENCES teams(id),
+  FOREIGN KEY (competition_id) REFERENCES competitions(id),
+  FOREIGN KEY (season_id) REFERENCES seasons(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_season_squads_team ON season_squads(team_id);
+
+CREATE TABLE IF NOT EXISTS squad_players (
+  id TEXT PRIMARY KEY,
+  squad_id TEXT NOT NULL,
+  player_id TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'starter',
+  position TEXT,
+  jersey_number INTEGER,
+  is_captain INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (squad_id) REFERENCES season_squads(id),
+  FOREIGN KEY (player_id) REFERENCES players(id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_squad_players_unique ON squad_players(squad_id, player_id);
+CREATE INDEX IF NOT EXISTS idx_squad_players_squad ON squad_players(squad_id);
+
+CREATE TABLE IF NOT EXISTS formation_templates (
+  id TEXT PRIMARY KEY,
+  sport_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  key TEXT NOT NULL,
+  formation TEXT NOT NULL,
+  positions_json TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (sport_id) REFERENCES sports(id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_formation_templates_key ON formation_templates(sport_id, key);
+
 CREATE TABLE IF NOT EXISTS matches (
   id TEXT PRIMARY KEY,
   competition_id TEXT NOT NULL,

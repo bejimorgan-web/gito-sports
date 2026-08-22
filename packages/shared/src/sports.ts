@@ -112,6 +112,87 @@ export interface Team {
   updatedAt: string;
 }
 
+export type PlayerPosition = "goalkeeper" | "defender" | "midfielder" | "forward" | "winger" | "striker" | "fullback" | "center-back" | "attacking-midfielder" | "defensive-midfielder" | "custom";
+
+export interface Player {
+  id: EntityId;
+  teamId: EntityId;
+  countryId?: EntityId;
+  firstName: string;
+  lastName: string;
+  displayName: string;
+  position?: PlayerPosition;
+  jerseyNumber?: number;
+  heightCm?: number;
+  weightKg?: number;
+  birthDate?: string;
+  status: EntityStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreatePlayerRequest {
+  teamId: EntityId;
+  countryId?: EntityId;
+  firstName: string;
+  lastName: string;
+  displayName?: string;
+  position?: PlayerPosition;
+  jerseyNumber?: number;
+  heightCm?: number;
+  weightKg?: number;
+  birthDate?: string;
+}
+
+export interface UpdatePlayerRequest {
+  teamId?: EntityId;
+  countryId?: EntityId | null;
+  firstName?: string;
+  lastName?: string;
+  displayName?: string;
+  position?: PlayerPosition;
+  jerseyNumber?: number | null;
+  heightCm?: number | null;
+  weightKg?: number | null;
+  birthDate?: string | null;
+  status?: EntityStatus;
+}
+
+export interface SeasonSquad {
+  id: EntityId;
+  teamId: EntityId;
+  competitionId?: EntityId;
+  seasonId?: EntityId;
+  name: string;
+  status: EntityStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateSeasonSquadRequest { teamId: EntityId; competitionId?: EntityId; seasonId?: EntityId; name: string; }
+export interface UpdateSeasonSquadRequest { teamId?: EntityId; competitionId?: EntityId | null; seasonId?: EntityId | null; name?: string; status?: EntityStatus; }
+
+export interface SquadPlayer {
+  id: EntityId;
+  squadId: EntityId;
+  playerId: EntityId;
+  role: "starter" | "bench" | "rotation" | "coach-choice" | "custom";
+  position?: string;
+  jerseyNumber?: number;
+  isCaptain: boolean;
+  status: EntityStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateSquadPlayerRequest { squadId: EntityId; playerId: EntityId; role?: SquadPlayer["role"]; position?: string; jerseyNumber?: number; isCaptain?: boolean; }
+export interface UpdateSquadPlayerRequest { squadId?: EntityId; playerId?: EntityId; role?: SquadPlayer["role"]; position?: string | null; jerseyNumber?: number | null; isCaptain?: boolean; status?: EntityStatus; }
+
+export interface FormationPositionPoint { x: number; y: number; label?: string; }
+export interface FormationTemplate { id: EntityId; sportId: EntityId; name: string; key: string; formation: string; positions: FormationPositionPoint[]; status: EntityStatus; createdAt: string; updatedAt: string; }
+export interface CreateFormationTemplateRequest { sportId: EntityId; name: string; key?: string; formation: string; positions: FormationPositionPoint[]; }
+export interface UpdateFormationTemplateRequest { sportId?: EntityId; name?: string; key?: string; formation?: string; positions?: FormationPositionPoint[]; status?: EntityStatus; }
+
 export interface CompetitionSeasonTeam {
   id: EntityId;
   competitionId: EntityId;

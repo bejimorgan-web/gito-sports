@@ -526,6 +526,9 @@ function ensureNewsSchemaColumns(database: DatabaseSync) {
           FROM news_article_categories;
         DROP TABLE news_article_categories;
         ALTER TABLE news_article_categories_new RENAME TO news_article_categories;
+        CREATE INDEX idx_news_article_categories_article ON news_article_categories(article_id);
+        CREATE INDEX idx_news_article_categories_type ON news_article_categories(category_type);
+        CREATE INDEX idx_news_article_categories_entity ON news_article_categories(entity_id);
       `);
     }
     database.exec("CREATE INDEX IF NOT EXISTS idx_news_article_categories_approved_entity ON news_article_categories(category_type, entity_id, classification_status);");

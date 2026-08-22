@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 
 import '../app_config.dart';
@@ -58,13 +59,15 @@ class MobileAnalyticsService {
         throw const SocketException('Analytics event failed');
       }
     } catch (error, stackTrace) {
-      FirebaseCrashlytics.instance.recordError(
-        error,
-        stackTrace,
-        reason: 'Failed to send analytics event',
-        fatal: false,
-      );
-      rethrow;
+      if (Firebase.apps.isNotEmpty) {
+        FirebaseCrashlytics.instance.recordError(
+          error,
+          stackTrace,
+          reason: 'Failed to send analytics event',
+          fatal: false,
+        );
+      }
+      return;
     } finally {
       client.close(force: true);
     }

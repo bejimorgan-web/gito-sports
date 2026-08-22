@@ -3,6 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:gito_live_sports_mobile/main.dart';
+import 'package:gito_live_sports_mobile/models/mobile_models.dart';
+import 'package:gito_live_sports_mobile/services/mobile_api_service.dart';
 
 void main() {
   testWidgets('App starts and shows app title', (WidgetTester tester) async {
@@ -16,12 +18,16 @@ void main() {
     await tester.pumpWidget(const GitoLiveSportsApp());
 
     expect(find.byTooltip('Personalize GiTO'), findsOneWidget);
-    await tester.tap(find.byTooltip('Personalize GiTO'));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: const GitoPersonalizeScreen(api: _CatalogApi()),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Personalize GiTO'), findsOneWidget);
     expect(find.text('What sports do you follow?'), findsOneWidget);
-    expect(find.text('Football'), findsOneWidget);
+    expect(find.text('Soccer'), findsOneWidget);
   });
 
   testWidgets('Following screen surfaces selected sports and teams', (WidgetTester tester) async {
@@ -37,6 +43,25 @@ void main() {
     expect(find.text('Football'), findsOneWidget);
     expect(find.text('Barcelona'), findsOneWidget);
   });
+}
+
+class _CatalogApi extends MobileApiService {
+  const _CatalogApi();
+
+  @override
+  Future<List<MobileSport>> getSports() async => const [
+        MobileSport(id: 'sport-1', name: 'Soccer', slug: 'soccer'),
+      ];
+
+  @override
+  Future<List<MobileCompetition>> getCompetitions() async => const [
+        MobileCompetition(id: 'competition-1', name: 'League One', sportId: 'sport-1'),
+      ];
+
+  @override
+  Future<List<MobileClub>> getClubs({List<String> teamIds = const <String>[]}) async => const [
+        MobileClub(id: 'team-1', name: 'Example FC', sportId: 'sport-1', status: 'active'),
+      ];
 }
 
 class TestSharedPreferences {

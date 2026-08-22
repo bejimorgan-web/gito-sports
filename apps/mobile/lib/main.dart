@@ -77,7 +77,7 @@ Future<void> _initializeCrashlytics() async {
 
 class GiTOBrandColors {
   static const background = Color(0xFF0B1020);
-  static const primary = Color(0xFF4F46E5);
+  static const primary = Color(0xFF20D37B);
   static const accent = Color(0xFF22D3EE);
   static const live = Color(0xFF22C55E);
   static const warning = Color(0xFFF59E0B);
@@ -93,12 +93,6 @@ class GitoFollowStore {
   static const String _sportsKey = 'gito_followed_sports';
   static const String _competitionsKey = 'gito_followed_competitions';
   static const String _teamsKey = 'gito_followed_teams';
-
-  static const List<String> sports = <String>[
-    'football',
-    'basketball',
-    'tennis'
-  ];
 
   static String displayName(String value) {
     final trimmed = value.trim();
@@ -119,23 +113,6 @@ class GitoFollowStore {
 
     return words.join(' ');
   }
-
-  static const Map<String, List<String>> recommendedCompetitions =
-      <String, List<String>>{
-    'football': <String>['La Liga', 'Premier League', 'Champions League'],
-    'basketball': <String>['NBA', 'EuroLeague'],
-    'tennis': <String>['ATP', 'WTA'],
-  };
-  static const Map<String, List<String>> recommendedTeams =
-      <String, List<String>>{
-    'football': <String>['Barcelona', 'Manchester City', 'Real Madrid'],
-    'basketball': <String>[
-      'Los Angeles Lakers',
-      'Boston Celtics',
-      'Golden State Warriors'
-    ],
-    'tennis': <String>['Carlos Alcaraz', 'Novak Djokovic', 'Iga Swiatek'],
-  };
 
   static Future<Set<String>> readSports() async {
     final prefs = await SharedPreferences.getInstance();
@@ -197,7 +174,8 @@ class GitoFollowStoreViewModel {
 }
 
 class GitoPersonalizeScreen extends StatefulWidget {
-  const GitoPersonalizeScreen({super.key});
+  const GitoPersonalizeScreen({super.key, this.api = const MobileApiService()});
+  final MobileApiService api;
 
   @override
   State<GitoPersonalizeScreen> createState() => _GitoPersonalizeScreenState();
@@ -208,11 +186,23 @@ class _GitoPersonalizeScreenState extends State<GitoPersonalizeScreen> {
   final Set<String> _selectedCompetitions = <String>{};
   final Set<String> _selectedTeams = <String>{};
   int _step = 0;
+  _FollowCatalog? _catalog;
 
   @override
   void initState() {
     super.initState();
+    _loadCatalog();
     _loadCurrentSelections();
+  }
+
+  Future<_FollowCatalog> _loadCatalog() async {
+    final catalog = _FollowCatalog(
+      sports: await widget.api.getSports(),
+      competitions: await widget.api.getCompetitions(),
+      teams: await widget.api.getClubs(),
+    );
+    if (mounted) setState(() => _catalog = catalog);
+    return catalog;
   }
 
   Future<void> _loadCurrentSelections() async {
@@ -226,21 +216,30 @@ class _GitoPersonalizeScreenState extends State<GitoPersonalizeScreen> {
   }
 
   List<String> _recommendedCompetitionsForCurrentSports() {
-    final result = <String>[];
-    for (final sport in _selectedSports) {
-      result.addAll(
-          GitoFollowStore.recommendedCompetitions[sport] ?? const <String>[]);
-    }
-    return result.toSet().toList();
+    final sports = (_catalog?.sports ?? const <MobileSport>[])
+        .where((sport) =>
+            _selectedSports.contains(_normalizeCatalogValue(sport.name)) ||
+            _selectedSports.contains(_normalizeCatalogValue(sport.slug)))
+        .map((sport) => sport.id)
+        .toSet();
+    return (_catalog?.competitions ?? const <MobileCompetition>[])
+        .where((competition) =>
+            sports.isEmpty || sports.contains(competition.sportId))
+        .map((competition) => competition.name)
+        .toList();
   }
 
   List<String> _recommendedTeamsForCurrentSports() {
-    final result = <String>[];
-    for (final sport in _selectedSports) {
-      result
-          .addAll(GitoFollowStore.recommendedTeams[sport] ?? const <String>[]);
-    }
-    return result.toSet().toList();
+    final sports = (_catalog?.sports ?? const <MobileSport>[])
+        .where((sport) =>
+            _selectedSports.contains(_normalizeCatalogValue(sport.name)) ||
+            _selectedSports.contains(_normalizeCatalogValue(sport.slug)))
+        .map((sport) => sport.id)
+        .toSet();
+    return (_catalog?.teams ?? const <MobileClub>[])
+        .where((team) => sports.isEmpty || sports.contains(team.sportId))
+        .map((team) => team.name)
+        .toList();
   }
 
   Future<void> _saveAndClose() async {
@@ -270,7 +269,7 @@ class _GitoPersonalizeScreenState extends State<GitoPersonalizeScreen> {
           spacing: 10,
           runSpacing: 10,
           children: values.map((value) {
-            final rawValue = value.toLowerCase();
+            final rawValue = _normalizeCatalogValue(value);
             final selected = selection.contains(rawValue);
             return FilterChip(
               selected: selected,
@@ -301,7 +300,9 @@ class _GitoPersonalizeScreenState extends State<GitoPersonalizeScreen> {
       'Recommended clubs and teams',
     ];
 
-    final sportOptions = GitoFollowStore.sports.toList();
+    final sportOptions = (_catalog?.sports ?? const <MobileSport>[])
+        .map((sport) => sport.name)
+        .toList();
 
     final recommendations = _recommendedCompetitionsForCurrentSports();
     final teamRecommendations = _recommendedTeamsForCurrentSports();
@@ -377,6 +378,21 @@ class _GitoPersonalizeScreenState extends State<GitoPersonalizeScreen> {
     );
   }
 }
+
+class _FollowCatalog {
+  const _FollowCatalog(
+      {required this.sports, required this.competitions, required this.teams});
+  final List<MobileSport> sports;
+  final List<MobileCompetition> competitions;
+  final List<MobileClub> teams;
+}
+
+String _normalizeCatalogValue(String? value) => (value ?? '')
+    .trim()
+    .toLowerCase()
+    .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+    .trim()
+    .replaceAll(RegExp(r'\s+'), ' ');
 
 class GitoFollowingScreen extends StatefulWidget {
   const GitoFollowingScreen({super.key});
@@ -1364,7 +1380,7 @@ class _LiveHomeScreenState extends State<LiveHomeScreen> {
 
     // Sports tab
     if (config.sports) {
-      availableScreens.add(SportsScreen(matches: List.unmodifiable(_matches)));
+      availableScreens.add(const SportsScreen());
       availableDestinations.add(
         const NavigationDestination(
           icon: Icon(Icons.sports_soccer_rounded),
@@ -1659,11 +1675,17 @@ class _LiveScoresScreenState extends State<LiveScoresScreen> {
                 ),
               ),
               SliverToBoxAdapter(
-                child: AppBrandHero(
-                  title: 'Live Scores',
-                  subtitle: 'Live scores as they happen.',
-                  logoAsset: appLogoAsset,
-                  trailing: ConnectionDot(state: _connectionState),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 8, 18, 4),
+                  child: Row(children: [
+                    Text('Live Scores',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleLarge
+                            ?.copyWith(fontWeight: FontWeight.w900)),
+                    const Spacer(),
+                    ConnectionDot(state: _connectionState),
+                  ]),
                 ),
               ),
               if (!_firstLoad && _connectionState != FeedConnectionState.online)
@@ -2099,120 +2121,110 @@ class ScoreStatusPill extends StatelessWidget {
   }
 }
 
-class SportsScreen extends StatelessWidget {
-  const SportsScreen({required this.matches, super.key});
-
-  final List<LiveMatch> matches;
+class SportsScreen extends StatefulWidget {
+  const SportsScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final sports = <String, Map<String, List<LiveMatch>>>{};
-    final sportLogos = <String, String?>{};
-    final countryLogos = <String, String?>{};
+  State<SportsScreen> createState() => _SportsScreenState();
+}
 
-    for (final match in matches) {
-      final sportName =
-          match.sportName?.isNotEmpty == true ? match.sportName! : 'All Sports';
-      final countryName =
-          match.countryName?.isNotEmpty == true ? match.countryName! : 'Global';
+class _SportsScreenState extends State<SportsScreen> {
+  final _api = const MobileApiService();
+  late Future<List<MobileSport>> _sports;
 
-      sportLogos[sportName] = sportLogos[sportName] ?? match.sportLogoUrl;
-      countryLogos[countryName] =
-          countryLogos[countryName] ?? match.countryLogoUrl;
+  @override
+  void initState() {
+    super.initState();
+    _sports = _api.getSports();
+  }
 
-      final countries = sports.putIfAbsent(sportName, () => {});
-      final matchesForCountry = countries.putIfAbsent(countryName, () => []);
-      matchesForCountry.add(match);
-    }
-
-    return WatermarkedPage(
-      logoAsset: appLogoAsset,
-      child: SafeArea(
-        child: ListView(
-          key: const PageStorageKey('sports-browser'),
-          padding: const EdgeInsets.all(18),
-          children: [
-            const AppBrandHero(
-              title: 'Sports',
-              subtitle: 'Browse all sports by country.',
-              logoAsset: appLogoAsset,
-            ),
-            const SizedBox(height: 18),
-            if (sports.isEmpty)
-              const EmptyPanel(text: 'No sports are available right now.')
-            else
-              ...sports.entries.map((entry) {
-                final sportName = entry.key;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  child: Card(
-                    color: const Color(0xFF101418),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(18),
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => SportCountriesScreen(
-                              sportName: sportName,
-                              sportLogoUrl: sportLogos[sportName],
-                              countryMatches: entry.value,
-                              countryLogos: countryLogos,
-                            ),
-                          ),
-                        );
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 18, vertical: 20),
-                        child: Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 34,
-                              backgroundColor: const Color(0xFF0F1612),
-                              backgroundImage:
-                                  sportLogos[sportName]?.isNotEmpty == true
-                                      ? NetworkImage(sportLogos[sportName]!)
-                                      : null,
-                              child: sportLogos[sportName]?.isNotEmpty != true
-                                  ? Text(
-                                      sportName.substring(0, 1).toUpperCase())
-                                  : null,
-                            ),
-                            const SizedBox(width: 18),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(sportName,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleLarge
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w900,
-                                          )),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    '${entry.value.length} country${entry.value.length == 1 ? '' : 'ies'}',
-                                    style: const TextStyle(
-                                        color: Color(0xFFAAB4AE)),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const Icon(Icons.chevron_right_rounded,
-                                color: Color(0xFF20D37B)),
-                          ],
-                        ),
-                      ),
-                    ),
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('Sports')),
+        body: MobileStateView<List<MobileSport>>(
+          future: _sports,
+          emptyText: 'No configured sports available.',
+          builder: (context, sports) => RefreshIndicator(
+            onRefresh: () async => setState(() => _sports = _api.getSports()),
+            child: ListView.separated(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(18),
+              itemCount: sports.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (context, index) {
+                final sport = sports[index];
+                return Card(
+                  child: ListTile(
+                    leading:
+                        _CatalogLogo(url: sport.logoUrl, label: sport.name),
+                    title: Text(sport.name),
+                    onTap: () =>
+                        Navigator.of(context).push(MaterialPageRoute<void>(
+                      builder: (_) =>
+                          CanonicalSportFixturesScreen(sport: sport, api: _api),
+                    )),
                   ),
                 );
-              }),
-          ],
+              },
+            ),
+          ),
         ),
-      ),
-    );
-  }
+      );
+}
+
+class CanonicalSportFixturesScreen extends StatelessWidget {
+  const CanonicalSportFixturesScreen(
+      {required this.sport, required this.api, super.key});
+  final MobileSport sport;
+  final MobileApiService api;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: Text(sport.name)),
+        body: MobileStateView<List<MobileFixture>>(
+          future: api.getFixtures(
+              sportId: sport.id,
+              from: DateTime.now().toUtc().toIso8601String(),
+              to: DateTime.now()
+                  .toUtc()
+                  .add(const Duration(days: 1))
+                  .toIso8601String()),
+          emptyText: 'No fixtures available for this sport.',
+          builder: (context, fixtures) => ListView.builder(
+            itemCount: fixtures.length,
+            itemBuilder: (context, index) {
+              final fixture = fixtures[index];
+              return Card(
+                child: ListTile(
+                  title: Text(
+                      '${fixture.homeClub.name} vs ${fixture.awayClub.name}'),
+                  subtitle: Text(fixture.competition.name),
+                  trailing: Text(fixture.scoreLabel),
+                  onTap: () =>
+                      Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) =>
+                        FixtureDetailScreen(fixtureId: fixture.id, api: api),
+                  )),
+                ),
+              );
+            },
+          ),
+        ),
+      );
+}
+
+class _CatalogLogo extends StatelessWidget {
+  const _CatalogLogo({required this.url, required this.label});
+  final String? url;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => CircleAvatar(
+        backgroundImage: url?.isNotEmpty == true ? NetworkImage(url!) : null,
+        child: url?.isNotEmpty == true
+            ? null
+            : Text(label.isEmpty ? '?' : label[0].toUpperCase()),
+      );
 }
 
 class SportCountriesScreen extends StatelessWidget {

@@ -38,6 +38,7 @@ import { configRouter } from "./routes/config.js";
 import { runtimeConfig } from "./config/env.js";
 import { newsRouter } from "./routes/news.js";
 import { fixtureReconciliationRouter } from "./routes/fixture-reconciliation.js";
+import { playerCatalogRouter } from "./routes/player-catalog.js";
 
 export function createApp() {
   const app = express();
@@ -194,6 +195,7 @@ export function createApp() {
   app.use("/streams", streamsRouter);
   app.use('/api/admin/migration', migrationRouter);
   app.use('/api/admin/fixture-reconciliation', fixtureReconciliationRouter);
+  app.use("/catalog", playerCatalogRouter);
 
   if (runtimeConfig.errorReportingEnabled && runtimeConfig.sentryDsn) {
     Sentry.setupExpressErrorHandler(app);
