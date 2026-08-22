@@ -608,7 +608,7 @@ class FixtureDetailScreen extends StatelessWidget {
           final MobileLineupPlayer? player;
           final String label;
           @override
-          Widget build(BuildContext context) => Container(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3), color: Colors.white, child: player == null ? Text(label, textAlign: TextAlign.center, style: const TextStyle(fontSize: 10, color: Colors.black)) : Column(mainAxisSize: MainAxisSize.min, children: [ClipOval(child: player!.photoUrl?.isNotEmpty == true ? Image.network(player!.photoUrl!, width: 24, height: 24, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const _PlayerAvatarFallback()) : const _PlayerAvatarFallback()), Text('${player!.shirtNumber ?? '-'} ${player!.name}', textAlign: TextAlign.center, style: const TextStyle(fontSize: 9, color: Colors.black))]));
+          Widget build(BuildContext context) => Container(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3), color: Colors.white, child: player == null ? Text(label, textAlign: TextAlign.center, style: const TextStyle(fontSize: 10, color: Colors.black)) : Column(mainAxisSize: MainAxisSize.min, children: [ClipOval(child: player!.photoUrl?.isNotEmpty == true ? Image.network(player!.photoUrl!, width: 24, height: 24, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const _PlayerAvatarFallback()) : const _PlayerAvatarFallback()), Text(player!.name, textAlign: TextAlign.center, style: const TextStyle(fontSize: 9, color: Colors.black))]));
         }
 
         class _PlayerAvatarFallback extends StatelessWidget {
