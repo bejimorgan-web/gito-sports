@@ -26,8 +26,9 @@ function validateInput(fixtureId: string, input: SaveFixtureLineupRequest) {
   if (input.status === "confirmed" && input.starters.length !== positions.length) throw new Error("lineup_starting_xi_incomplete");
   if (input.captainPlayerId && !input.starters.some((item) => item.playerId === input.captainPlayerId)) throw new Error("lineup_captain_must_start");
   for (const playerId of allPlayers) {
-    const player = database.prepare("SELECT p.id FROM players p JOIN season_squads ss ON ss.team_id = p.team_id WHERE p.id = ? AND p.team_id = ? AND ss.id = ? AND p.status = 'active'").get(playerId, input.teamId, input.seasonSquadId);
+    const player = database.prepare("SELECT p.id, p.availability_status FROM players p JOIN season_squads ss ON ss.team_id = p.team_id WHERE p.id = ? AND p.team_id = ? AND ss.id = ? AND p.status = 'active'").get(playerId, input.teamId, input.seasonSquadId) as { id: string; availability_status: string } | undefined;
     if (!player) throw new Error("lineup_player_not_in_squad");
+    if (input.status === "confirmed" && player.availability_status !== "available") throw new Error(`lineup_player_${player.availability_status}_cannot_confirm`);
   }
 }
 

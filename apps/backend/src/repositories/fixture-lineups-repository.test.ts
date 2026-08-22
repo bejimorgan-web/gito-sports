@@ -48,6 +48,8 @@ test("canonical lineups persist independently and enforce squad, slot, and confi
   assert.throws(() => saveFixtureLineup(fixture.id, { teamId: "team-home", seasonSquadId: homeSquad.id, formationId: formation.id, status: "confirmed", starters: [{ slotIndex: 0, playerId: homeKeeper.id }], substitutes: [homeStriker.id] }), /lineup_starting_xi_incomplete/);
   assert.throws(() => saveFixtureLineup(fixture.id, { teamId: "team-home", seasonSquadId: homeSquad.id, formationId: formation.id, status: "possible", starters: [{ slotIndex: 0, playerId: homeKeeper.id }, { slotIndex: 1, playerId: homeKeeper.id }], substitutes: [] }), /lineup_player_duplicate/);
   assert.throws(() => saveFixtureLineup(fixture.id, { teamId: "team-home", seasonSquadId: homeSquad.id, formationId: formation.id, status: "possible", starters: [{ slotIndex: 0, playerId: awayPlayer.id }], substitutes: [] }), /lineup_player_not_in_squad/);
+  getDatabase().prepare("UPDATE players SET availability_status = 'injured', injury_type = 'Hamstring', expected_return_date = '2026-09-15', injury_notes = 'Muscle strain' WHERE id = ?").run(homeKeeper.id);
+  assert.throws(() => saveFixtureLineup(fixture.id, { teamId: "team-home", seasonSquadId: homeSquad.id, formationId: formation.id, status: "confirmed", starters: [{ slotIndex: 0, playerId: homeKeeper.id }, { slotIndex: 1, playerId: homeStriker.id }], substitutes: [] }), /lineup_player_injured_cannot_confirm/);
   assert.equal(clearFixtureLineup(fixture.id, "team-home"), true);
   assert.equal(getFixtureLineups(fixture.id).some((lineup) => lineup.teamId === "team-away"), true);
 });

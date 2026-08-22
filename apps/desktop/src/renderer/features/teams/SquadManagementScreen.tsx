@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
-import type { Player, PlayerPosition, Season, SeasonSquad, Sport, Team } from "@gito/shared";
+import type { Player, PlayerAvailability, PlayerPosition, Season, SeasonSquad, Sport, Team } from "@gito/shared";
 import { apiClient } from "../../services/api-client";
 
 const positions: PlayerPosition[] = ["goalkeeper", "defender", "midfielder", "forward", "winger", "striker", "fullback", "center-back", "attacking-midfielder", "defensive-midfielder", "custom"];
+const availabilities: PlayerAvailability[] = ["available", "injured", "suspended", "unavailable"];
 
 export function SquadManagementScreen({ accessToken }: { accessToken: string }) {
   const [teams, setTeams] = useState<Team[]>([]);
@@ -17,12 +18,17 @@ export function SquadManagementScreen({ accessToken }: { accessToken: string }) 
   const [search, setSearch] = useState("");
   const [position, setPosition] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
+  const [availabilityFilter, setAvailabilityFilter] = useState("");
   const [editing, setEditing] = useState<Player | null>(null);
   const [name, setName] = useState("");
   const [shirtNumber, setShirtNumber] = useState("");
   const [playerPosition, setPlayerPosition] = useState<PlayerPosition>("forward");
   const [photoUrl, setPhotoUrl] = useState("");
   const [playerStatus, setPlayerStatus] = useState<"active" | "inactive" | "archived">("active");
+  const [availability, setAvailability] = useState<PlayerAvailability>("available");
+  const [injuryType, setInjuryType] = useState("");
+  const [expectedReturnDate, setExpectedReturnDate] = useState("");
+  const [injuryNotes, setInjuryNotes] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
@@ -85,18 +91,18 @@ export function SquadManagementScreen({ accessToken }: { accessToken: string }) 
 
   const visiblePlayers = useMemo(() => players.filter((player) =>
     (!search || `${player.displayName} ${player.firstName} ${player.lastName}`.toLowerCase().includes(search.toLowerCase())) &&
-    (!position || player.position === position) && (!statusFilter || player.status === statusFilter)
-  ), [players, position, search, statusFilter]);
+    (!position || player.position === position) && (!statusFilter || player.status === statusFilter) && (!availabilityFilter || player.availability === availabilityFilter)
+  ), [availabilityFilter, players, position, search, statusFilter]);
 
-  const clearEditor = () => { setEditing(null); setName(""); setShirtNumber(""); setPlayerPosition("forward"); setPhotoUrl(""); setPlayerStatus("active"); };
-  const editPlayer = (player: Player) => { setEditing(player); setName(player.displayName); setShirtNumber(player.jerseyNumber?.toString() ?? ""); setPlayerPosition(player.position ?? "forward"); setPhotoUrl(player.photoUrl ?? ""); setPlayerStatus(player.status as typeof playerStatus); };
+  const clearEditor = () => { setEditing(null); setName(""); setShirtNumber(""); setPlayerPosition("forward"); setPhotoUrl(""); setPlayerStatus("active"); setAvailability("available"); setInjuryType(""); setExpectedReturnDate(""); setInjuryNotes(""); };
+  const editPlayer = (player: Player) => { setEditing(player); setName(player.displayName); setShirtNumber(player.jerseyNumber?.toString() ?? ""); setPlayerPosition(player.position ?? "forward"); setPhotoUrl(player.photoUrl ?? ""); setPlayerStatus(player.status as typeof playerStatus); setAvailability(player.availability); setInjuryType(player.injuryType ?? ""); setExpectedReturnDate(player.expectedReturnDate ?? ""); setInjuryNotes(player.injuryNotes ?? ""); };
 
   const savePlayer = async () => {
     if (!teamId || !squadId || !name.trim() || isSaving) { setMessage("Team, season squad, and player name are required"); return; }
     setIsSaving(true); setMessage("Saving...");
     try {
       const parts = name.trim().split(/\s+/); const firstName = parts.shift() ?? name.trim(); const lastName = parts.join(" ") || firstName;
-      const payload = { teamId, firstName, lastName, displayName: name.trim(), position: playerPosition, ...(shirtNumber ? { jerseyNumber: Number(shirtNumber) } : {}), ...(photoUrl ? { photoUrl } : {}), status: playerStatus };
+      const payload = { teamId, firstName, lastName, displayName: name.trim(), position: playerPosition, ...(shirtNumber ? { jerseyNumber: Number(shirtNumber) } : {}), ...(photoUrl ? { photoUrl } : {}), status: playerStatus, availability, ...(availability === "injured" ? { ...(injuryType ? { injuryType } : {}), ...(expectedReturnDate ? { expectedReturnDate } : {}), ...(injuryNotes ? { injuryNotes } : {}) } : {}) };
       const saved = editing ? await apiClient.updatePlayer(editing.id, payload, accessToken) : await apiClient.createPlayer(payload, accessToken);
       if (!editing) await apiClient.createSquadPlayer(squadId, { playerId: saved.id, role: "starter", position: playerPosition, ...(shirtNumber ? { jerseyNumber: Number(shirtNumber) } : {}) }, accessToken);
       await loadPlayers(); clearEditor(); setMessage(editing ? "Saved" : "Player created");
@@ -135,13 +141,15 @@ export function SquadManagementScreen({ accessToken }: { accessToken: string }) 
         <label>Position<select value={playerPosition} onChange={(event) => setPlayerPosition(event.target.value as PlayerPosition)}>{positions.map((item) => <option key={item} value={item}>{item.replaceAll("-", " ")}</option>)}</select></label>
         <label>Photo URL<input value={photoUrl} onChange={(event) => setPhotoUrl(event.target.value)} placeholder="https://..." /></label>
         <label>Status<select value={playerStatus} onChange={(event) => setPlayerStatus(event.target.value as typeof playerStatus)}><option value="active">Active</option><option value="inactive">Inactive</option><option value="archived">Archived</option></select></label>
+        <label>Availability<select value={availability} onChange={(event) => setAvailability(event.target.value as PlayerAvailability)}>{availabilities.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        {availability === "injured" ? <><label>Injury<input value={injuryType} onChange={(event) => setInjuryType(event.target.value)} /></label><label>Expected Return<input type="date" value={expectedReturnDate} onChange={(event) => setExpectedReturnDate(event.target.value)} /></label><label>Notes<textarea value={injuryNotes} onChange={(event) => setInjuryNotes(event.target.value)} /></label></> : null}
       </div>
       <div className="button-row"><button type="button" onClick={savePlayer} disabled={isSaving}>{isSaving ? "Saving..." : editing ? "Save Player" : "Save Player"}</button></div>
     </section>
     <section className="console-panel">
       <div className="panel-heading"><h3>{selectedTeam?.name ?? "Players"}</h3><span>{isLoading ? "Loading..." : `${visiblePlayers.length} players`}</span></div>
-      <div className="form-grid three-column"><label>Search player<input value={search} onChange={(event) => setSearch(event.target.value)} /></label><label>Position<select value={position} onChange={(event) => setPosition(event.target.value)}><option value="">All positions</option>{positions.map((item) => <option key={item} value={item}>{item.replaceAll("-", " ")}</option>)}</select></label><label>Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option><option value="archived">Archived</option></select></label></div>
-      <div className="entity-table"><table><thead><tr><th>Number</th><th>Player</th><th>Position</th><th>Status</th><th>Actions</th></tr></thead><tbody>{visiblePlayers.map((player) => <tr key={player.id}><td>{player.jerseyNumber ?? "-"}</td><td>{player.displayName}</td><td>{player.position?.replaceAll("-", " ") ?? "-"}</td><td>{player.status}</td><td><button type="button" onClick={() => editPlayer(player)}>Edit</button><button type="button" className="secondary" onClick={() => void removePlayer(player)} disabled={Boolean(removingId)}>{removingId === player.id ? "Removing..." : "Remove from Squad"}</button></td></tr>)}</tbody></table></div>
+      <div className="form-grid four-column"><label>Search player<input value={search} onChange={(event) => setSearch(event.target.value)} /></label><label>Position<select value={position} onChange={(event) => setPosition(event.target.value)}><option value="">All positions</option>{positions.map((item) => <option key={item} value={item}>{item.replaceAll("-", " ")}</option>)}</select></label><label>Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option><option value="archived">Archived</option></select></label><label>Availability<select value={availabilityFilter} onChange={(event) => setAvailabilityFilter(event.target.value)}><option value="">All availability</option>{availabilities.map((item) => <option key={item} value={item}>{item}</option>)}</select></label></div>
+      <div className="entity-table"><table><thead><tr><th>Number</th><th>Player</th><th>Position</th><th>Status</th><th>Availability</th><th>Actions</th></tr></thead><tbody>{visiblePlayers.map((player) => <tr key={player.id}><td>{player.jerseyNumber ?? "-"}</td><td>{player.displayName}</td><td>{player.position?.replaceAll("-", " ") ?? "-"}</td><td>{player.status}</td><td><span className={`availability-indicator availability-${player.availability}`}>{player.availability}</span></td><td><button type="button" onClick={() => editPlayer(player)}>Edit</button><button type="button" className="secondary" onClick={() => void removePlayer(player)} disabled={Boolean(removingId)}>{removingId === player.id ? "Removing..." : "Remove from Squad"}</button></td></tr>)}</tbody></table></div>
     </section>
   </section>;
 }

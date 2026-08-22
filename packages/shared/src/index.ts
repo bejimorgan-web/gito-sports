@@ -9,6 +9,7 @@ export type {
   Season,
   Player,
   PlayerPosition,
+  PlayerAvailability,
   SeasonSquad,
   SquadPlayer,
   FormationPositionPoint,

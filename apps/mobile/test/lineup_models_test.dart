@@ -15,7 +15,7 @@ void main() {
         ],
       },
       'starters': [
-        {'playerId': 'player-1', 'name': 'Alex Keeper', 'slotIndex': 0, 'shirtNumber': 1, 'photoUrl': 'https://example.test/alex.jpg', 'position': 'goalkeeper'},
+        {'playerId': 'player-1', 'name': 'Alex Keeper', 'slotIndex': 0, 'shirtNumber': 1, 'photoUrl': 'https://example.test/alex.jpg', 'position': 'goalkeeper', 'availability': 'injured'},
       ],
       'substitutes': [
         {'playerId': 'player-2', 'name': 'Sam Forward', 'shirtNumber': 9, 'position': 'forward'},
@@ -26,6 +26,7 @@ void main() {
     expect(lineup.formation, '4-3-3');
     expect(lineup.positions.single['label'], 'GK');
     expect(lineup.starters.single.photoUrl, 'https://example.test/alex.jpg');
+    expect(lineup.starters.single.availability, 'injured');
     expect(lineup.substitutes.single.shirtNumber, 9);
   });
 

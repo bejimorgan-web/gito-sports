@@ -316,6 +316,12 @@ function ensureNewsSchemaColumns(database: DatabaseSync) {
     if (hasTable(database, "players") && !hasColumn(database, "players", "photo_url")) {
       database.exec("ALTER TABLE players ADD COLUMN photo_url TEXT");
     }
+    if (hasTable(database, "players") && !hasColumn(database, "players", "availability_status")) {
+      database.exec("ALTER TABLE players ADD COLUMN availability_status TEXT NOT NULL DEFAULT 'available'");
+    }
+    if (hasTable(database, "players") && !hasColumn(database, "players", "injury_type")) database.exec("ALTER TABLE players ADD COLUMN injury_type TEXT");
+    if (hasTable(database, "players") && !hasColumn(database, "players", "expected_return_date")) database.exec("ALTER TABLE players ADD COLUMN expected_return_date TEXT");
+    if (hasTable(database, "players") && !hasColumn(database, "players", "injury_notes")) database.exec("ALTER TABLE players ADD COLUMN injury_notes TEXT");
   database.exec(`
     CREATE TABLE IF NOT EXISTS news_generated_rss_sources (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, source_url TEXT NOT NULL, feed_token TEXT NOT NULL UNIQUE,

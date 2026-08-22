@@ -255,15 +255,16 @@ class MobileNewsArticle {
 }
 
 class MobileLineupPlayer {
-    const MobileLineupPlayer({required this.playerId, required this.name, this.slotIndex, this.shirtNumber, this.photoUrl, this.position});
+    const MobileLineupPlayer({required this.playerId, required this.name, this.slotIndex, this.shirtNumber, this.photoUrl, this.position, this.availability = 'available'});
     final String playerId;
     final String name;
     final int? slotIndex;
     final int? shirtNumber;
     final String? photoUrl;
     final String? position;
+    final String availability;
     factory MobileLineupPlayer.fromJson(Map<String, dynamic> json) => MobileLineupPlayer(
-            playerId: '${json['playerId'] ?? ''}', name: '${json['name'] ?? 'Player'}', slotIndex: (json['slotIndex'] as num?)?.toInt(), shirtNumber: (json['shirtNumber'] as num?)?.toInt(), photoUrl: json['photoUrl']?.toString(), position: json['position']?.toString());
+            playerId: '${json['playerId'] ?? ''}', name: '${json['name'] ?? 'Player'}', slotIndex: (json['slotIndex'] as num?)?.toInt(), shirtNumber: (json['shirtNumber'] as num?)?.toInt(), photoUrl: json['photoUrl']?.toString(), position: json['position']?.toString(), availability: '${json['availability'] ?? 'available'}');
 }
 
 class MobileLineup {

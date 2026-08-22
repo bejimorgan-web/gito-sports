@@ -113,6 +113,7 @@ export interface Team {
 }
 
 export type PlayerPosition = "goalkeeper" | "defender" | "midfielder" | "forward" | "winger" | "striker" | "fullback" | "center-back" | "attacking-midfielder" | "defensive-midfielder" | "custom";
+export type PlayerAvailability = "available" | "injured" | "suspended" | "unavailable";
 
 export interface Player {
   id: EntityId;
@@ -122,6 +123,10 @@ export interface Player {
   lastName: string;
   displayName: string;
   photoUrl?: string;
+  availability: PlayerAvailability;
+  injuryType?: string;
+  expectedReturnDate?: string;
+  injuryNotes?: string;
   position?: PlayerPosition;
   jerseyNumber?: number;
   heightCm?: number;
@@ -139,6 +144,10 @@ export interface CreatePlayerRequest {
   lastName: string;
   displayName?: string;
   photoUrl?: string;
+  availability?: PlayerAvailability;
+  injuryType?: string;
+  expectedReturnDate?: string;
+  injuryNotes?: string;
   position?: PlayerPosition;
   jerseyNumber?: number;
   heightCm?: number;
@@ -153,6 +162,10 @@ export interface UpdatePlayerRequest {
   lastName?: string;
   displayName?: string;
   photoUrl?: string | null;
+  availability?: PlayerAvailability;
+  injuryType?: string | null;
+  expectedReturnDate?: string | null;
+  injuryNotes?: string | null;
   position?: PlayerPosition;
   jerseyNumber?: number | null;
   heightCm?: number | null;

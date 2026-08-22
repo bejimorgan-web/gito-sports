@@ -35,8 +35,8 @@ export type MobileLineup = {
   teamId: string;
   status: string;
   formation: { id: string; name: string; formation: string; positions: Array<{ x: number; y: number; label?: string }> };
-  starters: Array<{ slotIndex: number; playerId: string; name: string; shirtNumber: number | null; photoUrl: string | null; position: string | null }>;
-  substitutes: Array<{ playerId: string; name: string; shirtNumber: number | null; photoUrl: string | null; position: string | null }>;
+  starters: Array<{ slotIndex: number; playerId: string; name: string; shirtNumber: number | null; photoUrl: string | null; position: string | null; availability: string }>;
+  substitutes: Array<{ playerId: string; name: string; shirtNumber: number | null; photoUrl: string | null; position: string | null; availability: string }>;
   captainPlayerId: string | null;
 };
 
@@ -44,9 +44,9 @@ function fixtureLineups(fixtureId: string): MobileLineup[] {
   const database = getDatabase();
   return getFixtureLineups(fixtureId).map((lineup) => {
     const formation = database.prepare("SELECT id, name, formation, positions_json FROM formation_templates WHERE id = ?").get(lineup.formationId) as any;
-    const players = database.prepare("SELECT id, display_name, jersey_number, photo_url, position FROM players WHERE id IN (SELECT player_id FROM lineup_player_assignments WHERE lineup_id = ?)").all(lineup.id) as any[];
+    const players = database.prepare("SELECT id, display_name, jersey_number, photo_url, position, availability_status FROM players WHERE id IN (SELECT player_id FROM lineup_player_assignments WHERE lineup_id = ?)").all(lineup.id) as any[];
     const byId = new Map(players.map((player) => [player.id, player]));
-    const mapPlayer = (playerId: string) => { const player = byId.get(playerId); return { playerId, name: player?.display_name ?? "Player", shirtNumber: player?.jersey_number ?? null, photoUrl: player?.photo_url ?? null, position: player?.position ?? null }; };
+    const mapPlayer = (playerId: string) => { const player = byId.get(playerId); return { playerId, name: player?.display_name ?? "Player", shirtNumber: player?.jersey_number ?? null, photoUrl: player?.photo_url ?? null, position: player?.position ?? null, availability: player?.availability_status ?? "available" }; };
     return { id: lineup.id, teamId: lineup.teamId, status: lineup.status, formation: { id: formation.id, name: formation.name, formation: formation.formation, positions: JSON.parse(formation.positions_json) }, starters: lineup.players.filter((item) => item.role === "starter").map((item) => ({ ...mapPlayer(item.playerId), slotIndex: item.slotIndex ?? 0 })), substitutes: lineup.players.filter((item) => item.role === "substitute").map((item) => mapPlayer(item.playerId)), captainPlayerId: lineup.captainPlayerId ?? null };
   });
 }
