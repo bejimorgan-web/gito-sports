@@ -52,12 +52,28 @@ class MobileApiService {
           .whereType<Map>()
           .map((item) => MobileSport.fromJson(Map<String, dynamic>.from(item)))
           .toList();
-  Future<List<MobileCompetition>> getCompetitions() async =>
-      ((await _get('/mobile/competitions')) as List)
+  Future<List<MobileHost>> getHosts({required String sportId}) async =>
+      ((await _get('/hosts?sportId=${Uri.encodeQueryComponent(sportId)}')) as List)
           .whereType<Map>()
-          .map((item) =>
-              MobileCompetition.fromJson(Map<String, dynamic>.from(item)))
+          .map((item) => MobileHost.fromJson(Map<String, dynamic>.from(item)))
           .toList();
+
+  Future<List<MobileCompetition>> getCompetitions({String? sportId, String? hostId}) async {
+    final query = <String, String>{
+      if (sportId != null) 'sportId': sportId,
+      if (hostId != null) 'hostId': hostId,
+    };
+    final path = '/mobile/competitions${query.isEmpty ? '' : '?${Uri(queryParameters: query).query}'}';
+    return ((await _get(path)) as List)
+        .whereType<Map>()
+        .map((item) => MobileCompetition.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+  }
+
+
+  Future<List<MobileCompetition>> getCompetitionsForHost(String sportId, String hostId) async =>
+      getCompetitions(sportId: sportId, hostId: hostId);
+
   Future<List<MobileClub>> getClubs(
       {List<String> teamIds = const <String>[]}) async {
     final query = teamIds.isEmpty
@@ -133,9 +149,10 @@ class MobileApiService {
       MobileNewsArticle.fromJson(
           Map<String, dynamic>.from(await _get('/mobile/news/$articleId')));
 
-    Future<MobileFixture> getFixture(String fixtureId, {String? clubId}) async =>
+  Future<MobileFixture> getFixture(String fixtureId, {String? clubId}) async =>
       MobileFixture.fromJson(
-                    Map<String, dynamic>.from(await _get('/mobile/fixtures/$fixtureId${clubId == null ? '' : '?clubId=${Uri.encodeQueryComponent(clubId)}'}')));
+          Map<String, dynamic>.from(await _get('/mobile/fixtures/$fixtureId${clubId == null ? '' : '?clubId=${Uri.encodeQueryComponent(clubId)}'}')));
+
   Future<List<MobileNewsArticle>> getCompetitionNews(
           String competitionId) async =>
       _news('/mobile/competitions/$competitionId/news');

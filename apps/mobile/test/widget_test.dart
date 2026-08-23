@@ -43,6 +43,21 @@ void main() {
     expect(find.text('Football'), findsOneWidget);
     expect(find.text('Barcelona'), findsOneWidget);
   });
+
+  testWidgets('Sports screen shows sport host navigation instead of a direct fixture list', (WidgetTester tester) async {
+    await tester.pumpWidget(MaterialApp(home: SportsScreen(api: _CatalogApi())));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Soccer'), findsOneWidget);
+    await tester.tap(find.text('Soccer'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Spain'), findsOneWidget);
+    await tester.tap(find.text('Spain'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('League One'), findsOneWidget);
+  });
 }
 
 class _CatalogApi extends MobileApiService {
@@ -54,7 +69,12 @@ class _CatalogApi extends MobileApiService {
       ];
 
   @override
-  Future<List<MobileCompetition>> getCompetitions() async => const [
+  Future<List<MobileHost>> getHosts({required String sportId}) async => const [
+        MobileHost(id: 'host-1', sportId: 'sport-1', name: 'Spain'),
+      ];
+
+  @override
+  Future<List<MobileCompetition>> getCompetitions({String? sportId, String? hostId}) async => const [
         MobileCompetition(id: 'competition-1', name: 'League One', sportId: 'sport-1'),
       ];
 

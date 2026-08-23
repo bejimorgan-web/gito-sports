@@ -2122,20 +2122,20 @@ class ScoreStatusPill extends StatelessWidget {
 }
 
 class SportsScreen extends StatefulWidget {
-  const SportsScreen({super.key});
+  const SportsScreen({super.key, this.api = const MobileApiService()});
+  final MobileApiService api;
 
   @override
   State<SportsScreen> createState() => _SportsScreenState();
 }
 
 class _SportsScreenState extends State<SportsScreen> {
-  final _api = const MobileApiService();
   late Future<List<MobileSport>> _sports;
 
   @override
   void initState() {
     super.initState();
-    _sports = _api.getSports();
+    _sports = widget.api.getSports();
   }
 
   @override
@@ -2145,7 +2145,7 @@ class _SportsScreenState extends State<SportsScreen> {
           future: _sports,
           emptyText: 'No configured sports available.',
           builder: (context, sports) => RefreshIndicator(
-            onRefresh: () async => setState(() => _sports = _api.getSports()),
+            onRefresh: () async => setState(() => _sports = widget.api.getSports()),
             child: ListView.separated(
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(18),
@@ -2155,13 +2155,10 @@ class _SportsScreenState extends State<SportsScreen> {
                 final sport = sports[index];
                 return Card(
                   child: ListTile(
-                    leading:
-                        _CatalogLogo(url: sport.logoUrl, label: sport.name),
+                    leading: _CatalogLogo(url: sport.logoUrl, label: sport.name),
                     title: Text(sport.name),
-                    onTap: () =>
-                        Navigator.of(context).push(MaterialPageRoute<void>(
-                      builder: (_) =>
-                          CanonicalSportFixturesScreen(sport: sport, api: _api),
+                    onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                      builder: (_) => SportHostsScreen(sport: sport, api: widget.api),
                     )),
                   ),
                 );
@@ -2172,38 +2169,97 @@ class _SportsScreenState extends State<SportsScreen> {
       );
 }
 
-class CanonicalSportFixturesScreen extends StatelessWidget {
-  const CanonicalSportFixturesScreen(
-      {required this.sport, required this.api, super.key});
+class SportHostsScreen extends StatelessWidget {
+  const SportHostsScreen({required this.sport, required this.api, super.key});
   final MobileSport sport;
   final MobileApiService api;
 
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: Text(sport.name)),
+        body: MobileStateView<List<MobileHost>>(
+          future: api.getHosts(sportId: sport.id),
+          emptyText: 'No hosts configured for this sport.',
+          builder: (context, hosts) => ListView.separated(
+            padding: const EdgeInsets.all(18),
+            itemCount: hosts.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 10),
+            itemBuilder: (context, index) {
+              final host = hosts[index];
+              return Card(
+                child: ListTile(
+                  leading: _CatalogLogo(url: host.logoUrl, label: host.name),
+                  title: Text(host.name),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => HostCompetitionsScreen(sport: sport, host: host, api: api),
+                  )),
+                ),
+              );
+            },
+          ),
+        ),
+      );
+}
+
+class HostCompetitionsScreen extends StatelessWidget {
+  const HostCompetitionsScreen({required this.sport, required this.host, required this.api, super.key});
+  final MobileSport sport;
+  final MobileHost host;
+  final MobileApiService api;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: Text(host.name)),
+        body: MobileStateView<List<MobileCompetition>>(
+          future: api.getCompetitions(sportId: sport.id, hostId: host.id),
+          emptyText: 'No competitions configured for this host.',
+          builder: (context, competitions) => ListView.separated(
+            padding: const EdgeInsets.all(18),
+            itemCount: competitions.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 10),
+            itemBuilder: (context, index) {
+              final competition = competitions[index];
+              return Card(
+                child: ListTile(
+                  leading: _CatalogLogo(url: competition.logoUrl, label: competition.name),
+                  title: Text(competition.name),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => CompetitionFixturesScreen(sport: sport, host: host, competition: competition, api: api),
+                  )),
+                ),
+              );
+            },
+          ),
+        ),
+      );
+}
+
+class CompetitionFixturesScreen extends StatelessWidget {
+  const CompetitionFixturesScreen({required this.sport, required this.host, required this.competition, required this.api, super.key});
+  final MobileSport sport;
+  final MobileHost host;
+  final MobileCompetition competition;
+  final MobileApiService api;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: Text(competition.name)),
         body: MobileStateView<List<MobileFixture>>(
-          future: api.getFixtures(
-              sportId: sport.id,
-              from: DateTime.now().toUtc().toIso8601String(),
-              to: DateTime.now()
-                  .toUtc()
-                  .add(const Duration(days: 1))
-                  .toIso8601String()),
-          emptyText: 'No fixtures available for this sport.',
-          builder: (context, fixtures) => ListView.builder(
+          future: api.getCompetitionFixtures(competition.id),
+          emptyText: 'No fixtures available for this competition.',
+          builder: (context, fixtures) => ListView.separated(
+            padding: const EdgeInsets.all(18),
             itemCount: fixtures.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 12),
             itemBuilder: (context, index) {
               final fixture = fixtures[index];
               return Card(
                 child: ListTile(
-                  title: Text(
-                      '${fixture.homeClub.name} vs ${fixture.awayClub.name}'),
+                  title: Text('${fixture.homeClub.name} vs ${fixture.awayClub.name}'),
                   subtitle: Text(fixture.competition.name),
                   trailing: Text(fixture.scoreLabel),
-                  onTap: () =>
-                      Navigator.of(context).push(MaterialPageRoute<void>(
-                    builder: (_) =>
-                        FixtureDetailScreen(fixtureId: fixture.id, api: api),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => FixtureDetailScreen(fixtureId: fixture.id, api: api),
                   )),
                 ),
               );

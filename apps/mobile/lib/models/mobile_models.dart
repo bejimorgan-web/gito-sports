@@ -20,6 +20,36 @@ class MobileCountry {
       MobileCountry(id: '${json['id'] ?? ''}', name: '${json['name'] ?? ''}');
 }
 
+class MobileHost {
+  const MobileHost({
+    required this.id,
+    required this.sportId,
+    required this.name,
+    this.type,
+    this.countryId,
+    this.logoUrl,
+    this.status,
+  });
+
+  final String id;
+  final String sportId;
+  final String name;
+  final String? type;
+  final String? countryId;
+  final String? logoUrl;
+  final String? status;
+
+  factory MobileHost.fromJson(Map<String, dynamic> json) => MobileHost(
+        id: '${json['id'] ?? ''}',
+        sportId: '${json['sportId'] ?? json['sport_id'] ?? ''}',
+        name: '${json['name'] ?? ''}',
+        type: json['type']?.toString() ?? json['hostType']?.toString(),
+        countryId: json['countryId']?.toString() ?? json['country_id']?.toString(),
+        logoUrl: json['logoUrl']?.toString() ?? json['logo_url']?.toString(),
+        status: json['status']?.toString(),
+      );
+}
+
 class MobileClub {
   const MobileClub(
       {required this.id,

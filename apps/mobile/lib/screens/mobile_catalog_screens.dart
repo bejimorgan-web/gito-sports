@@ -518,100 +518,401 @@ class _NewsInlineFallback extends StatelessWidget {
 }
 
 class FixtureDetailScreen extends StatelessWidget {
-  const FixtureDetailScreen(
-      {required this.fixtureId,
-      super.key,
-        this.clubId,
-      this.api = const MobileApiService()});
+  const FixtureDetailScreen({
+    required this.fixtureId,
+    super.key,
+    this.clubId,
+    this.api = const MobileApiService(),
+  });
+
   final String fixtureId;
-      final String? clubId;
+  final String? clubId;
   final MobileApiService api;
+
   @override
   Widget build(BuildContext context) => Scaffold(
-      appBar: AppBar(title: const Text('Fixture')),
-      body: MobileStateView<MobileFixture>(
+        appBar: AppBar(title: const Text('Fixture')),
+        body: MobileStateView<MobileFixture>(
           future: api.getFixture(fixtureId, clubId: clubId),
           emptyText: 'Fixture not found.',
-          builder: (context, fixture) =>
-              ListView(padding: const EdgeInsets.all(16), children: [
-                _FixtureHeroCard(fixture: fixture),
-                const SizedBox(height: 16),
-                _MobileLineups(fixture: fixture),
-                const SizedBox(height: 16),
-                Text('Streams', style: Theme.of(context).textTheme.titleMedium),
-                ...fixture.streams.map((stream) => ListTile(
+          builder: (context, fixture) => ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              _FixtureHeroCard(fixture: fixture),
+              const SizedBox(height: 16),
+              _MobileLineups(fixture: fixture, clubId: clubId),
+              const SizedBox(height: 16),
+              Text('Streams', style: Theme.of(context).textTheme.titleMedium),
+              ...fixture.streams.map((stream) => ListTile(
                     title: Text(stream.channelName),
-                    subtitle:
-                        Text('${stream.providerName} · ${stream.healthStatus}'),
-                    trailing: Text(stream.status)))
-              ])));
+                    subtitle: Text('${stream.providerName} · ${stream.healthStatus}'),
+                    trailing: Text(stream.status),
+                  )),
+            ],
+          ),
+        ),
+      );
 }
 
-        class _MobileLineups extends StatelessWidget {
-          const _MobileLineups({required this.fixture});
-          final MobileFixture fixture;
-          @override
-          Widget build(BuildContext context) {
-            final lineups = fixture.lineups;
-            if (lineups.isEmpty) return const Card(child: ListTile(title: Text('Lineups'), subtitle: Text('Lineups not available yet.')));
-            return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Lineups', style: Theme.of(context).textTheme.titleLarge), ...lineups.map((lineup) => _MobileLineupCard(lineup: lineup, team: lineup.teamId == fixture.homeClub.id ? fixture.homeClub : fixture.awayClub))]);
-          }
-        }
+class _MobileLineups extends StatelessWidget {
+  const _MobileLineups({required this.fixture, this.clubId});
 
-        class _MobileLineupCard extends StatelessWidget {
-          const _MobileLineupCard({required this.lineup, required this.team});
-          final MobileLineup lineup;
-          final MobileClub team;
-          @override
-          Widget build(BuildContext context) => Card(margin: const EdgeInsets.only(top: 12), child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(team.name, style: Theme.of(context).textTheme.titleMedium), Text('${lineup.statusLabel} · ${lineup.formationName}'), if (lineup.status == 'possible' && lineup.starters.any((player) => player.availability != 'available')) const Text('Some players have limited availability.', style: TextStyle(fontSize: 12)), const SizedBox(height: 8), _MobileLineupPitch(lineup: lineup, logoUrl: team.logoUrl), const SizedBox(height: 8), const Text('Substitutes', style: TextStyle(fontWeight: FontWeight.bold)), ...lineup.substitutes.map((player) => ListTile(dense: true, leading: Text('${player.shirtNumber ?? '-'}'), title: Text(player.name), subtitle: Text(player.position ?? '')))])));
-        }
+  final MobileFixture fixture;
+  final String? clubId;
 
-        class _MobileLineupPitch extends StatelessWidget {
-          const _MobileLineupPitch({required this.lineup, this.logoUrl});
-          final MobileLineup lineup;
-          final String? logoUrl;
-          @override
-          Widget build(BuildContext context) {
-            final bySlot = {for (final player in lineup.starters) player.slotIndex ?? -1: player};
-            return AspectRatio(aspectRatio: 1.25, child: Stack(children: [CustomPaint(size: Size.infinite, painter: const _FootballPitchPainter()), if (logoUrl?.isNotEmpty == true) Center(child: Opacity(opacity: .1, child: Image.network(logoUrl!, width: 130, height: 80, fit: BoxFit.contain))), for (var index = 0; index < lineup.positions.length; index++) Align(alignment: Alignment((((lineup.positions[index]['x'] as num?)?.toDouble() ?? 50) / 50) - 1, (((lineup.positions[index]['y'] as num?)?.toDouble() ?? 50) / 50) - 1), child: _MobileSlotMarker(player: bySlot[index], label: '${lineup.positions[index]['label'] ?? 'POS'}'))]));
-          }
-        }
+  @override
+  Widget build(BuildContext context) {
+    final lineups = fixture.lineups;
+    if (lineups.isEmpty) {
+      return const Card(
+        child: ListTile(
+          title: Text('Lineups'),
+          subtitle: Text('Lineups not available yet.'),
+        ),
+      );
+    }
 
-        class _FootballPitchPainter extends CustomPainter {
-          const _FootballPitchPainter();
-          @override
-          void paint(Canvas canvas, Size size) {
-            final line = Paint()..color = Colors.white.withOpacity(.8)..style = PaintingStyle.stroke..strokeWidth = 1.2;
-            canvas.drawRect((Offset.zero & size).deflate(2), line);
-            canvas.drawLine(Offset(0, size.height / 2), Offset(size.width, size.height / 2), line);
-            canvas.drawCircle(Offset(size.width / 2, size.height / 2), size.width * .16, line);
-            canvas.drawCircle(Offset(size.width / 2, size.height / 2), 2, line);
-            final boxWidth = size.width * .58;
-            final boxHeight = size.height * .19;
-            canvas.drawRect(Rect.fromLTWH((size.width - boxWidth) / 2, 2, boxWidth, boxHeight), line);
-            canvas.drawRect(Rect.fromLTWH((size.width - boxWidth) / 2, size.height - boxHeight - 2, boxWidth, boxHeight), line);
-            final sixWidth = size.width * .28;
-            final sixHeight = size.height * .08;
-            canvas.drawRect(Rect.fromLTWH((size.width - sixWidth) / 2, 2, sixWidth, sixHeight), line);
-            canvas.drawRect(Rect.fromLTWH((size.width - sixWidth) / 2, size.height - sixHeight - 2, sixWidth, sixHeight), line);
-            canvas.drawCircle(Offset(size.width / 2, boxHeight * .65), 2, line);
-            canvas.drawCircle(Offset(size.width / 2, size.height - boxHeight * .65), 2, line);
-            canvas.drawCircle(Offset(size.width / 2, 2 + boxHeight), size.width * .1, line);
-            canvas.drawCircle(Offset(size.width / 2, size.height - boxHeight - 2), size.width * .1, line);
-          }
-          @override
-          bool shouldRepaint(covariant _FootballPitchPainter oldDelegate) => false;
-        }
+    if (clubId != null) {
+      final lineup = lineups.firstWhere(
+        (item) => item.teamId == clubId,
+        orElse: () => lineups.first,
+      );
+      final team = lineup.teamId == fixture.homeClub.id ? fixture.homeClub : fixture.awayClub;
+      return _MobileLineupCard(lineup: lineup, team: team, clubOnly: true);
+    }
 
-        class _MobileSlotMarker extends StatelessWidget {
-          const _MobileSlotMarker({required this.player, required this.label});
-          final MobileLineupPlayer? player;
-          final String label;
-          @override
-          Widget build(BuildContext context) => Container(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3), color: Colors.white, child: player == null ? Text(label, textAlign: TextAlign.center, style: const TextStyle(fontSize: 10, color: Colors.black)) : Column(mainAxisSize: MainAxisSize.min, children: [ClipOval(child: player!.photoUrl?.isNotEmpty == true ? Image.network(player!.photoUrl!, width: 24, height: 24, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const _PlayerAvatarFallback()) : const _PlayerAvatarFallback()), Text(player!.name, textAlign: TextAlign.center, style: const TextStyle(fontSize: 9, color: Colors.black))]));
-        }
+    final home = lineups.firstWhere(
+      (item) => item.teamId == fixture.homeClub.id,
+      orElse: () => lineups.first,
+    );
+    final away = lineups.firstWhere(
+      (item) => item.teamId == fixture.awayClub.id,
+      orElse: () => lineups.length > 1 ? lineups.last : lineups.first,
+    );
 
-        class _PlayerAvatarFallback extends StatelessWidget {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Lineups', style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 12),
+        _TwoTeamLineupPitch(fixture: fixture, homeLineup: home, awayLineup: away),
+      ],
+    );
+  }
+}
+
+class _MobileLineupCard extends StatelessWidget {
+  const _MobileLineupCard({
+    required this.lineup,
+    required this.team,
+    this.clubOnly = false,
+  });
+
+  final MobileLineup lineup;
+  final MobileClub team;
+  final bool clubOnly;
+
+  @override
+  Widget build(BuildContext context) => Card(
+        margin: const EdgeInsets.only(top: 12),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(team.name, style: Theme.of(context).textTheme.titleMedium),
+              Text('${lineup.statusLabel} · ${lineup.formationName}'),
+              if (lineup.status == 'possible' &&
+                  lineup.starters.any((player) => player.availability != 'available'))
+                const Text(
+                  'Some players have limited availability.',
+                  style: TextStyle(fontSize: 12),
+                ),
+              const SizedBox(height: 8),
+              _MobileLineupPitch(lineup: lineup, logoUrl: team.logoUrl),
+              const SizedBox(height: 8),
+              if (!clubOnly) const Text('Substitutes', style: TextStyle(fontWeight: FontWeight.bold)),
+              if (clubOnly) ...[
+                const Text('Coach', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                const Text('Coach information not available.'),
+                const SizedBox(height: 12),
+                const Text('Substitutes', style: TextStyle(fontWeight: FontWeight.bold)),
+              ],
+              ...lineup.substitutes.map((player) => ListTile(
+                    dense: true,
+                    leading: CircleAvatar(
+                      radius: 18,
+                      backgroundImage: player.photoUrl?.isNotEmpty == true
+                          ? NetworkImage(player.photoUrl!)
+                          : null,
+                      child: player.photoUrl?.isNotEmpty != true
+                          ? const Icon(Icons.person)
+                          : null,
+                    ),
+                    title: Text(player.name),
+                    subtitle: Text(player.position ?? ''),
+                  )),
+            ],
+          ),
+        ),
+      );
+}
+
+class _TwoTeamLineupPitch extends StatelessWidget {
+  const _TwoTeamLineupPitch({
+    required this.fixture,
+    required this.homeLineup,
+    required this.awayLineup,
+  });
+
+  final MobileFixture fixture;
+  final MobileLineup homeLineup;
+  final MobileLineup awayLineup;
+
+  @override
+  Widget build(BuildContext context) {
+    final homeBySlot = {for (final player in homeLineup.starters) player.slotIndex ?? -1: player};
+    final awayBySlot = {for (final player in awayLineup.starters) player.slotIndex ?? -1: player};
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          children: [
+            Text(
+              '${fixture.homeClub.name} vs ${fixture.awayClub.name}',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            AspectRatio(
+              aspectRatio: 1.5,
+              child: Stack(
+                children: [
+                  CustomPaint(size: Size.infinite, painter: const _FootballPitchPainter()),
+                  if (fixture.homeClub.logoUrl?.isNotEmpty == true)
+                    Positioned.fill(
+                      child: Opacity(
+                        opacity: 0.08,
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Image.network(
+                            fixture.homeClub.logoUrl!,
+                            fit: BoxFit.contain,
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (fixture.awayClub.logoUrl?.isNotEmpty == true)
+                    Positioned.fill(
+                      child: Opacity(
+                        opacity: 0.08,
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: Image.network(
+                            fixture.awayClub.logoUrl!,
+                            fit: BoxFit.contain,
+                          ),
+                        ),
+                      ),
+                    ),
+                  for (var i = 0; i < homeLineup.positions.length; i++)
+                    Align(
+                      alignment: Alignment(
+                        (((homeLineup.positions[i]['x'] as num?)?.toDouble() ?? 50) / 100 * 2 - 1),
+                        (((homeLineup.positions[i]['y'] as num?)?.toDouble() ?? 50) / 100 * 2 - 1),
+                      ),
+                      child: _MobileSlotMarker(
+                        player: homeBySlot[i],
+                        label: homeLineup.positions[i]['label']?.toString() ?? 'HOME',
+                      ),
+                    ),
+                  for (var i = 0; i < awayLineup.positions.length; i++)
+                    Align(
+                      alignment: Alignment(
+                        -((((awayLineup.positions[i]['x'] as num?)?.toDouble() ?? 50) / 100 * 2 - 1)),
+                        (((awayLineup.positions[i]['y'] as num?)?.toDouble() ?? 50) / 100 * 2 - 1),
+                      ),
+                      child: _MobileSlotMarker(
+                        player: awayBySlot[i],
+                        label: awayLineup.positions[i]['label']?.toString() ?? 'AWAY',
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MobileLineupPitch extends StatelessWidget {
+  const _MobileLineupPitch({required this.lineup, this.logoUrl});
+
+  final MobileLineup lineup;
+  final String? logoUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final bySlot = {for (final player in lineup.starters) player.slotIndex ?? -1: player};
+
+    return AspectRatio(
+      aspectRatio: 1.25,
+      child: Stack(
+        children: [
+          CustomPaint(size: Size.infinite, painter: const _FootballPitchPainter()),
+          if (logoUrl?.isNotEmpty == true)
+            Center(
+              child: Opacity(
+                opacity: 0.12,
+                child: Image.network(
+                  logoUrl!,
+                  width: 140,
+                  height: 100,
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ),
+          for (var index = 0; index < lineup.positions.length; index++)
+            Align(
+              alignment: Alignment(
+                (((lineup.positions[index]['x'] as num?)?.toDouble() ?? 50) / 100 * 2 - 1),
+                (((lineup.positions[index]['y'] as num?)?.toDouble() ?? 50) / 100 * 2 - 1),
+              ),
+              child: _MobileSlotMarker(
+                player: bySlot[index],
+                label: '${lineup.positions[index]['label'] ?? 'POS'}',
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FootballPitchPainter extends CustomPainter {
+  const _FootballPitchPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final grass = Paint()..color = const Color(0xFF1B8F45);
+    final line = Paint()
+      ..color = Colors.white.withOpacity(0.9)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4;
+    final stripe = Paint()..color = const Color(0xFF2CA35A);
+
+    canvas.drawRect(Offset.zero & size, grass);
+    for (var i = 0; i < 8; i++) {
+      final x = i * (size.width / 8);
+      canvas.drawRect(
+        Rect.fromLTWH(x, 0, size.width / 18, size.height),
+        stripe,
+      );
+    }
+
+    final bounds = Rect.fromLTWH(2, 2, size.width - 4, size.height - 4);
+    canvas.drawRect(bounds, line);
+    final half = size.width / 2;
+    canvas.drawLine(Offset(half, 0), Offset(half, size.height), line);
+    canvas.drawCircle(Offset(half, size.height / 2), size.width * 0.14, line);
+    canvas.drawCircle(Offset(half, size.height / 2), 3, line);
+
+    final penaltyWidth = size.width * 0.42;
+    final penaltyHeight = size.height * 0.26;
+    final sixWidth = size.width * 0.24;
+    final sixHeight = size.height * 0.12;
+
+    canvas.drawRect(
+      Rect.fromLTWH((size.width - penaltyWidth) / 2, 0, penaltyWidth, penaltyHeight),
+      line,
+    );
+    canvas.drawRect(
+      Rect.fromLTWH((size.width - penaltyWidth) / 2, size.height - penaltyHeight, penaltyWidth, penaltyHeight),
+      line,
+    );
+    canvas.drawRect(
+      Rect.fromLTWH((size.width - sixWidth) / 2, 0, sixWidth, sixHeight),
+      line,
+    );
+    canvas.drawRect(
+      Rect.fromLTWH((size.width - sixWidth) / 2, size.height - sixHeight, sixWidth, sixHeight),
+      line,
+    );
+
+    canvas.drawCircle(Offset(half, penaltyHeight / 2), 3, line);
+    canvas.drawCircle(Offset(half, size.height - penaltyHeight / 2), 3, line);
+
+    final arcRadius = size.width * 0.12;
+    final arcRect = Rect.fromCircle(
+      center: Offset(half, size.height / 2),
+      radius: arcRadius,
+    );
+    canvas.drawArc(arcRect, 1.57, 3.14, false, line);
+    canvas.drawArc(arcRect, -1.57, 3.14, false, line);
+  }
+
+  @override
+  bool shouldRepaint(covariant _FootballPitchPainter oldDelegate) => false;
+}
+
+class _MobileSlotMarker extends StatelessWidget {
+  const _MobileSlotMarker({required this.player, required this.label});
+
+  final MobileLineupPlayer? player;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    if (player == null) {
+      return SizedBox(
+        width: 42,
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontSize: 10,
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ClipOval(
+          child: player!.photoUrl?.isNotEmpty == true
+              ? Image.network(
+                  player!.photoUrl!,
+                  width: 28,
+                  height: 28,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const _PlayerAvatarFallback(),
+                )
+              : const _PlayerAvatarFallback(),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          player!.name,
+          textAlign: TextAlign.center,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontSize: 9,
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PlayerAvatarFallback extends StatelessWidget {
           const _PlayerAvatarFallback();
           @override
           Widget build(BuildContext context) => Container(width: 24, height: 24, color: const Color(0xffd7e0e8), alignment: Alignment.center, child: const Icon(Icons.person, size: 16, color: Color(0xff52606d)));
