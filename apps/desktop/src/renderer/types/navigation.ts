@@ -61,6 +61,11 @@ export const navigationItems: NavigationItem[] = [
     description: "Configure visible mobile navigation sections"
   },
   {
+    key: "iptv",
+    label: "IPTV Management",
+    description: "Manage providers, validate saves, and configure IPTV sources"
+  },
+  {
     key: "matchAssignment",
     label: "IPTV Content Browser",
     description: "Browse IPTV content and assign streams to matches"
