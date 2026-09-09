@@ -147,7 +147,13 @@ export function maybeMigrateLegacyDatabasePathIfNeeded(targetDatabasePath: strin
   fs.mkdirSync(targetDir, { recursive: true });
 
   try {
-    fs.copyFileSync(sourceDatabasePath, targetDatabasePath);
+    const sourceDatabase = allowSqliteInstantiation(() => new DatabaseSync(sourceDatabasePath, { readonly: true }));
+    try {
+      const escapedTargetPath = targetDatabasePath.replace(/'/g, "''");
+      sourceDatabase.exec(`VACUUM INTO '${escapedTargetPath}'`);
+    } finally {
+      sourceDatabase.close();
+    }
 
     if (!isLikelyGiToDatabase(targetDatabasePath)) {
       fs.rmSync(targetDatabasePath, { force: true });
