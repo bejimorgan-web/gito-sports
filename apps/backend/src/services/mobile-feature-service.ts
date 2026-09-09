@@ -31,11 +31,17 @@ const DEFAULT_FEATURES: ReadonlyArray<{ feature_key: string; id: string }> = [
   { feature_key: "navigation.live", id: "flag_live" }
 ];
 
+const FEATURE_DEFAULTS: Record<string, boolean> = {
+  "navigation.liveScores": true,
+  "navigation.sports": true,
+  "navigation.live": false,
+};
+
 export const DEFAULT_NAVIGATION_FEATURES: MobileFeaturesResponse = {
   navigation: {
-    liveScores: { enabled: true, message: null },
-    sports: { enabled: true, message: null },
-    live: { enabled: true, message: null }
+    liveScores: { enabled: FEATURE_DEFAULTS["navigation.liveScores"] ?? true, message: null },
+    sports: { enabled: FEATURE_DEFAULTS["navigation.sports"] ?? true, message: null },
+    live: { enabled: FEATURE_DEFAULTS["navigation.live"] ?? false, message: null }
   }
 };
 
@@ -64,6 +70,10 @@ function normalizeEnabledValue(value: number | boolean | string | null | undefin
   }
 
   return toBool(value);
+}
+
+function getDefaultFeatureValue(featureKey: string): boolean {
+  return FEATURE_DEFAULTS[featureKey] ?? true;
 }
 
 export class MobileFeatureService {
@@ -98,13 +108,21 @@ export class MobileFeatureService {
       VALUES
         ('nav_live_scores', 'navigation.liveScores', 1, datetime('now'), datetime('now')),
         ('nav_sports', 'navigation.sports', 1, datetime('now'), datetime('now')),
-        ('nav_live', 'navigation.live', 1, datetime('now'), datetime('now'));
+        ('nav_live', 'navigation.live', 0, datetime('now'), datetime('now'));
 
       INSERT OR IGNORE INTO mobile_feature_flags (id, feature_key, enabled, display_message, created_at, updated_at)
       VALUES
         ('flag_live_scores', 'navigation.liveScores', 1, NULL, datetime('now'), datetime('now')),
         ('flag_sports', 'navigation.sports', 1, NULL, datetime('now'), datetime('now')),
-        ('flag_live', 'navigation.live', 1, NULL, datetime('now'), datetime('now'));
+        ('flag_live', 'navigation.live', 0, NULL, datetime('now'), datetime('now'));
+
+      UPDATE mobile_features
+      SET enabled = 0, updated_at = datetime('now')
+      WHERE feature_name = 'navigation.live';
+
+      UPDATE mobile_feature_flags
+      SET enabled = 0, display_message = NULL, updated_at = datetime('now')
+      WHERE feature_key = 'navigation.live';
     `);
   }
 
@@ -173,7 +191,9 @@ export class MobileFeatureService {
     if (missingFeatures.length > 0) {
       const nowIso = new Date().toISOString();
       for (const missing of missingFeatures) {
-        const enabled = legacyMap.has(missing.feature_key) ? legacyMap.get(missing.feature_key)! : true;
+        const enabled = legacyMap.has(missing.feature_key)
+          ? legacyMap.get(missing.feature_key)!
+          : getDefaultFeatureValue(missing.feature_key);
         db.prepare(
           `INSERT OR IGNORE INTO mobile_feature_flags (id, feature_key, enabled, display_message, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
         ).run(missing.id, missing.feature_key, enabled ? 1 : 0, null, nowIso, nowIso);
@@ -238,7 +258,9 @@ export class MobileFeatureService {
 
     if (missingFeatures.length > 0 || rows.length === 0) {
       for (const missing of missingFeatures) {
-        const enabled = legacyMap.has(missing.feature_key) ? legacyMap.get(missing.feature_key)! : true;
+        const enabled = legacyMap.has(missing.feature_key)
+          ? legacyMap.get(missing.feature_key)!
+          : getDefaultFeatureValue(missing.feature_key);
         db.prepare(
           `INSERT OR IGNORE INTO mobile_feature_flags (id, feature_key, enabled, display_message, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
         ).run(missing.id, missing.feature_key, enabled ? 1 : 0, null, nowIso, nowIso);

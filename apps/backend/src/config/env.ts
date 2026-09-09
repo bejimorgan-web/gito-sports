@@ -14,9 +14,9 @@ const port = Number(process.env.PORT ?? 4100);
 const canonicalDatabasePath = path.resolve(workspaceRoot, "data", "gito.sqlite");
 const canonicalBackupDir = path.resolve(workspaceRoot, "data", "backups");
 
-// For Render compatibility prefer explicit DATABASE_PATH or the platform writable
-// directory `/tmp/gito.sqlite`. Fall back to workspace `data/gito.sqlite` for
-// local development when DATABASE_PATH is not provided.
+// Production must use an explicit DATABASE_PATH on the Render-mounted disk.
+// Local development falls back to the workspace data directory when DATABASE_PATH
+// is not provided.
 const configuredDatabasePath = process.env.DATABASE_PATH?.trim();
 if (nodeEnv === "production" && !configuredDatabasePath) {
   throw new Error("DATABASE_PATH must be explicitly configured in production; use the mounted persistent disk path.");

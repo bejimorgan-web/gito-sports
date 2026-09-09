@@ -83,12 +83,101 @@ function validateDatabaseStartup(database: DatabaseSync, databasePath: string) {
   console.log(`[startup] ===================================================`);
 }
 
+function isLikelyGiToDatabase(databasePath: string): boolean {
+  try {
+    const db = allowSqliteInstantiation(() => new DatabaseSync(databasePath, { readonly: true }));
+
+    try {
+      const integrity = String((db.prepare("PRAGMA integrity_check").get() as { integrity_check?: string } | undefined)?.integrity_check ?? "unknown");
+      if (integrity !== "ok") {
+        return false;
+      }
+
+      const schemaVersion = Number((db.prepare("PRAGMA user_version").get() as { user_version?: number } | undefined)?.user_version ?? 0);
+      if (schemaVersion !== EXPECTED_SCHEMA_VERSION) {
+        return false;
+      }
+
+      const requiredTables = [
+        "sports",
+        "teams",
+        "competitions",
+        "seasons",
+        "matches",
+        "streams",
+        "providers",
+        "channels",
+        "operator_users",
+        "news_articles",
+        "news_article_categories",
+        "news_article_media"
+      ];
+      const placeholders = requiredTables.map(() => "?").join(",");
+      const rows = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${placeholders})`).all(...requiredTables) as Array<{ name: string }>;
+
+      return new Set(rows.map((row) => row.name)).size === requiredTables.length;
+    } finally {
+      db.close();
+    }
+  } catch {
+    return false;
+  }
+}
+
+export function maybeMigrateLegacyDatabasePathIfNeeded(targetDatabasePath: string, legacyDatabasePath?: string): { migrated: boolean; reason: string } {
+  const sourceDatabasePath = legacyDatabasePath ? path.resolve(legacyDatabasePath) : "/tmp/gito.sqlite";
+
+  if (sourceDatabasePath === path.resolve(targetDatabasePath)) {
+    return { migrated: false, reason: "legacy-source-is-already-target" };
+  }
+
+  if (fs.existsSync(targetDatabasePath)) {
+    return { migrated: false, reason: "target-database-already-exists" };
+  }
+
+  if (!fs.existsSync(sourceDatabasePath)) {
+    return { migrated: false, reason: "legacy-database-not-found" };
+  }
+
+  if (!isLikelyGiToDatabase(sourceDatabasePath)) {
+    return { migrated: false, reason: "legacy-database-is-not-a-valid-gito-database" };
+  }
+
+  const targetDir = path.dirname(targetDatabasePath);
+  fs.mkdirSync(targetDir, { recursive: true });
+
+  try {
+    fs.copyFileSync(sourceDatabasePath, targetDatabasePath);
+
+    if (!isLikelyGiToDatabase(targetDatabasePath)) {
+      fs.rmSync(targetDatabasePath, { force: true });
+      return { migrated: false, reason: "copied-database-invalid" };
+    }
+
+    console.log(`[startup] migrated legacy database from ${sourceDatabasePath} to ${targetDatabasePath}`);
+    return { migrated: true, reason: "legacy-database-copied" };
+  } catch (error) {
+    console.error("[startup] failed to migrate legacy database into persistent target", error);
+    return { migrated: false, reason: "migration-failed" };
+  }
+}
+
 export function getDatabase(): DatabaseSync {
   if (database) {
     return database;
   }
 
   const resolvedDatabasePath = runtimeConfig.newsTestMode ? ":memory:" : env.absoluteDatabasePath;
+  const legacyDatabasePath = process.env.LEGACY_DATABASE_PATH ?? "/tmp/gito.sqlite";
+
+  if (!runtimeConfig.newsTestMode) {
+    const migrationResult = maybeMigrateLegacyDatabasePathIfNeeded(resolvedDatabasePath, legacyDatabasePath);
+    if (migrationResult.migrated) {
+      console.log(`[startup] migration_status=${migrationResult.reason}`);
+    } else if (migrationResult.reason !== "target-database-already-exists" && migrationResult.reason !== "legacy-database-not-found") {
+      console.log(`[startup] migration_status=${migrationResult.reason}`);
+    }
+  }
 
   console.log(`[startup] ========== DATABASE PERSISTENCE STARTUP ==========`);
   console.log(`[startup] RESOLVED_DATABASE_PATH=${resolvedDatabasePath}`);

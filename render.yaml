@@ -7,21 +7,17 @@ services:
     startCommand: node apps/backend/dist/server.js
     healthCheckPath: /health
     autoDeploy: true
-    # For persistent storage in production, uncomment the disk section below
-    # and update DATABASE_PATH to /var/data/gito.sqlite in envVars
-    # disk:
-    #   name: gito-data
-    #   mountPath: /var/data
-    #   sizeGB: 10
+    disk:
+      name: gito-data
+      mountPath: /var/data
+      sizeGB: 10
     envVars:
       - key: NODE_ENV
         value: production
-      # First deployment uses ephemeral /tmp; add persistent disk and change to /var/data/gito.sqlite for production
       - key: DATABASE_PATH
-        value: /tmp/gito.sqlite
-      # Backups are ephemeral on first deployment; point to /var/data/backups when persistent disk is enabled
+        value: /var/data/gito.sqlite
       - key: BACKUP_DIR
-        value: /tmp/backups
+        value: /var/data/backups
       - key: AI_CLASSIFICATION_ENABLED
         value: "false"
       - key: JWT_SECRET

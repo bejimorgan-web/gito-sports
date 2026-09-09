@@ -16,10 +16,10 @@ test("normalizes mobile navigation flags into the public response shape", () => 
   });
 });
 
-test("keeps all mobile sections enabled as the safe default", () => {
+test("keeps live streaming off by default for the closed-test release candidate", () => {
   assert.deepEqual(DEFAULT_NAVIGATION_FEATURES.navigation, {
     liveScores: { enabled: true, message: null },
     sports: { enabled: true, message: null },
-    live: { enabled: true, message: null }
+    live: { enabled: false, message: null }
   });
 });
