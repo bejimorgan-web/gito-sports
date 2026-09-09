@@ -121,10 +121,38 @@ export function listProviders(): IPTVProvider[] {
 }
 
 export function createProvider(input: CreateProviderRequest): IPTVProvider {
+  const database = getDatabase();
   const timestamp = now();
+
+  const existing = database
+    .prepare(
+      `SELECT id
+      FROM providers
+      WHERE deleted = 0
+        AND base_url = ?
+        AND type = ?
+        AND COALESCE(credential_username, '') = COALESCE(?, '')
+        AND COALESCE(credential_password, '') = COALESCE(?, '')
+      ORDER BY created_at DESC
+      LIMIT 1`
+    )
+    .get(
+      input.baseUrl,
+      input.type,
+      input.username ?? null,
+      input.password ?? null
+    ) as { id: string } | undefined;
+
+  if (existing) {
+    const persisted = getProviderById(existing.id);
+    if (persisted) {
+      return persisted;
+    }
+  }
+
   const id = crypto.randomUUID();
 
-  getDatabase()
+  database
     .prepare(
       `INSERT INTO providers (
         id, name, base_url, type, auth_type, sync_mode, credential_username, credential_password,

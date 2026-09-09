@@ -5,6 +5,8 @@ import { validateHttpStreamUrl } from "./url-validation.js";
 import { parseM3uPlaylist } from "./m3u-parser.js";
 import { buildXtreamEndpointCandidates, normalizeXtreamUrl, testXtreamConnection } from "./xtream-codes.js";
 import { detectProviderType } from "./provider-type-detector.js";
+import { createProvider, getProviderById, listProviders, softDeleteProvider } from "../repositories/provider-repository.js";
+import { getDatabase } from "../db/connection.js";
 
 test("accepts common non-http stream protocols", () => {
   assert.equal(validateHttpStreamUrl("rtmp://example.com/live/stream"), null);
@@ -88,4 +90,38 @@ test("detects provider kinds from URL shape and payload hints", async () => {
     password: "pass"
   });
   assert.equal(detectedXtream, "xtream");
+});
+
+test("retries of the same validated provider payload do not create duplicate provider rows", () => {
+  const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const input = {
+    name: `Retry Provider ${uniqueSuffix}`,
+    baseUrl: `https://example.com/xtream/${uniqueSuffix}`,
+    type: "xtream" as const,
+    authType: "basic" as const,
+    username: "user",
+    password: "pass"
+  };
+
+  const first = createProvider(input);
+  const second = createProvider({
+    ...input,
+    name: `Retry Provider ${uniqueSuffix} - duplicate`
+  });
+
+  assert.ok(first);
+  assert.ok(second);
+  assert.equal(second.id, first.id);
+
+  const matches = getDatabase()
+    .prepare(
+      `SELECT COUNT(*) AS count FROM providers WHERE deleted = 0 AND base_url = ? AND type = ? AND credential_username = ? AND credential_password = ?`
+    )
+    .get(input.baseUrl, input.type, input.username, input.password) as { count: number };
+
+  assert.equal(matches.count, 1);
+
+  softDeleteProvider(first.id);
+  assert.equal(getProviderById(first.id), undefined);
+  assert.ok(listProviders().some((provider) => provider.id === first.id) === false);
 });

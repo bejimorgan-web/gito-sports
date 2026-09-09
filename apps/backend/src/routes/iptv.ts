@@ -215,15 +215,17 @@ iptvRouter.post("/providers", async (request, response) => {
   };
 
   const provider = IPTVService.createProvider(providerInput);
-  if (provider) {
+  const persistedProvider = provider ? IPTVService.getProvider(provider.id) ?? provider : provider;
+
+  if (persistedProvider) {
     try {
-      await persistValidatedProvider(provider.id, validation, providerInput, { activate: false });
+      await persistValidatedProvider(persistedProvider.id, validation, providerInput, { activate: false });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (/foreign key|constraint/i.test(message)) {
-        IPTVService.setProviderStatus(provider.id, "failed");
+        IPTVService.setProviderStatus(persistedProvider.id, "failed");
         response.status(201).json({
-          data: IPTVService.getProvider(provider.id) ?? provider,
+          data: IPTVService.getProvider(persistedProvider.id) ?? persistedProvider,
           meta: {
             warning: "provider_saved_without_channels",
             message: "The provider record was saved, but the channel import could not be completed because the database rejected the channel link."
@@ -235,7 +237,7 @@ iptvRouter.post("/providers", async (request, response) => {
     }
   }
 
-  response.status(201).json({ data: provider ? IPTVService.getProvider(provider.id) ?? provider : provider });
+  response.status(201).json({ data: persistedProvider });
 });
 
 iptvRouter.put("/providers/:providerId", async (request, response) => {
@@ -271,17 +273,19 @@ iptvRouter.put("/providers/:providerId", async (request, response) => {
     return;
   }
 
+  const persistedUpdated = IPTVService.getProvider(updated.id) ?? updated;
+
   try {
-    await persistValidatedProvider(updated.id, validation, {
-      ...updated,
+    await persistValidatedProvider(persistedUpdated.id, validation, {
+      ...persistedUpdated,
       type: detectedType as CreateProviderRequest["type"]
     }, { activate: false });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (/foreign key|constraint/i.test(message)) {
-      IPTVService.setProviderStatus(updated.id, "failed");
+      IPTVService.setProviderStatus(persistedUpdated.id, "failed");
       response.json({
-        data: IPTVService.getProvider(updated.id) ?? updated,
+        data: IPTVService.getProvider(persistedUpdated.id) ?? persistedUpdated,
         meta: {
           warning: "provider_saved_without_channels",
           message: "The provider was updated, but the channel import could not be completed because the database rejected the channel link."
@@ -292,7 +296,7 @@ iptvRouter.put("/providers/:providerId", async (request, response) => {
     throw error;
   }
 
-  response.json({ data: IPTVService.getProvider(updated.id) ?? updated });
+  response.json({ data: persistedUpdated });
 });
 
 iptvRouter.delete("/providers/:providerId", (request, response) => {
