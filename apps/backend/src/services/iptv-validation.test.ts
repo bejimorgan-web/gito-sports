@@ -166,6 +166,50 @@ https://example.com/stream2.m3u8`);
   assert.equal(channels[1]?.url, "https://example.com/stream2.m3u8");
 });
 
+test("parses tolerant M3U attributes and does not steal the next entry URL", () => {
+  const channels = parseM3uPlaylist(`\uFEFF#EXTM3U
+#extinf:-1 tvg-id = 'chan1' group-title=News,News One
+#EXTVLCOPT:http-referrer=https://example.com
+#EXTINF:-1 group-title="Sports",Sports One
+https://example.com/sports.ts`);
+
+  assert.equal(channels.length, 1);
+  assert.equal(channels[0]?.name, "Sports One");
+  assert.equal(channels[0]?.groupName, "Sports");
+  assert.equal(channels[0]?.url, "https://example.com/sports.ts");
+});
+
+test("rejects disabled Xtream accounts even when the API returns HTTP 200", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => new Response(JSON.stringify({ user_info: { auth: 0, status: "Disabled" } }), { status: 200 });
+    const result = await testXtreamConnection("https://example.com", "user", "pass");
+    assert.equal(result.ok, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("normalizes wrapped Xtream streams, string IDs, names, extensions, and encoded credentials", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      if (url.searchParams.get("action") === "get_live_categories") {
+        return new Response(JSON.stringify({ categories: [{ category_id: 10, category_name: "Sports" }] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ streams: [{ stream_id: "7", stream_name: "Sports One", category_id: 10, container_extension: "ts" }] }), { status: 200 });
+    };
+
+    const channels = await fetchXtreamChannels("https://example.com/base", "user name", "pass/word");
+    assert.equal(channels[0]?.name, "Sports One");
+    assert.equal(channels[0]?.groupName, "Sports");
+    assert.equal(channels[0]?.url, "https://example.com/base/live/user%20name/pass%2Fword/7.ts");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("detects provider kinds from URL shape and payload hints", async () => {
   const detectedM3u = await detectProviderType({ baseUrl: "https://example.com/playlist.m3u" });
   assert.equal(detectedM3u, "m3u");

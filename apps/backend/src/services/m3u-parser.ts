@@ -7,8 +7,9 @@ export interface M3uParseError {
 }
 
 function readAttribute(line: string, name: string): string | undefined {
-  const match = line.match(new RegExp(`${name}="([^"]*)"`));
-  return match?.[1];
+  const attributePattern = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s,]+))`, "i");
+  const match = line.match(attributePattern);
+  return match?.[1] ?? match?.[2] ?? match?.[3];
 }
 
 function readDisplayName(line: string): string {
@@ -42,6 +43,7 @@ function readInlineUrl(line: string): string | undefined {
 
 export function parseM3uPlaylist(content: string, onInvalidEntry?: (entry: M3uParseError) => void): ParsedChannel[] {
   const lines = content
+    .replace(/^\uFEFF/, "")
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
@@ -51,7 +53,7 @@ export function parseM3uPlaylist(content: string, onInvalidEntry?: (entry: M3uPa
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
 
-    if (!line?.startsWith("#EXTINF")) {
+    if (!line || !/^#EXTINF\b/i.test(line)) {
       continue;
     }
 
@@ -61,9 +63,12 @@ export function parseM3uPlaylist(content: string, onInvalidEntry?: (entry: M3uPa
     let url = readInlineUrl(line);
     for (let j = index + 1; j < Math.min(lines.length, index + 6); j += 1) {
       const candidate = lines[j];
+      if (/^#EXTINF\b/i.test(candidate ?? "")) break;
       if (candidate && !candidate.startsWith("#") && candidate.length > 0) {
-        url ??= candidate;
-        break;
+        if (/^(?:https?|rtmp|rtsp|udp|srt):\/\//i.test(candidate)) {
+          url ??= candidate;
+          break;
+        }
       }
     }
 

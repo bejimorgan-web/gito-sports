@@ -64,14 +64,32 @@ export function buildXtreamEndpointCandidates(baseUrl: string) {
 }
 
 interface XtreamCategory {
-  category_id: string;
-  category_name: string;
+  category_id?: string | number;
+  category_name?: string;
 }
 
 interface XtreamStream {
-  name: string;
-  stream_id: number;
-  category_id?: string;
+  name?: string;
+  stream_name?: string;
+  stream_id?: string | number;
+  category_id?: string | number;
+  container_extension?: string;
+}
+
+function unwrapXtreamArray<T>(payload: unknown, key: string): T[] | null {
+  if (Array.isArray(payload)) return payload as T[];
+  if (payload && typeof payload === "object" && Array.isArray((payload as Record<string, unknown>)[key])) {
+    return (payload as Record<string, unknown>)[key] as T[];
+  }
+  return null;
+}
+
+function isXtreamAuthFailure(payload: unknown): boolean {
+  if (!payload || typeof payload !== "object") return false;
+  const userInfo = (payload as Record<string, unknown>).user_info;
+  if (!userInfo || typeof userInfo !== "object") return false;
+  const info = userInfo as Record<string, unknown>;
+  return info.auth === 0 || String(info.auth).toLowerCase() === "false" || ["disabled", "expired", "banned"].includes(String(info.status ?? "").toLowerCase());
 }
 
 function safeXtreamHost(baseUrl: string): string {
@@ -204,6 +222,9 @@ export async function testXtreamConnection(
 
       try {
         const payload = response.value.payload;
+        if (isXtreamAuthFailure(payload)) {
+          continue;
+        }
         if (payload && typeof payload === "object" && !Array.isArray(payload)) {
           return {
             ok: true,
@@ -361,8 +382,14 @@ export async function fetchXtreamChannels(
     )
   );
 
-  const categoriesResponse = categoryResponses.find((result) => result.status === "fulfilled" && result.value.response.ok);
-  const streamsResponse = streamsResponses.find((result) => result.status === "fulfilled" && result.value.response.ok);
+  const categoriesResponse = categoryResponses.find((result) => {
+    if (result.status !== "fulfilled" || !result.value.response.ok) return false;
+    try { return unwrapXtreamArray(result.value.text.trim() ? JSON.parse(result.value.text) : null, "categories") !== null; } catch { return false; }
+  });
+  const streamsResponse = streamsResponses.find((result) => {
+    if (result.status !== "fulfilled" || !result.value.response.ok) return false;
+    try { return unwrapXtreamArray(result.value.text.trim() ? JSON.parse(result.value.text) : null, "streams") !== null; } catch { return false; }
+  });
 
   if (!categoriesResponse || !streamsResponse) {
     throw new Error("Xtream channel extraction failed.");
@@ -382,8 +409,10 @@ export async function fetchXtreamChannels(
     throw new Error("Xtream channel extraction failed.");
   }
 
-  const categories = JSON.parse(categoriesResponseData.text) as XtreamCategory[];
-  const streams = JSON.parse(streamsResponseData.text) as XtreamStream[];
+  const categoriesPayload = JSON.parse(categoriesResponseData.text);
+  const streamsPayload = JSON.parse(streamsResponseData.text);
+  const categories = unwrapXtreamArray<XtreamCategory>(categoriesPayload, "categories") ?? [];
+  const streams = unwrapXtreamArray<XtreamStream>(streamsPayload, "streams") ?? [];
   console.info("[iptv-validation] xtream_catalogue_received", {
     host: safeXtreamHost(normalizedBaseUrl),
     categoriesStatus: categoriesResponseData.response.status,
@@ -393,23 +422,28 @@ export async function fetchXtreamChannels(
     categoriesCount: Array.isArray(categories) ? categories.length : 0,
     streamsCount: Array.isArray(streams) ? streams.length : 0
   });
-  if (!Array.isArray(categories) || !Array.isArray(streams)) {
-    throw new Error("Xtream provider returned an invalid catalogue response.");
-  }
-  const categoryNames = new Map(categories.map((category) => [category.category_id, category.category_name]));
+  const categoryNames = new Map<string, string>();
+  categories.forEach((category) => {
+    const id = String(category.category_id ?? "");
+    const name = category.category_name?.trim();
+    if (id && name) categoryNames.set(id, name);
+  });
   const streamBase = normalizedBaseUrl.endsWith("/") ? normalizedBaseUrl.slice(0, -1) : normalizedBaseUrl;
 
   return streams.flatMap((stream) => {
-    if (!stream.stream_id || !stream.name) {
+    const streamId = stream.stream_id === undefined || stream.stream_id === null ? "" : String(stream.stream_id);
+    const streamName = stream.name ?? stream.stream_name;
+    if (!streamId || !streamName) {
       onInvalidStream?.({ rawEntry: stream, reason: "invalid_xtream_stream" });
       return [];
     }
 
-    const groupName = stream.category_id ? categoryNames.get(stream.category_id) : undefined;
+    const groupName = stream.category_id === undefined ? undefined : categoryNames.get(String(stream.category_id));
+    const extension = String(stream.container_extension ?? "m3u8").replace(/^\./, "") || "m3u8";
     const channel: ParsedChannel = {
-      name: stream.name,
-      externalRef: String(stream.stream_id),
-      url: `${streamBase}/live/${username}/${password}/${stream.stream_id}.m3u8`
+      name: streamName,
+      externalRef: streamId,
+      url: `${streamBase}/live/${encodeURIComponent(username)}/${encodeURIComponent(password)}/${encodeURIComponent(streamId)}.${extension}`
     };
 
     if (groupName) {
