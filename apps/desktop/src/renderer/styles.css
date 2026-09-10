@@ -856,6 +856,10 @@ textarea {
   font-size: 0.78rem;
 }
 
+.sports-workspace-screen .entity-panel .panel-heading {
+  flex-wrap: wrap;
+}
+
 .dashboard-metric-card span {
   color: #8fa1b3;
   text-transform: uppercase;

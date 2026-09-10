@@ -139,6 +139,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
   const [clubSeasonOptions, setClubSeasonOptions] = useState<ClubSeasonOption[]>([]);
   const [selectedClubSeasonId, setSelectedClubSeasonId] = useState("all");
   const [selectedClubSeasonTeamIds, setSelectedClubSeasonTeamIds] = useState<string[] | null>(null);
+  const [selectedClubHostId, setSelectedClubHostId] = useState("all");
   const [selectedSport, setSelectedSport] = useState<Sport | null>(null);
   const [status, setStatus] = useState("Ready");
   const [isSaving, setIsSaving] = useState(false);
@@ -225,14 +226,15 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
 
   const clubs = sportTeams.filter((team) => team.type === "club");
   const visibleClubs = selectedClubSeasonTeamIds
-    ? clubs.filter((team) => selectedClubSeasonTeamIds.includes(team.id))
-    : clubs;
+    ? clubs.filter((team) => selectedClubSeasonTeamIds.includes(team.id) && (selectedClubHostId === "all" || team.hostId === selectedClubHostId))
+    : clubs.filter((team) => selectedClubHostId === "all" || team.hostId === selectedClubHostId);
   const nationalTeams = sportTeams.filter((team) => team.type === "national");
 
   useEffect(() => {
     let cancelled = false;
     setSelectedClubSeasonId("all");
     setSelectedClubSeasonTeamIds(null);
+    setSelectedClubHostId("all");
     if (!selectedSport || sportCompetitions.length === 0) {
       setClubSeasonOptions([]);
       return;
@@ -894,6 +896,15 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                     ))}
                   </select>
                 </label>
+                <label className="club-season-filter">
+                  <span>Host</span>
+                  <select value={selectedClubHostId} onChange={(event) => setSelectedClubHostId(event.target.value)}>
+                    <option value="all">All</option>
+                    {sportHosts.map((host) => (
+                      <option key={host.id} value={host.id}>{host.name}</option>
+                    ))}
+                  </select>
+                </label>
                 <button type="button" onClick={() => openTeamEditor()} disabled={isCatalogView}>
                   Add Club
                 </button>
@@ -913,7 +924,15 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                     />
                   ))
                 ) : (
-                  <p className="field-note">{selectedClubSeasonId === "all" ? "No clubs are defined for this sport yet." : "No clubs are assigned to this competition season."}</p>
+                  <p className="field-note">
+                    {selectedClubSeasonId !== "all" && selectedClubHostId !== "all"
+                      ? "No clubs match this competition season and host."
+                      : selectedClubSeasonId !== "all"
+                      ? "No clubs are assigned to this competition season."
+                      : selectedClubHostId !== "all"
+                      ? "No clubs are assigned to this host."
+                      : "No clubs are defined for this sport yet."}
+                  </p>
                 )}
               </div>
             </article>
