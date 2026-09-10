@@ -518,7 +518,7 @@ textarea {
 }
 
 .entity-list:has(.entity-hero-card-team) {
-  grid-template-columns: repeat(auto-fill, minmax(132px, 152px));
+  grid-template-columns: repeat(auto-fill, minmax(140px, 160px));
 }
 
 .sports-workspace-screen,
@@ -546,7 +546,7 @@ textarea {
   }
 
   .entity-list:has(.entity-hero-card-team) {
-    grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
   }
 }
 
@@ -2642,7 +2642,7 @@ dd {
   }
 
   .sports-workspace-screen .entity-list:has(.entity-hero-card-team) {
-    grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(124px, 1fr));
   }
 }
 
