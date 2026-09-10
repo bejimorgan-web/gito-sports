@@ -13,6 +13,19 @@ const port = Number(process.env.PORT ?? 4100);
 
 const canonicalDatabasePath = path.resolve(workspaceRoot, "data", "gito.sqlite");
 const canonicalBackupDir = path.resolve(workspaceRoot, "data", "backups");
+const configuredUploadDir = process.env.UPLOAD_DIR?.trim();
+const resolvedUploadDir = path.resolve(configuredUploadDir ?? path.join(workspaceRoot, "data", "uploads"));
+const productionUploadRoot = path.resolve("/var/data");
+if (nodeEnv === "production") {
+  if (!configuredUploadDir) {
+    throw new Error("UPLOAD_DIR must be explicitly configured in production; use /var/data/uploads on the mounted persistent disk.");
+  }
+  const uploadRelativePath = path.relative(productionUploadRoot, resolvedUploadDir);
+  if (!uploadRelativePath || uploadRelativePath.startsWith("..") || path.isAbsolute(uploadRelativePath)) {
+    throw new Error("UPLOAD_DIR must be a child of /var/data in production; refusing an ephemeral or unsafe upload directory.");
+  }
+}
+fs.mkdirSync(resolvedUploadDir, { recursive: true });
 
 // Production must use an explicit DATABASE_PATH on the Render-mounted disk.
 // Local development falls back to the workspace data directory when DATABASE_PATH
@@ -133,6 +146,7 @@ export const runtimeConfig = {
   maxAgeDays,
   backupDir,
   backupIntervalMs,
+  uploadDir: resolvedUploadDir,
   autoRestoreBackup,
   autoImportMigration,
   newsTestMode,

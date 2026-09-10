@@ -12,6 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { verifyAccessToken } from "../services/jwt.js";
 import { env, runtimeConfig } from "../config/env.js";
+import { getUploadStorageDiagnostics } from "../services/upload-storage.js";
 
 export const systemRouter = Router();
 
@@ -55,6 +56,7 @@ systemRouter.post("/restore/check", async (req, res) => {
 systemRouter.get("/health", async (_req, res) => {
   const health = startupHealthCheck();
   const backupStats = await getBackupStats();
+  const uploadStorage = getUploadStorageDiagnostics();
 
   const dbOk = health.db === "ok";
   const diskPressure = backupStats.disk && backupStats.requiredBackupBytes
@@ -69,6 +71,7 @@ systemRouter.get("/health", async (_req, res) => {
     iptv: health.iptvService,
     liveScores: health.scoreService,
     renderMode: process.env.DATABASE_PATH ? true : false,
+    uploads: uploadStorage,
     databaseBackup: {
       status:
         backupStats.backupDirExists && backupStats.backupCount > 0 && backupStats.latestBackupValid !== false

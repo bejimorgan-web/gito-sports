@@ -268,6 +268,35 @@ export const apiClient = {
     const query = providerId ? `?providerId=${encodeURIComponent(providerId)}` : "";
     return request<string[]>(`/iptv/categories${query}`);
   },
+  listIptvCatalogueCategories(providerId: string, contentType: "live" | "movie" | "series") {
+    return request<{ items: Array<{ id: string; providerId: string; contentType: string; name: string; slug?: string | null }>; total: number }>(`/iptv/providers/${encodeURIComponent(providerId)}/categories?contentType=${contentType}&pageSize=100`);
+  },
+  listIptvMovies(providerId: string, categoryId?: string, search?: string) {
+    const params = new URLSearchParams({ page: "1", pageSize: "100" });
+    if (categoryId) params.set("categoryId", categoryId);
+    if (search) params.set("search", search);
+    return request<{ items: Array<{ id: string; title: string; description?: string | null; categoryId?: string | null; category?: { name: string } | null; posterUrl?: string | null }>; total: number }>(`/iptv/providers/${encodeURIComponent(providerId)}/movies?${params}`);
+  },
+  listIptvSeries(providerId: string, categoryId?: string) {
+    const params = new URLSearchParams({ page: "1", pageSize: "100" });
+    if (categoryId) params.set("categoryId", categoryId);
+    return request<{ items: Array<{ id: string; title: string; categoryId?: string | null; category?: { name: string } | null; posterUrl?: string | null }>; total: number }>(`/iptv/providers/${encodeURIComponent(providerId)}/series?${params}`);
+  },
+  listIptvSeasons(providerId: string, seriesId: string) {
+    return request<Array<{ id: string; seriesId: string; seasonNumber?: number | null; name?: string | null }>>(`/iptv/providers/${encodeURIComponent(providerId)}/series/${encodeURIComponent(seriesId)}/seasons`);
+  },
+  listIptvEpisodes(providerId: string, seasonId: string) {
+    return request<{ items: Array<{ id: string; title?: string | null; episodeNumber?: number | null; playbackReference: string }>; total: number }>(`/iptv/providers/${encodeURIComponent(providerId)}/seasons/${encodeURIComponent(seasonId)}/episodes?page=1&pageSize=100`);
+  },
+  listIptvEpgChannels(providerId: string) {
+    return request<{ items: Array<{ id: string; externalEpgChannelId: string; channelId?: string | null; channelExternalRef?: string | null; name: string }> }>(`/iptv/providers/${encodeURIComponent(providerId)}/epg/channels?pageSize=100`);
+  },
+  listIptvEpgProgrammes(providerId: string, epgChannelId: string, current = false, upcoming = false) {
+    const params = new URLSearchParams({ page: "1", pageSize: "20", epgChannelId });
+    if (current) params.set("current", "true");
+    if (upcoming) params.set("upcoming", "true");
+    return request<{ items: Array<{ title: string; description?: string | null; startAt?: string | null; endAt?: string | null; externalProgrammeId: string }> }>(`/iptv/providers/${encodeURIComponent(providerId)}/epg/programmes?${params}`);
+  },
   setProviderStatus(providerId: string, status: string) {
     return request<unknown>(`/iptv/providers/${providerId}/status`, {
       method: "POST",
@@ -520,10 +549,7 @@ export const apiClient = {
 
       const body = (await response.json()) as { data: { url: string } };
       const url = body.data.url;
-      if (/^https?:\/\//i.test(url)) {
-        return url;
-      }
-      return `${API_BASE_URL}${url}`;
+      return url.startsWith("/uploads/") || url.startsWith("uploads/") ? (url.startsWith("/") ? url : `/${url}`) : url;
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         throw new Error("Logo upload timed out. Please check the backend server and try again.");

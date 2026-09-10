@@ -43,8 +43,7 @@ import { playerCatalogRouter } from "./routes/player-catalog.js";
 export function createApp() {
   const app = express();
 
-  const uploadDirectory = process.env.UPLOAD_DIR ?? path.join("/tmp", "uploads");
-  fs.mkdirSync(uploadDirectory, { recursive: true });
+  const uploadDirectory = runtimeConfig.uploadDir;
 
   app.set("trust proxy", true);
   app.use(helmet());

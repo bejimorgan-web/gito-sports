@@ -4,11 +4,10 @@ import path from "node:path";
 import express from "express";
 import multer from "multer";
 
-import { env } from "../config/env.js";
+import { runtimeConfig } from "../config/env.js";
 
 const uploadsRouter = express.Router();
-const uploadDirectory = process.env.UPLOAD_DIR ?? path.join("/tmp", "uploads");
-fs.mkdirSync(uploadDirectory, { recursive: true });
+const uploadDirectory = runtimeConfig.uploadDir;
 const debugLog = path.join(uploadDirectory, "upload-debug.log");
 function writeDebug(...parts: any[]) {
   try {
@@ -80,7 +79,7 @@ uploadsRouter.post(
         // best-effort; continue if something unexpected happens
       }
 
-      const fileUrl = `${request.protocol}://${request.get("host")}/uploads/${request.file.filename}`;
+      const fileUrl = `/uploads/${request.file.filename}`;
       console.log('[uploads] responding with file url', fileUrl);
       writeDebug('responding with file url', fileUrl);
       response.status(201).json({ data: { url: fileUrl } });
