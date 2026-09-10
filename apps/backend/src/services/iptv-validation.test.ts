@@ -222,6 +222,15 @@ test("detects provider kinds from URL shape and payload hints", async () => {
   assert.equal(detectedXtream, "xtream");
 });
 
+test("detects Xtream credentials from get.php M3U playlist URLs", async () => {
+  const detectedXtream = await detectProviderType({
+    baseUrl: "https://example.com/get.php?username=user&password=pass&type=m3u_plus&output=ts",
+    username: "user",
+    password: "pass"
+  });
+  assert.equal(detectedXtream, "xtream");
+});
+
 test("retries of the same validated provider payload do not create duplicate provider rows", () => {
   const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const input = {

@@ -2,7 +2,7 @@ export type DetectedProviderType = "m3u" | "xtream" | "manual";
 
 function looksLikeXtreamBaseUrl(baseUrl: string) {
   const normalized = baseUrl.trim().toLowerCase();
-  return /(^|\/)(player_api\.php|get\.php|api\.php|xmltv\.php|xtream)(\/|$)/.test(normalized);
+  return /(^|\/)(player_api\.php|get\.php|api\.php|xmltv\.php|xtream)([/?#]|$)/.test(normalized);
 }
 
 function looksLikeM3uBaseUrl(baseUrl: string) {
@@ -12,7 +12,7 @@ function looksLikeM3uBaseUrl(baseUrl: string) {
 
 function looksLikeXtreamPayload(payload: string) {
   const normalized = payload.trim().toLowerCase();
-  return /(player_api|get_live_categories|get_live_streams|user_info|server_info|streams|categories)/.test(normalized);
+  return /\b(player_api|get_live_categories|get_live_streams|user_info|server_info|streams|categories)\b/.test(normalized);
 }
 
 export async function detectProviderType(input: {
@@ -24,7 +24,7 @@ export async function detectProviderType(input: {
   const baseUrl = input.baseUrl?.trim() ?? "";
   const payload = input.payload?.trim() ?? "";
 
-  if (looksLikeXtreamBaseUrl(baseUrl) || (input.username && input.password && /xtream|player_api|get\.php|api\.php/i.test(baseUrl))) {
+  if (looksLikeXtreamBaseUrl(baseUrl) || (input.username && input.password && /xtream|player_api|get\.php|api\.php|type=m3u_plus|type=m3u/i.test(baseUrl))) {
     return "xtream";
   }
 

@@ -277,11 +277,25 @@ export function getDatabase(): DatabaseSync {
 
   // Ensure Phase 1 IPTV tables exist even on existing database files.
   try {
+    if (hasTable(database, "channels")) {
+      const channelColumns = database.prepare("PRAGMA table_info(channels)").all() as Array<{ name: string }>;
+      if (!channelColumns.some((column) => column.name === "category_id")) {
+        database.exec("ALTER TABLE channels ADD COLUMN category_id TEXT;");
+        console.log("[startup] added channels.category_id for provider catalogue grouping");
+      }
+    }
     if (
       !hasTable(database, "iptv_providers") ||
       !hasTable(database, "iptv_channels") ||
       !hasTable(database, "iptv_provider_health") ||
-      !hasTable(database, "iptv_channel_index")
+      !hasTable(database, "iptv_channel_index") ||
+      !hasTable(database, "iptv_categories") ||
+      !hasTable(database, "iptv_movies") ||
+      !hasTable(database, "iptv_series") ||
+      !hasTable(database, "iptv_seasons") ||
+      !hasTable(database, "iptv_series_episodes") ||
+      !hasTable(database, "iptv_epg_channels") ||
+      !hasTable(database, "iptv_epg_programmes")
     ) {
       database.exec(readInitialSchema());
       console.log("[startup] applied missing IPTV schema fragments to existing database");
@@ -356,13 +370,9 @@ export function getDatabase(): DatabaseSync {
   // Validate startup and ensure DB is healthy. If validation throws, propagate up.
   validateDatabaseStartup(database, resolvedDatabasePath);
 
-  // Rehydrate operational state and start background services.
-  // News integration tests opt out so their process has no recurring handles.
-  try {
-    rehydrateSyncStateOnStartup();
-  } catch (err) {
-    console.error("[startup] rehydrate failed", err);
-  }
+  // Rehydration is handled by the scheduled background job below. Avoid
+  // running it during startup because large provider databases can block the
+  // HTTP event loop and delay IPTV requests.
 
   if (!runtimeConfig.newsTestMode) {
     try {

@@ -87,6 +87,8 @@ export function parseM3uPlaylist(content: string, onInvalidEntry?: (entry: M3uPa
     };
     const externalRef = readAttribute(line, "tvg-id");
     const groupName = readAttribute(line, "group-title");
+    const categoryId = readAttribute(line, "group-id") ?? readAttribute(line, "category-id");
+    const declaredContentType = readAttribute(line, "content-type") ?? readAttribute(line, "type");
 
     if (externalRef) {
       parsedChannel.externalRef = externalRef;
@@ -94,6 +96,13 @@ export function parseM3uPlaylist(content: string, onInvalidEntry?: (entry: M3uPa
 
     if (groupName) {
       parsedChannel.groupName = groupName;
+    }
+
+    if (categoryId) {
+      parsedChannel.categoryId = categoryId;
+    }
+    if (declaredContentType === "live" || declaredContentType === "movie" || declaredContentType === "series") {
+      parsedChannel.contentType = declaredContentType;
     }
 
     channels.push(parsedChannel);

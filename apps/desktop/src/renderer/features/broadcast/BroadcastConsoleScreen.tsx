@@ -39,6 +39,7 @@ interface BroadcastConsoleScreenProps {
   onClearAssignment: () => void;
   onSetLiveMode: (enabled: boolean) => void;
   onOpenMatch?: (matchId?: string) => void;
+  showLegacyChannelBrowser?: boolean;
 }
 
 function getNextAction({
@@ -301,8 +302,9 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
   onReportHealth,
   onSelectChannel,
   onClearAssignment,
-  onSetLiveMode
-  , onOpenMatch
+  onSetLiveMode,
+  onOpenMatch,
+  showLegacyChannelBrowser = true
 }: BroadcastConsoleScreenProps) {
   const [selectedSportId, setSelectedSportId] = useState<string>("");
   const [selectedCompetitionId, setSelectedCompetitionId] = useState<string>("");
@@ -1058,7 +1060,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
             </aside>
           </div>
 
-            <div className="channel-group-layout">
+            {showLegacyChannelBrowser ? <div className="channel-group-layout">
               <aside className="group-column console-panel">
                 <div className="panel-heading">
                   <h4>Channel Groups</h4>
@@ -1164,7 +1166,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
                   {filteredSelectedGroupChannels.length === 0 ? <div className="empty-row">{channelSearchQuery.trim() !== "" ? "No matching channels found." : selectedContentType === "favorites" ? "No favorite channels saved yet." : "No channels in this group."}</div> : null}
                 </div>
               </aside>
-            </div>
+            </div> : null}
           </div>
 
           <div className="match-control-layout">

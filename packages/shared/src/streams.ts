@@ -42,6 +42,7 @@ export interface Channel {
   providerId: EntityId;
   name: string;
   externalRef?: string;
+  categoryId?: string;
   groupName?: string;
   url: string;
   contentType?: "live" | "movie" | "series";

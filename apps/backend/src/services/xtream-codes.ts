@@ -345,6 +345,138 @@ export interface XtreamParseError {
   reason: string;
 }
 
+export type XtreamMovieRecord = {
+  externalId: string;
+  categoryId?: string;
+  name: string;
+  streamUrl: string;
+  posterUrl?: string;
+  metadata: unknown;
+};
+
+export type XtreamSeriesRecord = {
+  externalId: string;
+  categoryId?: string;
+  name: string;
+  posterUrl?: string;
+  metadata: unknown;
+};
+
+export type XtreamSeasonRecord = {
+  seriesExternalId: string;
+  providerSeasonId: string;
+  seasonNumber?: number;
+  name?: string;
+  posterUrl?: string;
+  metadata: unknown;
+};
+
+export type XtreamEpisodeRecord = {
+  externalId: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  name?: string;
+  streamUrl: string;
+  metadata: unknown;
+};
+
+export type XtreamCatalogue = {
+  movieCategories: Array<{ providerCategoryId: string; name: string; metadata: unknown }>;
+  movies: XtreamMovieRecord[];
+  seriesCategories: Array<{ providerCategoryId: string; name: string; metadata: unknown }>;
+  series: XtreamSeriesRecord[];
+  seasons: XtreamSeasonRecord[];
+  episodes: Array<{ seriesExternalId: string; records: XtreamEpisodeRecord[] }>;
+};
+
+async function fetchXtreamAction(baseUrl: string, username: string, password: string, action: string, signal?: AbortSignal, extra: Record<string, string> = {}): Promise<unknown> {
+  for (const candidate of buildXtreamEndpointCandidates(baseUrl)) {
+    try {
+      const result = await fetchJsonWithTimeout(buildUrl(candidate, { username, password, action, ...extra }), { signal });
+        if (!result.response.ok || result.parseError || result.payload === null) {
+          continue;
+        }
+        if (result.payload && typeof result.payload === "object" && !Array.isArray(result.payload)) {
+          const payload = result.payload as Record<string, unknown>;
+          if (payload.error || isXtreamAuthFailure(payload)) continue;
+        }
+      return result.payload;
+    } catch {
+      // Try the next compatible endpoint shape.
+    }
+  }
+  throw new Error(`Xtream action failed: ${action}`);
+}
+
+function asRecords(payload: unknown, key: string): any[] {
+  return unwrapXtreamArray<any>(payload, key) ?? [];
+}
+
+function xtreamStreamUrl(baseUrl: string, username: string, password: string, kind: "movie" | "series", id: string, extension?: string) {
+  const base = baseUrl.replace(/\/$/, "");
+  const suffix = String(extension ?? "mp4").replace(/^\./, "") || "mp4";
+  return `${base}/${kind}/${encodeURIComponent(username)}/${encodeURIComponent(password)}/${encodeURIComponent(id)}.${suffix}`;
+}
+
+export async function fetchXtreamLiveCatalogue(baseUrl: string, username: string, password: string, signal?: AbortSignal) {
+  const categoriesPayload = await fetchXtreamAction(baseUrl, username, password, "get_live_categories", signal);
+  const categories = asRecords(categoriesPayload, "categories").map((category) => ({
+    providerCategoryId: String(category.category_id ?? ""),
+    name: String(category.category_name ?? "Unnamed"),
+    metadata: category
+  })).filter((category) => category.providerCategoryId);
+  const channels = await fetchXtreamChannels(baseUrl, username, password, undefined, signal);
+  return { categories, channels };
+}
+
+export async function fetchXtreamCatalogue(baseUrl: string, username: string, password: string, signal?: AbortSignal): Promise<XtreamCatalogue> {
+  const movieCategoriesPayload = await fetchXtreamAction(baseUrl, username, password, "get_vod_categories", signal);
+  const movieStreamsPayload = await fetchXtreamAction(baseUrl, username, password, "get_vod_streams", signal);
+  const seriesCategoriesPayload = await fetchXtreamAction(baseUrl, username, password, "get_series_categories", signal);
+  const seriesPayload = await fetchXtreamAction(baseUrl, username, password, "get_series", signal);
+  const movieCategories = asRecords(movieCategoriesPayload, "categories").map((category) => ({ providerCategoryId: String(category.category_id ?? ""), name: String(category.category_name ?? "Unnamed"), metadata: category })).filter((category) => category.providerCategoryId);
+  const seriesCategories = asRecords(seriesCategoriesPayload, "categories").map((category) => ({ providerCategoryId: String(category.category_id ?? ""), name: String(category.category_name ?? "Unnamed"), metadata: category })).filter((category) => category.providerCategoryId);
+  const normalizedBase = normalizeXtreamUrl(baseUrl).url;
+  const movies = asRecords(movieStreamsPayload, "streams").flatMap((movie) => {
+    const id = movie.stream_id === undefined ? "" : String(movie.stream_id);
+    const name = String(movie.name ?? movie.stream_name ?? "").trim();
+    return id && name ? [{ externalId: id, categoryId: movie.category_id === undefined ? undefined : String(movie.category_id), name, streamUrl: xtreamStreamUrl(normalizedBase, username, password, "movie", id, movie.container_extension), posterUrl: movie.stream_icon ?? movie.cover, metadata: movie }] : [];
+  });
+  const series = asRecords(seriesPayload, "series").flatMap((item) => {
+    const id = item.series_id === undefined ? "" : String(item.series_id);
+    const name = String(item.name ?? item.series_name ?? "").trim();
+    return id && name ? [{ externalId: id, categoryId: item.category_id === undefined ? undefined : String(item.category_id), name, posterUrl: item.cover ?? item.cover_big, metadata: item }] : [];
+  });
+    if (!movieCategories.length && !movies.length && !seriesCategories.length && !series.length) {
+      throw new Error("Xtream provider returned no VOD or series catalogue data. Verify the account has VOD and series access.");
+    }
+  const seasons: XtreamSeasonRecord[] = [];
+  const episodes: Array<{ seriesExternalId: string; records: XtreamEpisodeRecord[] }> = [];
+  for (const item of series) {
+    if (signal?.aborted) break;
+    try {
+      const details = await fetchXtreamAction(baseUrl, username, password, "get_series_info", signal, { series_id: item.externalId });
+      const payload = details as any;
+      const info = payload?.info ?? {};
+      const episodeGroups = payload?.episodes ?? {};
+      for (const [seasonKey, seasonEpisodes] of Object.entries(episodeGroups)) {
+        const seasonNumber = Number(seasonKey);
+        const providerSeasonId = `${item.externalId}:${seasonKey}`;
+        seasons.push({ seriesExternalId: item.externalId, providerSeasonId, seasonNumber: Number.isFinite(seasonNumber) ? seasonNumber : undefined, name: `Season ${seasonKey}`, metadata: { info } });
+        const records = (Array.isArray(seasonEpisodes) ? seasonEpisodes : []).flatMap((episode: any) => {
+          const episodeId = episode.id ?? episode.episode_id;
+          if (episodeId === undefined) return [];
+          return [{ externalId: String(episodeId), seasonNumber, episodeNumber: Number(episode.episode_num ?? episode.episode_number) || undefined, name: episode.title ?? episode.name, streamUrl: xtreamStreamUrl(normalizedBase, username, password, "series", String(episodeId), episode.container_extension), metadata: episode }];
+        });
+        episodes.push({ seriesExternalId: item.externalId, records });
+      }
+    } catch {
+      // Preserve the series even when one provider omits its detail response.
+    }
+  }
+  return { movieCategories, movies, seriesCategories, series, seasons, episodes };
+}
+
 export async function fetchXtreamChannels(
   baseUrl: string,
   username: string,
@@ -443,6 +575,7 @@ export async function fetchXtreamChannels(
     const channel: ParsedChannel = {
       name: streamName,
       externalRef: streamId,
+      categoryId: stream.category_id === undefined ? undefined : String(stream.category_id),
       url: `${streamBase}/live/${encodeURIComponent(username)}/${encodeURIComponent(password)}/${encodeURIComponent(streamId)}.${extension}`
     };
 

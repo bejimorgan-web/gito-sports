@@ -9,26 +9,18 @@ export function rehydrateSyncStateOnStartup() {
     // Ensure providers table exists
     const providers = db.prepare("SELECT id, sync_mode FROM providers WHERE deleted = 0").all() as { id: string; sync_mode?: string }[];
 
-    for (const p of providers) {
-      // compute last successful stream load as the most recently updated channel for this provider
-      const row = db.prepare("SELECT MAX(updated_at) AS last_updated FROM channels WHERE provider_id = ?").get(p.id) as { last_updated?: string } | undefined;
-      if (row && row.last_updated) {
-        db.prepare("UPDATE providers SET last_successful_stream_load_at = ? WHERE id = ?").run(row.last_updated, p.id);
+    const channelState = db.prepare(
+      "SELECT provider_id, MAX(updated_at) AS last_updated, SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_count FROM channels GROUP BY provider_id"
+    ).all() as { provider_id: string; last_updated?: string; active_count?: number }[];
+    const channelStateByProvider = new Map(channelState.map((row) => [row.provider_id, row]));
+    const updateProvider = db.prepare("UPDATE providers SET last_successful_stream_load_at = COALESCE(?, last_successful_stream_load_at), availability_status = ? WHERE id = ?");
+    const updateState = db.transaction(() => {
+      for (const provider of providers) {
+        const state = channelStateByProvider.get(provider.id);
+        updateProvider.run(state?.last_updated ?? null, Number(state?.active_count ?? 0) > 0 ? "online" : "unknown", provider.id);
       }
-
-      // Recompute basic counts and availability status
-      const counts = db.prepare(
-        "SELECT status, COUNT(1) AS cnt FROM channels WHERE provider_id = ? GROUP BY status"
-      ).all(p.id) as { status: string; cnt: number }[];
-
-      let active = 0;
-      for (const c of counts) {
-        if (c.status === "active") active += c.cnt;
-      }
-
-      const availability = active > 0 ? "online" : "unknown";
-      db.prepare("UPDATE providers SET availability_status = ? WHERE id = ?").run(availability, p.id);
-    }
+    });
+    updateState();
 
     console.log("[startup] rehydrated provider sync state from DB");
   } catch (err) {

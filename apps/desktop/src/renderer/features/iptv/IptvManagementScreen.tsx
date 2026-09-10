@@ -126,6 +126,13 @@ export function IptvManagementScreen({
     return () => window.clearTimeout(timer);
   }, [channelSearch, channelCategory, channelProviderFilter, onLoadChannelPage]);
 
+  useEffect(() => {
+    if (!selectedProviderId) {
+      const firstActiveProvider = providers.find((provider) => provider.status === "active");
+      if (firstActiveProvider) setSelectedProviderId(firstActiveProvider.id);
+    }
+  }, [providers, selectedProviderId]);
+
   const loadChannelPage = (page: number) => {
     void onLoadChannelPage({
       page,
@@ -143,6 +150,7 @@ export function IptvManagementScreen({
 
   const handleSelectProvider = (providerId: string) => {
     setSelectedProviderId(providerId);
+    setChannelProviderFilter(providerId);
     const provider = providers.find((item) => item.id === providerId);
 
     if (provider) {
@@ -188,7 +196,13 @@ export function IptvManagementScreen({
 
       if (selectedProviderId && onUpdateProvider) {
         await onUpdateProvider(selectedProviderId, providerInput);
-        setStatusMessage("Provider updated.");
+        if (type === "xtream") {
+          setStatusMessage("Provider updated. Synchronizing live TV, movies, and series...");
+          await onSyncXtream(selectedProviderId);
+          setStatusMessage("Provider updated and full catalogue synchronization started.");
+        } else {
+          setStatusMessage("Provider updated.");
+        }
       } else {
         const createdProvider = await onCreateProvider(providerInput);
         setStatusMessage(createdProvider.type === "xtream" ? "Provider created. Synchronizing Xtream catalogue..." : "Provider created.");
@@ -385,25 +399,16 @@ export function IptvManagementScreen({
       </div>
 
       <IptvChannelsScreen
-        page={channelPage}
         providers={providers}
-        selectedChannelId={selectedChannelId}
-        search={channelSearch}
-        category={channelCategory}
         selectedProviderId={channelProviderFilter}
-        onSelectChannel={(channel) => setSelectedChannelId(channel.id)}
-        onSearchChange={setChannelSearch}
-        onCategoryChange={setChannelCategory}
         onProviderFilterChange={setChannelProviderFilter}
-        onPageChange={loadChannelPage}
+        below={selectedProviderId ? <IptvCatalogueScreen providerId={selectedProviderId} /> : (
+          <section className="console-panel iptv-catalogue-empty">
+            <h3>IPTV Content Browser</h3>
+            <p className="field-note">Select a saved IPTV provider to browse its channel groups, movies, series, seasons, episodes, and guide data.</p>
+          </section>
+        )}
       />
-
-      {selectedProviderId ? <IptvCatalogueScreen providerId={selectedProviderId} /> : (
-        <section className="console-panel iptv-catalogue-empty">
-          <h3>IPTV Content Browser</h3>
-          <p className="field-note">Select a saved IPTV provider to browse its channel groups, movies, series, seasons, episodes, and guide data.</p>
-        </section>
-      )}
 
       {operation ? <IptvOperationProgress operation={operation} onCancel={async () => { await onCancelIptvOperation(operation.id); }} /> : null}
 

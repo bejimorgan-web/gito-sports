@@ -47,6 +47,7 @@ export interface ParsedChannel {
   url: string;
   externalRef?: string;
   groupName?: string;
+  categoryId?: string;
   contentType?: "live" | "movie" | "series";
 }
 

@@ -426,12 +426,12 @@ export function syncProviderChannels(providerId: string, channels: ParsedChannel
   const duplicateDetections: Array<{ channel: ParsedChannel; reason: "duplicate_externalRef" | "duplicate_url" | "duplicate_in_payload" }> = [];
 
   const insertStmt = database.prepare(
-    `INSERT INTO channels (id, provider_id, name, external_ref, group_name, url, content_type, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`
+    `INSERT INTO channels (id, provider_id, name, external_ref, category_id, group_name, url, content_type, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`
   );
 
   const updateStmt = database.prepare(
-    `UPDATE channels SET name = ?, external_ref = ?, group_name = ?, url = ?, content_type = ?, status = 'active', updated_at = ? WHERE id = ?`
+    `UPDATE channels SET name = ?, external_ref = ?, category_id = ?, group_name = ?, url = ?, content_type = ?, status = 'active', updated_at = ? WHERE id = ?`
   );
 
   // De-duplicate incoming channels by normalized externalRef or normalized URL within the incoming payload only
@@ -476,13 +476,13 @@ export function syncProviderChannels(providerId: string, channels: ParsedChannel
 
     if (existingByExt) {
       channelId = existingByExt.id;
-      updateStmt.run(ch.name, ch.externalRef ?? null, ch.groupName ?? null, ch.url, ch.contentType ?? "live", timestamp, channelId);
+      updateStmt.run(ch.name, ch.externalRef ?? null, ch.categoryId ?? null, ch.groupName ?? null, ch.url, ch.contentType ?? "live", timestamp, channelId);
       traceChannelSync(ch, "update", "matched_existing_channel_by_external_ref", "persist");
       channelUpdates += 1;
       EventBus.emit("iptv:channel:updated", { providerId, channelId, externalRef: ch.externalRef ?? null });
     } else {
       channelId = crypto.randomUUID();
-      insertStmt.run(channelId, providerId, ch.name, ch.externalRef ?? null, ch.groupName ?? null, ch.url, ch.contentType ?? "live", timestamp, timestamp);
+      insertStmt.run(channelId, providerId, ch.name, ch.externalRef ?? null, ch.categoryId ?? null, ch.groupName ?? null, ch.url, ch.contentType ?? "live", timestamp, timestamp);
       traceChannelSync(ch, "insert", "created_new_channel_record", "persist");
       channelInserts += 1;
       EventBus.emit("iptv:channel:inserted", { providerId, channelId, externalRef: ch.externalRef ?? null });

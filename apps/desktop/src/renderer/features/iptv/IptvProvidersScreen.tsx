@@ -189,6 +189,9 @@ export function IptvProvidersScreen({
                     <button type="button" onClick={() => onSelectProvider(provider.id)}>
                       Edit
                     </button>
+                    <button type="button" onClick={() => onSelectProvider(provider.id)}>
+                      Browse Catalogue
+                    </button>
                     <button
                       type="button"
                       disabled={statusChangingProviderId === provider.id}

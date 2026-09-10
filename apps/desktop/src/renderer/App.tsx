@@ -9,6 +9,7 @@ import { BroadcastConsoleScreen } from "./features/broadcast/BroadcastConsoleScr
 import { DashboardShell } from "./features/dashboard/DashboardShell";
 import { MatchSchedulerScreen } from "./features/matches/MatchSchedulerScreen";
 import { IptvManagementScreen } from "./features/iptv/IptvManagementScreen";
+import { IptvCatalogueScreen } from "./features/iptv/IptvCatalogueScreen";
 import { SportsWorkspaceScreen } from "./features/sports/SportsWorkspaceScreen";
 import { StreamPreviewPanel } from "./features/preview/StreamPreviewPanel";
 import { AnalyticsOverviewScreen } from "./features/analytics/AnalyticsOverviewScreen";
@@ -121,26 +122,37 @@ function renderScreen(
       );
     case "matchAssignment":
       return (
-        <BroadcastConsoleScreen
-          assignment={state.assignment}
-          backendStatus={state.backendStatus}
-          channels={state.channels}
-          liveMatches={state.liveMatches}
-          previewedChannelId={state.previewedChannelId}
-          providers={state.providers}
-          selectedChannel={state.selectedChannel}
-          preferredProviderId={state.preferredProviderId}
-          liveMode={state.liveMode}
-          onApprove={actions.approveStream}
-          onAssignMatch={actions.assignMatch}
-          onClearAssignment={actions.clearAssignment}
-          onPreviewReady={actions.markPreviewReady}
-          onPublish={actions.publishStream}
-          onReportHealth={actions.reportStreamHealth}
-          onSelectChannel={actions.selectChannel}
-          onSetLiveMode={actions.setLiveMode}
-          onOpenMatch={actions.openMatch}
-        />
+        <>
+          <BroadcastConsoleScreen
+            assignment={state.assignment}
+            backendStatus={state.backendStatus}
+            channels={state.channels}
+            liveMatches={state.liveMatches}
+            previewedChannelId={state.previewedChannelId}
+            providers={state.providers}
+            selectedChannel={state.selectedChannel}
+            preferredProviderId={state.preferredProviderId}
+            liveMode={state.liveMode}
+            onApprove={actions.approveStream}
+            onAssignMatch={actions.assignMatch}
+            onClearAssignment={actions.clearAssignment}
+            onPreviewReady={actions.markPreviewReady}
+            onPublish={actions.publishStream}
+            onReportHealth={actions.reportStreamHealth}
+            onSelectChannel={actions.selectChannel}
+            onSetLiveMode={actions.setLiveMode}
+            onOpenMatch={actions.openMatch}
+            showLegacyChannelBrowser={false}
+          />
+          {state.preferredProviderId || state.providers.find((provider) => provider.status === "active")?.id ? (
+            <IptvCatalogueScreen providerId={state.preferredProviderId ?? state.providers.find((provider) => provider.status === "active")!.id} onSelectChannel={actions.selectChannel} />
+          ) : (
+            <section className="console-panel">
+              <h3>IPTV Content Browser</h3>
+              <p className="field-note">Create or activate an IPTV provider in IPTV Management to browse its catalogue.</p>
+            </section>
+          )}
+        </>
       );
     case "preview":
       return (

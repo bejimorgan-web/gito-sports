@@ -1,18 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
+import type { Channel } from "@gito/shared";
 import { apiClient } from "../../services/api-client";
 
 interface Props {
   providerId: string;
+  onSelectChannel?: (channel: Channel) => void;
 }
 
 type Category = { id: string; name: string; slug?: string | null };
 type Item = { id: string; title: string; description?: string | null; categoryId?: string | null; category?: { name: string } | null; posterUrl?: string | null };
-type LiveItem = { id: string; name: string; groupName?: string; categoryId?: string | null };
+type LiveItem = Channel;
 type Season = { id: string; seriesId: string; seasonNumber?: number | null; name?: string | null };
 type Episode = { id: string; title?: string | null; episodeNumber?: number | null; playbackReference: string };
 type GuideProgramme = { title: string; description?: string | null; startAt?: string | null; endAt?: string | null; externalProgrammeId: string };
 
-export function IptvCatalogueScreen({ providerId }: Props) {
+export function IptvCatalogueScreen({ providerId, onSelectChannel }: Props) {
   const [liveCategories, setLiveCategories] = useState<Category[]>([]);
   const [movieCategories, setMovieCategories] = useState<Category[]>([]);
   const [seriesCategories, setSeriesCategories] = useState<Category[]>([]);
@@ -20,6 +22,9 @@ export function IptvCatalogueScreen({ providerId }: Props) {
   const [movies, setMovies] = useState<Item[]>([]);
   const [series, setSeries] = useState<Item[]>([]);
   const [contentType, setContentType] = useState<"live" | "movie" | "series">("live");
+  const [selectedGroupId, setSelectedGroupId] = useState("");
+  const [selectedGroupItems, setSelectedGroupItems] = useState<Array<Item | LiveItem>>([]);
+  const [groupCounts, setGroupCounts] = useState<Record<string, number>>({});
   const [selectedItem, setSelectedItem] = useState<Item | LiveItem>();
   const [selectedSeasonId, setSelectedSeasonId] = useState("");
   const [seasons, setSeasons] = useState<Season[]>([]);
@@ -45,15 +50,7 @@ export function IptvCatalogueScreen({ providerId }: Props) {
       setLiveCategories(live.items);
       setMovieCategories(movie.items);
       setSeriesCategories(seriesGroup.items);
-      setLiveChannels(liveItems.items.map((channel) => {
-        const categoryId = (channel as typeof channel & { categoryId?: string }).categoryId;
-        return {
-          id: channel.id,
-          name: channel.name,
-          ...(channel.groupName ? { groupName: channel.groupName } : {}),
-          ...(categoryId ? { categoryId } : {})
-        };
-      }));
+      setLiveChannels(liveItems.items);
       setMovies(movieItems.items);
       setSeries(seriesItems.items);
       setStatus("Catalogue loaded from the provider catalogue.");
@@ -65,6 +62,8 @@ export function IptvCatalogueScreen({ providerId }: Props) {
 
   useEffect(() => {
     setSelectedItem(undefined);
+    setSelectedGroupId("");
+    setSelectedGroupItems([]);
     setSeasons([]);
     setEpisodes([]);
     setGuide([]);
@@ -123,7 +122,46 @@ export function IptvCatalogueScreen({ providerId }: Props) {
     : contentType === "movie"
     ? movieGroups
     : seriesGroups;
-  const activeTotal = contentType === "live" ? counts.live : contentType === "movie" ? counts.movie : counts.series;
+  const selectedGroup = activeGroups.find((group) => group.id === selectedGroupId) ?? activeGroups[0];
+
+  useEffect(() => {
+    if (selectedGroup && selectedGroup.id !== selectedGroupId) {
+      setSelectedGroupId(selectedGroup.id);
+    }
+  }, [selectedGroup, selectedGroupId]);
+
+  useEffect(() => {
+    if (!selectedGroup) {
+      setSelectedGroupItems([]);
+      return;
+    }
+    let cancelled = false;
+    setSelectedGroupItems([]);
+    const categoryId = selectedGroup.id;
+    if (contentType === "live") {
+      void apiClient.listChannelPage(providerId, { page: 1, pageSize: 100, category: categoryId }).then((page) => {
+        if (!cancelled) {
+          setSelectedGroupItems(page.items);
+          setGroupCounts((current) => ({ ...current, [categoryId]: page.total }));
+        }
+      }).catch(() => { if (!cancelled) setSelectedGroupItems([]); });
+    } else if (contentType === "movie") {
+      void apiClient.listIptvMovies(providerId, categoryId).then((page) => {
+        if (!cancelled) {
+          setSelectedGroupItems(page.items);
+          setGroupCounts((current) => ({ ...current, [categoryId]: page.total }));
+        }
+      }).catch(() => { if (!cancelled) setSelectedGroupItems([]); });
+    } else {
+      void apiClient.listIptvSeries(providerId, categoryId).then((page) => {
+        if (!cancelled) {
+          setSelectedGroupItems(page.items);
+          setGroupCounts((current) => ({ ...current, [categoryId]: page.total }));
+        }
+      }).catch(() => { if (!cancelled) setSelectedGroupItems([]); });
+    }
+    return () => { cancelled = true; };
+  }, [contentType, providerId, selectedGroup?.id]);
 
   return (
     <section className="console-panel iptv-catalogue-panel">
@@ -140,25 +178,25 @@ export function IptvCatalogueScreen({ providerId }: Props) {
         <aside className="iptv-browser-groups">
           <h4>{contentType === "live" ? "Channel Groups" : contentType === "movie" ? "Movie Groups" : "Series Groups"}</h4>
           {activeGroups.map((group) => (
-            <button type="button" key={group.id} className="iptv-group-button">
-              <span>{group.name}</span><small>{group.items.length}</small>
+            <button type="button" key={group.id} className={`iptv-group-button ${selectedGroup?.id === group.id ? "selected" : ""}`} onClick={() => { setSelectedGroupId(group.id); setSelectedItem(undefined); }}>
+              <span>{group.name}</span><small>{groupCounts[group.id] ?? group.items.length}</small>
             </button>
           ))}
           {!activeGroups.length ? <p className="field-note">No groups saved.</p> : null}
         </aside>
         <section className="iptv-browser-items">
-          <h4>{activeTotal} {contentType === "live" ? "channels" : contentType === "movie" ? "movies" : "series"}</h4>
-          {activeGroups.flatMap((group) => group.items).map((item) => {
+          <h4>{selectedGroup?.name ?? "Items"} · {selectedGroup ? (groupCounts[selectedGroup.id] ?? selectedGroupItems.length) : 0} {contentType === "live" ? "channels" : contentType === "movie" ? "movies" : "series"}</h4>
+          {selectedGroupItems.map((item) => {
             const itemId = "name" in item ? item.id : item.id;
             const title = "name" in item ? item.name : item.title;
-            return <button type="button" key={itemId} className={selectedItem && selectedItem.id === itemId ? "selected" : ""} onClick={() => setSelectedItem(item)}><strong>{title}</strong><small>{"name" in item ? (item.groupName || "Uncategorized") : (item.category?.name || "Uncategorized")}</small></button>;
+            return <button type="button" key={itemId} className={selectedItem && selectedItem.id === itemId ? "selected" : ""} onClick={() => { setSelectedItem(item); if (contentType === "live" && onSelectChannel && "url" in item) onSelectChannel(item); }}><strong>{title}</strong><small>{"name" in item ? (item.groupName || "Uncategorized") : (item.category?.name || "Uncategorized")}</small></button>;
           })}
         </section>
-        <aside className="iptv-channel-guide">
-          <h4>{contentType === "live" ? "Channel Guide" : contentType === "movie" ? "Movie Guide" : "Series Guide"}</h4>
+        {contentType === "series" ? <aside className="iptv-channel-guide">
+          <h4>Series Guide</h4>
           {contentType === "series" && selectedItem ? <select value={selectedSeasonId} onChange={(event) => setSelectedSeasonId(event.target.value)}><option value="">Select season</option>{seasons.map((season) => <option key={season.id} value={season.id}>{season.name || `Season ${season.seasonNumber ?? ""}`}</option>)}</select> : null}
           {contentType === "series" ? episodes.map((episode) => <div className="iptv-guide-entry" key={episode.id}><strong>Episode {episode.episodeNumber ?? ""}: {episode.title || "Untitled"}</strong><small>{episode.playbackReference}</small></div>) : guide.length ? guide.map((programme) => <div className="iptv-guide-entry" key={programme.externalProgrammeId}><strong>{programme.title}</strong><small>{programme.startAt ? new Date(programme.startAt).toLocaleString() : ""}</small><span>{programme.description || ""}</span></div>) : selectedItem && contentType === "movie" ? <p>{(selectedItem as Item).description || "No description supplied by the provider."}</p> : <p className="field-note">{guideStatus}</p>}
-        </aside>
+        </aside> : null}
       </div>
     </section>
   );

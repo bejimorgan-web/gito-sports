@@ -2,7 +2,7 @@ import { Router } from "express";
 import type { CreateProviderRequest } from "@gito/shared";
 import { IPTVService } from "../services/iptv-service.js";
 import { parseM3uPlaylist, M3uParseError } from "../services/m3u-parser.js";
-import { fetchXtreamChannels, fetchTextWithTimeout, fetchWithTimeout, testXtreamConnection, XtreamParseError, normalizeXtreamUrl } from "../services/xtream-codes.js";
+import { fetchXtreamCatalogue, fetchXtreamLiveCatalogue, fetchXtreamChannels, fetchTextWithTimeout, fetchWithTimeout, testXtreamConnection, XtreamParseError, normalizeXtreamUrl } from "../services/xtream-codes.js";
 import { validateHttpStreamUrl } from "../services/url-validation.js";
 import { logChannelSyncTrace } from "../services/iptv-trace.js";
 import { detectProviderType } from "../services/provider-type-detector.js";
@@ -18,6 +18,11 @@ import {
   listIptvMoviesPage,
   listIptvSeasonsPage,
   listIptvSeriesPage,
+  syncXtreamCategories,
+  syncXtreamMoviesDetailed,
+  syncXtreamSeriesDetailed,
+  syncXtreamSeasonsDetailed,
+  syncXtreamEpisodesDetailed,
   type CatalogueListOptions,
   type IptvCategoryContentType
 } from "../repositories/iptv-catalogue-repository.js";
@@ -253,17 +258,18 @@ function startXtreamSyncOperation(providerId: string) {
       const connection = await testXtreamConnection(serverUrl, username, password, signal);
       if (!connection.ok) throw new Error(connection.message);
 
-      report({ currentStage: "discovering_channels", currentMessage: "Loading Xtream categories and live streams." });
+      report({ currentStage: "discovering_channels", currentMessage: "Loading live groups and channels." });
       const invalidEntries: XtreamParseError[] = [];
-      const parsed = await fetchXtreamChannels(serverUrl, username, password, (entry) => invalidEntries.push(entry), signal);
-      const valid = parsed.filter((channel) => !validateHttpStreamUrl(channel.url));
+      const live = await fetchXtreamLiveCatalogue(serverUrl, username, password, signal);
+      syncXtreamCategories(providerId, "live", live.categories);
+      const valid = live.channels.filter((channel) => !validateHttpStreamUrl(channel.url));
       report({
-        total: parsed.length,
-        processed: parsed.length,
+        total: live.channels.length,
+        processed: live.channels.length,
         succeeded: valid.length,
         failed: invalidEntries.length,
         currentStage: "saving_channels",
-        currentMessage: `${parsed.length} channels discovered.`
+        currentMessage: `${live.channels.length} live channels discovered.`
       });
 
       if (state.cancelled) return;
@@ -273,12 +279,32 @@ function startXtreamSyncOperation(providerId: string) {
       }
 
       const saved = IPTVService.syncProviderChannels(providerId, valid);
+      report({ currentStage: "syncing_catalogue", currentMessage: "Loading movies, series, seasons, and episodes." });
+      const catalogue = await fetchXtreamCatalogue(serverUrl, username, password, signal);
+      syncXtreamCategories(providerId, "movie", catalogue.movieCategories);
+      syncXtreamCategories(providerId, "series", catalogue.seriesCategories);
+      const movieStats = syncXtreamMoviesDetailed(providerId, catalogue.movies);
+      const seriesStats = syncXtreamSeriesDetailed(providerId, catalogue.series);
+      const seasonStats = syncXtreamSeasonsDetailed(providerId, catalogue.seasons);
+      let episodeStats = { fetched: 0, processed: 0, inserted: 0, updated: 0, unchanged: 0, failed: 0, archived: 0 };
+      for (const seriesEpisodes of catalogue.episodes) {
+        const result = syncXtreamEpisodesDetailed(providerId, seriesEpisodes.seriesExternalId, seriesEpisodes.records);
+        episodeStats = {
+          fetched: episodeStats.fetched + result.fetched,
+          processed: episodeStats.processed + result.processed,
+          inserted: episodeStats.inserted + result.inserted,
+          updated: episodeStats.updated + result.updated,
+          unchanged: episodeStats.unchanged + result.unchanged,
+          failed: episodeStats.failed + result.failed,
+          archived: episodeStats.archived + result.archived
+        };
+      }
       IPTVService.updateProviderHealth({ providerId, success: true, impact: "success" });
       report({
-        processed: parsed.length,
+        processed: live.channels.length + movieStats.processed + seriesStats.processed + seasonStats.processed + episodeStats.processed,
         succeeded: saved.length,
         currentStage: "completed",
-        currentMessage: `${saved.length} channels saved. Provider activated.`
+        currentMessage: `${saved.length} channels, ${movieStats.processed} movies, and ${seriesStats.processed} series synchronized. Provider activated.`
       });
     } catch (error) {
       IPTVService.updateProviderHealth({ providerId, success: false, impact: "failure" });

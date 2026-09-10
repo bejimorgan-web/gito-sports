@@ -158,6 +158,7 @@ CREATE TABLE IF NOT EXISTS channels (
   provider_id TEXT NOT NULL,
   name TEXT NOT NULL,
   external_ref TEXT,
+  category_id TEXT,
   group_name TEXT,
   url TEXT NOT NULL,
   content_type TEXT NOT NULL DEFAULT 'live' CHECK (content_type IN ('live', 'movie', 'series')),
@@ -683,3 +684,151 @@ CREATE TABLE IF NOT EXISTS iptv_channel_index (
 
 CREATE INDEX IF NOT EXISTS idx_iptv_channel_index_name ON iptv_channel_index(name);
 CREATE INDEX IF NOT EXISTS idx_iptv_channel_index_checksum ON iptv_channel_index(checksum);
+
+-- IPTV catalogue schema (phase 3)
+CREATE TABLE IF NOT EXISTS iptv_categories (
+  id TEXT PRIMARY KEY,
+  provider_id TEXT NOT NULL,
+  content_type TEXT NOT NULL CHECK (content_type IN ('live', 'movie', 'series')),
+  provider_category_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  slug TEXT NOT NULL,
+  parent_category_id TEXT,
+  ordering INTEGER,
+  status TEXT NOT NULL DEFAULT 'active',
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(provider_id, content_type, provider_category_id),
+  FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS iptv_movies (
+  id TEXT PRIMARY KEY,
+  provider_id TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  category_id TEXT,
+  name TEXT NOT NULL,
+  stream_url TEXT NOT NULL,
+  poster_url TEXT,
+  backdrop_url TEXT,
+  description TEXT,
+  genre TEXT,
+  year INTEGER,
+  rating REAL,
+  duration INTEGER,
+  language TEXT,
+  country TEXT,
+  "cast" TEXT,
+  director TEXT,
+  trailer_url TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(provider_id, external_id),
+  FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS iptv_series (
+  id TEXT PRIMARY KEY,
+  provider_id TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  category_id TEXT,
+  name TEXT NOT NULL,
+  poster_url TEXT,
+  backdrop_url TEXT,
+  description TEXT,
+  genre TEXT,
+  year INTEGER,
+  rating REAL,
+  language TEXT,
+  country TEXT,
+  "cast" TEXT,
+  director TEXT,
+  trailer_url TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(provider_id, external_id),
+  FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS iptv_seasons (
+  id TEXT PRIMARY KEY,
+  provider_id TEXT NOT NULL,
+  series_id TEXT NOT NULL,
+  provider_season_id TEXT NOT NULL,
+  season_number INTEGER,
+  name TEXT,
+  description TEXT,
+  poster_url TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(provider_id, series_id, provider_season_id),
+  FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS iptv_series_episodes (
+  id TEXT PRIMARY KEY,
+  series_id TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  season_number INTEGER,
+  episode_number INTEGER,
+  name TEXT,
+  stream_url TEXT NOT NULL,
+  description TEXT,
+  duration INTEGER,
+  poster_url TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(series_id, external_id),
+  FOREIGN KEY (series_id) REFERENCES iptv_series(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS iptv_epg_channels (
+  id TEXT PRIMARY KEY,
+  provider_id TEXT NOT NULL,
+  external_epg_channel_id TEXT NOT NULL,
+  channel_id TEXT,
+  channel_external_ref TEXT,
+  name TEXT NOT NULL,
+  icon_url TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(provider_id, external_epg_channel_id),
+  FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS iptv_epg_programmes (
+  id TEXT PRIMARY KEY,
+  provider_id TEXT NOT NULL,
+  epg_channel_id TEXT NOT NULL,
+  channel_id TEXT,
+  external_programme_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  start_at TEXT,
+  end_at TEXT,
+  category TEXT,
+  icon_url TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(provider_id, epg_channel_id, external_programme_id),
+  FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_iptv_catalogue_categories_provider_type ON iptv_categories(provider_id, content_type, status);
+CREATE INDEX IF NOT EXISTS idx_iptv_movies_provider_category ON iptv_movies(provider_id, category_id, status);
+CREATE INDEX IF NOT EXISTS idx_iptv_series_provider_category ON iptv_series(provider_id, category_id, status);
+CREATE INDEX IF NOT EXISTS idx_iptv_seasons_provider_series ON iptv_seasons(provider_id, series_id, status);
+CREATE INDEX IF NOT EXISTS idx_iptv_episodes_series_season ON iptv_series_episodes(series_id, season_number, status);
+CREATE INDEX IF NOT EXISTS idx_iptv_epg_programmes_channel_time ON iptv_epg_programmes(provider_id, epg_channel_id, start_at);
