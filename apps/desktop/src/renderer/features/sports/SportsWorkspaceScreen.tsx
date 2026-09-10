@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type {
   Competition,
@@ -67,6 +67,64 @@ function EntityAvatar({ src, fallback }: { src?: string | undefined; fallback: s
   );
 }
 
+function EntityHeroCard({
+  name,
+  logoUrl,
+  detail,
+  selected,
+  onClick,
+  onDoubleClick,
+  onDelete,
+  deleteDisabled
+}: {
+  name: string;
+  logoUrl?: string | undefined;
+  detail: string;
+  selected?: boolean;
+  onClick?: () => void;
+  onDoubleClick?: () => void;
+  onDelete?: () => void;
+  deleteDisabled?: boolean;
+}) {
+  const resolvedLogoUrl = resolveAssetUrl(logoUrl);
+
+  return (
+    <article
+      className={`entity-hero-card ${selected ? "selected" : ""}`}
+      tabIndex={0}
+      onClick={onClick}
+      onDoubleClick={onDoubleClick}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" && onDoubleClick) onDoubleClick();
+      }}
+    >
+      <div className="entity-hero-card-logo" aria-hidden="true">
+        {resolvedLogoUrl ? <img src={resolvedLogoUrl} alt="" /> : <span>{name.slice(0, 2).toUpperCase()}</span>}
+      </div>
+      <div className="entity-hero-card-overlay" />
+      <div className="entity-hero-card-footer">
+        <div className="entity-hero-card-copy">
+          <strong>{name}</strong>
+          <small>{detail}</small>
+        </div>
+        {onDelete ? (
+          <button
+            type="button"
+            className="entity-hero-card-delete"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDelete();
+            }}
+            disabled={deleteDisabled}
+          >
+            Delete
+          </button>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
 export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) {
   const [sports, setSports] = useState<Sport[]>([]);
   const [countries, setCountries] = useState<Country[]>([]);
@@ -86,7 +144,6 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [isLogoUploading, setIsLogoUploading] = useState(false);
 
-  const sportCardRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   const pushToast = (message: string, type: "success" | "error" | "info" = "success") => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -643,20 +700,17 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
         </div>
         <div className="sport-selection-grid">
           {sports.map((sport) => (
-            <button
+            <EntityHeroCard
               key={sport.id}
-              type="button"
-              ref={(el) => (sportCardRefs.current[sport.id] = el)}
-              className={`sport-card ${selectedSport?.id === sport.id ? "selected" : ""}`}
+              name={sport.name}
+              logoUrl={sport.logoUrl}
+              detail={`${hosts.filter((host) => host.sportId === sport.id).length} host${hosts.filter((host) => host.sportId === sport.id).length === 1 ? "" : "s"} assigned`}
+              selected={selectedSport?.id === sport.id}
               onClick={() => setSelectedSport(sport)}
-            >
-              <div className="sport-card-top">
-                <EntityAvatar src={sport.logoUrl} fallback={sport.name} />
-                <span className={`entity-badge ${selectedSport?.id === sport.id ? "active" : ""}`}>{sport.status}</span>
-              </div>
-              <strong>{sport.name}</strong>
-              <small>{sport.countryIds?.length ?? 0} supported country{sport.countryIds?.length === 1 ? "" : "ies"}</small>
-            </button>
+              onDoubleClick={() => openSportEditor(sport)}
+              onDelete={() => queueDelete("sport", sport.id, sport.name)}
+              deleteDisabled={isCatalogView}
+            />
           ))}
         </div>
       </section>
@@ -711,20 +765,15 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
               <div className="entity-list">
                 {sportHosts.length > 0 ? (
                   sportHosts.map((host) => (
-                    <article className="entity-list-item" key={host.id}>
-                      <div className="entity-row">
-                        <EntityAvatar src={host.logoUrl} fallback={host.name} />
-                        <div>
-                          <strong>{host.name}</strong>
-                          <small>{host.type}{host.countryId ? ` · ${countries.find((country) => country.id === host.countryId)?.name ?? ""}` : ""}</small>
-                        </div>
-                      </div>
-                      <div className="entity-row-actions">
-                        <button type="button" className="secondary" onClick={() => void removeAssignedHost(host.id)} disabled={isCatalogView || Boolean(hostActionId)}>
-                          {hostActionId === host.id ? "Removing..." : "Remove"}
-                        </button>
-                      </div>
-                    </article>
+                    <EntityHeroCard
+                      key={host.id}
+                      name={host.name}
+                      logoUrl={host.logoUrl}
+                      detail={`${host.type}${host.countryId ? ` · ${countries.find((country) => country.id === host.countryId)?.name ?? ""}` : ""}`}
+                      onDoubleClick={() => openHostEditor(host)}
+                      onDelete={() => queueDelete("host", host.id, host.name)}
+                      deleteDisabled={isCatalogView || Boolean(hostActionId)}
+                    />
                   ))
                 ) : (
                   <p className="field-note">No hosts are linked to this sport yet.</p>
@@ -740,25 +789,15 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                 </button>
                 {sportCompetitions.length > 0 ? (
                   sportCompetitions.map((competition) => (
-                    <article className="entity-list-item" key={competition.id}>
-                      <div className="entity-row">
-                        <EntityAvatar src={competition.logoUrl} fallback={competition.name} />
-                        <div>
-                          <strong>{competition.name}</strong>
-                          <small>
-                            {competition.type} · {competition.participantType === "clubs" ? "Clubs" : "National Teams"}
-                          </small>
-                        </div>
-                      </div>
-                      <div className="entity-row-actions">
-                        <button type="button" onClick={() => openCompetitionEditor(competition)} disabled={isCatalogView}>
-                          Edit
-                        </button>
-                        <button type="button" className="secondary" onClick={() => queueDelete("competition", competition.id, competition.name)} disabled={isCatalogView}>
-                          Delete
-                        </button>
-                      </div>
-                    </article>
+                    <EntityHeroCard
+                      key={competition.id}
+                      name={competition.name}
+                      logoUrl={competition.logoUrl}
+                      detail={`${competition.type} · ${competition.participantType === "clubs" ? "Clubs" : "National Teams"}`}
+                      onDoubleClick={() => openCompetitionEditor(competition)}
+                      onDelete={() => queueDelete("competition", competition.id, competition.name)}
+                      deleteDisabled={isCatalogView}
+                    />
                   ))
                 ) : (
                   <p className="field-note">No competitions exist for this sport yet.</p>
@@ -780,23 +819,15 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
               <div className="entity-list">
                 {clubs.length > 0 ? (
                   clubs.map((team) => (
-                    <article className="entity-list-item" key={team.id}>
-                      <div className="entity-row">
-                        <EntityAvatar src={team.logoUrl} fallback={team.name} />
-                        <div>
-                          <strong>{team.name}</strong>
-                          <small>{team.shortName ?? "Club"}</small>
-                        </div>
-                      </div>
-                      <div className="entity-row-actions">
-                        <button type="button" onClick={() => openTeamEditor(team)} disabled={isCatalogView}>
-                          Edit
-                        </button>
-                        <button type="button" className="secondary" onClick={() => queueDelete("team", team.id, team.name)} disabled={isCatalogView}>
-                          Delete
-                        </button>
-                      </div>
-                    </article>
+                    <EntityHeroCard
+                      key={team.id}
+                      name={team.name}
+                      logoUrl={team.logoUrl}
+                      detail={team.shortName ?? "Club"}
+                      onDoubleClick={() => openTeamEditor(team)}
+                      onDelete={() => queueDelete("team", team.id, team.name)}
+                      deleteDisabled={isCatalogView}
+                    />
                   ))
                 ) : (
                   <p className="field-note">No clubs are defined for this sport yet.</p>
@@ -814,23 +845,15 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
               <div className="entity-list">
                 {nationalTeams.length > 0 ? (
                   nationalTeams.map((team) => (
-                    <article className="entity-list-item" key={team.id}>
-                      <div className="entity-row">
-                        <EntityAvatar src={team.logoUrl} fallback={team.name} />
-                        <div>
-                          <strong>{team.name}</strong>
-                          <small>{team.countryId ? countries.find((country) => country.id === team.countryId)?.name : "National Team"}</small>
-                        </div>
-                      </div>
-                      <div className="entity-row-actions">
-                        <button type="button" onClick={() => openTeamEditor(team)} disabled={isCatalogView}>
-                          Edit
-                        </button>
-                        <button type="button" className="secondary" onClick={() => queueDelete("team", team.id, team.name)} disabled={isCatalogView}>
-                          Delete
-                        </button>
-                      </div>
-                    </article>
+                    <EntityHeroCard
+                      key={team.id}
+                      name={team.name}
+                      logoUrl={team.logoUrl}
+                      detail={team.countryId ? countries.find((country) => country.id === team.countryId)?.name ?? "National Team" : "National Team"}
+                      onDoubleClick={() => openTeamEditor(team)}
+                      onDelete={() => queueDelete("team", team.id, team.name)}
+                      deleteDisabled={isCatalogView}
+                    />
                   ))
                 ) : (
                   <p className="field-note">No national teams have been created yet.</p>
