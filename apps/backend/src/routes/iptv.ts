@@ -7,8 +7,64 @@ import { validateHttpStreamUrl } from "../services/url-validation.js";
 import { logChannelSyncTrace } from "../services/iptv-trace.js";
 import { detectProviderType } from "../services/provider-type-detector.js";
 import { IptvOperationManager, type IptvOperationType } from "../services/iptv-operation-manager.js";
+import {
+  getIptvMovie,
+  getIptvSeries,
+  listIptvCategoriesPage,
+  listIptvChannelsPage,
+  listIptvEpgChannelsPage,
+  listIptvEpgProgrammesPage,
+  listIptvEpisodesPage,
+  listIptvMoviesPage,
+  listIptvSeasonsPage,
+  listIptvSeriesPage,
+  type CatalogueListOptions,
+  type IptvCategoryContentType
+} from "../repositories/iptv-catalogue-repository.js";
 
 type ChannelListMode = "active" | "includeInactive" | "debug" | "raw";
+
+const catalogueStatuses = new Set(["active", "inactive", "archived", "stale"]);
+
+function parseCatalogueQuery(request: any, response: any): CatalogueListOptions | undefined {
+  const rawPage = request.query.page;
+  const rawPageSize = request.query.pageSize;
+  const page = rawPage === undefined ? 1 : Number(rawPage);
+  const pageSize = rawPageSize === undefined ? 50 : Number(rawPageSize);
+  if (!Number.isInteger(page) || page < 1 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) {
+    response.status(400).json({ error: "invalid_pagination", message: "page must be >= 1 and pageSize must be between 1 and 100." });
+    return undefined;
+  }
+
+  const status = typeof request.query.status === "string" ? request.query.status : undefined;
+  if (status && !catalogueStatuses.has(status)) {
+    response.status(400).json({ error: "invalid_status" });
+    return undefined;
+  }
+
+  return {
+    page,
+    pageSize,
+    search: typeof request.query.search === "string" ? request.query.search.trim() || undefined : undefined,
+    categoryId: typeof request.query.categoryId === "string" ? request.query.categoryId : undefined,
+    status
+  };
+}
+
+function requireProvider(providerId: string, response: any) {
+  const provider = IPTVService.getProvider(providerId);
+  if (!provider) {
+    response.status(404).json({ error: "provider_not_found" });
+    return false;
+  }
+  return true;
+}
+
+function parseContentType(value: unknown): IptvCategoryContentType | undefined | null {
+  if (value === undefined) return undefined;
+  if (value === "live" || value === "movie" || value === "series") return value;
+  return null;
+}
 
 async function validateProviderConnection(input: {
   baseUrl?: string;
@@ -818,6 +874,127 @@ iptvRouter.get("/parity/:providerId", (request, response) => {
   }
 
   response.json({ data: diagnostic });
+});
+
+// Phase 3: Catalogue API endpoints (public access, no authentication required)
+iptvRouter.get("/providers/:providerId/categories", (request, response) => {
+  const providerId = request.params.providerId;
+  if (!providerId || !requireProvider(providerId, response)) return;
+  const contentType = parseContentType(request.query.contentType);
+  if (contentType === null) {
+    response.status(400).json({ error: "invalid_content_type" });
+    return;
+  }
+  const options = parseCatalogueQuery(request, response);
+  if (!options) return;
+  response.json({ data: listIptvCategoriesPage(providerId, contentType, options) });
+});
+
+iptvRouter.get("/providers/:providerId/channels", (request, response) => {
+  const providerId = request.params.providerId;
+  if (!providerId || !requireProvider(providerId, response)) return;
+  const options = parseCatalogueQuery(request, response);
+  if (!options) return;
+  response.json({ data: listIptvChannelsPage(providerId, options) });
+});
+
+iptvRouter.get("/providers/:providerId/movies", (request, response) => {
+  const providerId = request.params.providerId;
+  if (!providerId || !requireProvider(providerId, response)) return;
+  const options = parseCatalogueQuery(request, response);
+  if (!options) return;
+  response.json({ data: listIptvMoviesPage(providerId, options) });
+});
+
+iptvRouter.get("/providers/:providerId/movies/:movieId", (request, response) => {
+  const providerId = request.params.providerId;
+  const movieId = request.params.movieId;
+  if (!providerId || !movieId || !requireProvider(providerId, response)) return;
+  const movie = getIptvMovie(providerId, movieId);
+  if (!movie) {
+    response.status(404).json({ error: "movie_not_found" });
+    return;
+  }
+  response.json({ data: movie });
+});
+
+iptvRouter.get("/providers/:providerId/series", (request, response) => {
+  const providerId = request.params.providerId;
+  if (!providerId || !requireProvider(providerId, response)) return;
+  const options = parseCatalogueQuery(request, response);
+  if (!options) return;
+  response.json({ data: listIptvSeriesPage(providerId, options) });
+});
+
+iptvRouter.get("/providers/:providerId/series/:seriesId", (request, response) => {
+  const providerId = request.params.providerId;
+  const seriesId = request.params.seriesId;
+  if (!providerId || !seriesId || !requireProvider(providerId, response)) return;
+  const series = getIptvSeries(providerId, seriesId);
+  if (!series) {
+    response.status(404).json({ error: "series_not_found" });
+    return;
+  }
+  response.json({ data: series });
+});
+
+iptvRouter.get("/providers/:providerId/series/:seriesId/seasons", (request, response) => {
+  const providerId = request.params.providerId;
+  const seriesId = request.params.seriesId;
+  if (!providerId || !seriesId || !requireProvider(providerId, response)) return;
+  if (!getIptvSeries(providerId, seriesId)) {
+    response.status(404).json({ error: "series_not_found" });
+    return;
+  }
+  response.json({ data: listIptvSeasonsPage(providerId, seriesId) });
+});
+
+iptvRouter.get("/providers/:providerId/seasons/:seasonId/episodes", (request, response) => {
+  const providerId = request.params.providerId;
+  const seasonId = request.params.seasonId;
+  if (!providerId || !seasonId || !requireProvider(providerId, response)) return;
+  const options = parseCatalogueQuery(request, response);
+  if (!options) return;
+  const episodes = listIptvEpisodesPage(providerId, seasonId, options);
+  if (!episodes) {
+    response.status(404).json({ error: "season_not_found" });
+    return;
+  }
+  response.json({ data: episodes });
+});
+
+iptvRouter.get("/providers/:providerId/epg/channels", (request, response) => {
+  const providerId = request.params.providerId;
+  if (!providerId || !requireProvider(providerId, response)) return;
+  const options = parseCatalogueQuery(request, response);
+  if (!options) return;
+  response.json({ data: listIptvEpgChannelsPage(providerId, options) });
+});
+
+iptvRouter.get("/providers/:providerId/epg/programmes", (request, response) => {
+  const providerId = request.params.providerId;
+  if (!providerId || !requireProvider(providerId, response)) return;
+  const options = parseCatalogueQuery(request, response);
+  if (!options) return;
+  const booleanQuery = (value: unknown) => value === undefined ? false : value === "true";
+  if (request.query.current !== undefined && request.query.current !== "true" && request.query.current !== "false") {
+    response.status(400).json({ error: "invalid_current_filter" });
+    return;
+  }
+  if (request.query.upcoming !== undefined && request.query.upcoming !== "true" && request.query.upcoming !== "false") {
+    response.status(400).json({ error: "invalid_upcoming_filter" });
+    return;
+  }
+  response.json({
+    data: listIptvEpgProgrammesPage(providerId, {
+      ...options,
+      epgChannelId: typeof request.query.epgChannelId === "string" ? request.query.epgChannelId : undefined,
+      from: typeof request.query.from === "string" ? request.query.from : undefined,
+      to: typeof request.query.to === "string" ? request.query.to : undefined,
+      current: booleanQuery(request.query.current),
+      upcoming: booleanQuery(request.query.upcoming)
+    })
+  });
 });
 
 export default iptvRouter;
