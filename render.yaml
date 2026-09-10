@@ -18,6 +18,8 @@ services:
         value: /var/data/gito.sqlite
       - key: BACKUP_DIR
         value: /var/data/backups
+      - key: MAX_BACKUPS
+        value: "5"
       - key: UPLOAD_DIR
         value: /var/data/uploads
       - key: AI_CLASSIFICATION_ENABLED
