@@ -87,7 +87,9 @@ const absoluteDatabasePath = databasePath;
 const dbReadOnlyMode = (process.env.DB_READONLY_MODE ?? "false").toLowerCase() === "true";
 
 // Backup configuration
-const maxBackups = Number(process.env.MAX_BACKUPS ?? 20);
+// Changed from 20 to 5 backups (60 hours retention with 12-hour schedule)
+// See BACKUP_REDESIGN_SCHEMA_ANALYSIS.md for rationale
+const maxBackups = Number(process.env.MAX_BACKUPS ?? 5);
 const maxAgeDays = Number(process.env.MAX_AGE_DAYS ?? 7);
 const backupDir = process.env.BACKUP_DIR
   ? path.resolve(process.env.BACKUP_DIR)
