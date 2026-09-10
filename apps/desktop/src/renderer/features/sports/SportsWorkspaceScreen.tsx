@@ -10,6 +10,7 @@ import type {
   CreateCompetitionRequest,
   CreateSportRequest,
   CreateTeamRequest,
+  Season,
   Sport,
   Team,
   TeamType,
@@ -56,6 +57,8 @@ type DeleteContext = {
   id: string;
   label: string;
 };
+
+type ClubSeasonOption = Season & { competitionName: string };
 
 function EntityAvatar({ src, fallback }: { src?: string | undefined; fallback: string }) {
   const resolvedSrc = resolveAssetUrl(src);
@@ -133,6 +136,9 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
   const [hosts, setHosts] = useState<Host[]>([]);
   const [competitions, setCompetitions] = useState<Competition[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
+  const [clubSeasonOptions, setClubSeasonOptions] = useState<ClubSeasonOption[]>([]);
+  const [selectedClubSeasonId, setSelectedClubSeasonId] = useState("all");
+  const [selectedClubSeasonTeamIds, setSelectedClubSeasonTeamIds] = useState<string[] | null>(null);
   const [selectedSport, setSelectedSport] = useState<Sport | null>(null);
   const [status, setStatus] = useState("Ready");
   const [isSaving, setIsSaving] = useState(false);
@@ -218,7 +224,65 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
   );
 
   const clubs = sportTeams.filter((team) => team.type === "club");
+  const visibleClubs = selectedClubSeasonTeamIds
+    ? clubs.filter((team) => selectedClubSeasonTeamIds.includes(team.id))
+    : clubs;
   const nationalTeams = sportTeams.filter((team) => team.type === "national");
+
+  useEffect(() => {
+    let cancelled = false;
+    setSelectedClubSeasonId("all");
+    setSelectedClubSeasonTeamIds(null);
+    if (!selectedSport || sportCompetitions.length === 0) {
+      setClubSeasonOptions([]);
+      return;
+    }
+
+    void Promise.all(
+      sportCompetitions
+        .filter((competition) => competition.participantType === "clubs")
+        .map(async (competition) => {
+          const seasons = await apiClient.listSeasons(competition.id);
+          return seasons.map((season) => ({ ...season, competitionName: competition.name }));
+        })
+    )
+      .then((seasonGroups) => {
+        if (!cancelled) setClubSeasonOptions(seasonGroups.flat());
+      })
+      .catch(() => {
+        if (!cancelled) setClubSeasonOptions([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSport?.id, sportCompetitions]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (selectedClubSeasonId === "all") {
+      setSelectedClubSeasonTeamIds(null);
+      return;
+    }
+
+    const season = clubSeasonOptions.find((option) => option.id === selectedClubSeasonId);
+    if (!season) {
+      setSelectedClubSeasonTeamIds(null);
+      return;
+    }
+
+    void apiClient.listSeasonTeams(season.competitionId, season.id)
+      .then((members) => {
+        if (!cancelled) setSelectedClubSeasonTeamIds(members.map((member) => member.teamId));
+      })
+      .catch(() => {
+        if (!cancelled) setSelectedClubSeasonTeamIds([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clubSeasonOptions, selectedClubSeasonId]);
 
   const loadData = async () => {
     try {
@@ -819,13 +883,24 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
             <article className="entity-panel">
               <div className="panel-heading">
                 <h3>Clubs</h3>
+                <label className="club-season-filter">
+                  <span>Competition season</span>
+                  <select value={selectedClubSeasonId} onChange={(event) => setSelectedClubSeasonId(event.target.value)}>
+                    <option value="all">All</option>
+                    {clubSeasonOptions.map((season) => (
+                      <option key={season.id} value={season.id}>
+                        {season.competitionName} · {season.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <button type="button" onClick={() => openTeamEditor()} disabled={isCatalogView}>
                   Add Club
                 </button>
               </div>
               <div className="entity-list">
-                {clubs.length > 0 ? (
-                  clubs.map((team) => (
+                {visibleClubs.length > 0 ? (
+                  visibleClubs.map((team) => (
                     <EntityHeroCard
                       key={team.id}
                       name={team.name}
@@ -838,7 +913,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                     />
                   ))
                 ) : (
-                  <p className="field-note">No clubs are defined for this sport yet.</p>
+                  <p className="field-note">{selectedClubSeasonId === "all" ? "No clubs are defined for this sport yet." : "No clubs are assigned to this competition season."}</p>
                 )}
               </div>
             </article>
