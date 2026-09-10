@@ -444,29 +444,38 @@ iptvRouter.post("/operations", async (request, response) => {
       return;
     }
 
-    const provider = body.username && body.password && body.baseUrl
-      ? { credential_username: body.username, credential_password: body.password, server_url: body.baseUrl, type: "xtream" }
-      : IPTVService.getProviderCredentials(body.providerId!);
-    if (!provider) throw new Error("provider_not_found");
-    const username = (provider as any).credential_username ?? (provider as any).username;
-    const password = (provider as any).credential_password ?? (provider as any).password;
-    const serverUrl = (provider as any).server_url ?? (provider as any).base_url ?? (provider as any).baseUrl;
-    if (!username || !password || !serverUrl) throw new Error("stored_xtream_credentials_required");
-    report({ currentStage: "authenticating", currentMessage: "Checking Xtream credentials." });
-    const connection = await testXtreamConnection(serverUrl, username, password, signal);
-    if (!connection.ok) throw new Error(connection.message);
-    if (type === "xtream_validation") {
-      report({ currentStage: "completed", currentMessage: "Server reachable and credentials accepted." });
-      return;
-    }
-    report({ currentStage: "discovering_channels", currentMessage: "Loading channel inventory." });
-    const invalidEntries: XtreamParseError[] = [];
-    const parsed = await fetchXtreamChannels(serverUrl, username, password, (entry) => invalidEntries.push(entry));
-    const valid = parsed.filter((channel) => !validateHttpStreamUrl(channel.url));
-    report({ total: parsed.length, processed: parsed.length, succeeded: valid.length, failed: invalidEntries.length, currentStage: "saving_channels", currentMessage: `${parsed.length} channels discovered.` });
-    if (!state.cancelled && valid.length > 0) {
+    try {
+      const provider = body.username && body.password && body.baseUrl
+        ? { credential_username: body.username, credential_password: body.password, server_url: body.baseUrl, type: "xtream" }
+        : IPTVService.getProviderCredentials(body.providerId!);
+      if (!provider) throw new Error("provider_not_found");
+      const username = (provider as any).credential_username ?? (provider as any).username;
+      const password = (provider as any).credential_password ?? (provider as any).password;
+      const serverUrl = (provider as any).server_url ?? (provider as any).base_url ?? (provider as any).baseUrl;
+      if (!username || !password || !serverUrl) throw new Error("stored_xtream_credentials_required");
+      report({ currentStage: "authenticating", currentMessage: "Checking Xtream credentials." });
+      const connection = await testXtreamConnection(serverUrl, username, password, signal);
+      if (!connection.ok) throw new Error(connection.message);
+      if (type === "xtream_validation") {
+        report({ currentStage: "completed", currentMessage: "Server reachable and credentials accepted. Channel sync is starting." });
+        return;
+      }
+      report({ currentStage: "discovering_channels", currentMessage: "Loading channel inventory." });
+      const invalidEntries: XtreamParseError[] = [];
+      const parsed = await fetchXtreamChannels(serverUrl, username, password, (entry) => invalidEntries.push(entry), signal);
+      const valid = parsed.filter((channel) => !validateHttpStreamUrl(channel.url));
+      report({ total: parsed.length, processed: parsed.length, succeeded: valid.length, failed: invalidEntries.length, currentStage: "saving_channels", currentMessage: `${parsed.length} channels discovered.` });
+      if (state.cancelled) return;
+      if (valid.length === 0) {
+        IPTVService.setProviderStatus(body.providerId!, "failed");
+        throw new Error("Xtream sync completed with zero usable channels.");
+      }
       IPTVService.syncProviderChannels(body.providerId!, valid);
-      report({ currentMessage: `${valid.length} channels saved.` });
+      IPTVService.setProviderStatus(body.providerId!, "active");
+      report({ currentStage: "completed", currentMessage: `${valid.length} channels saved. Provider activated.` });
+    } catch (error) {
+      if (body.providerId) IPTVService.setProviderStatus(body.providerId, "failed");
+      throw error;
     }
   });
 

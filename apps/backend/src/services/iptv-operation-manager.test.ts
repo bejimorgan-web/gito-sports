@@ -64,3 +64,20 @@ test("validation operations reach timeout instead of remaining pending", async (
 
   assert.fail("validation operation remained pending instead of timing out");
 });
+
+test("Xtream sync operations reach timeout instead of remaining pending", async () => {
+  const started = IptvOperationManager.start("xtream_channel_sync", async (_operation, _report, signal) => {
+    await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+  }, undefined, 10);
+
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const current = IptvOperationManager.get(started.id);
+    if (current?.status === "timeout") {
+      assert.match(current.currentMessage, /timed out/i);
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+
+  assert.fail("Xtream sync operation remained pending instead of timing out");
+});

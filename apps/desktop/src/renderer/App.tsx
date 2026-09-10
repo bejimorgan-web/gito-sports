@@ -90,6 +90,7 @@ function renderScreen(
     startIptvOperation: typeof apiClient.startIptvOperation;
     getIptvOperation: typeof apiClient.getIptvOperation;
     cancelIptvOperation: typeof apiClient.cancelIptvOperation;
+    refreshIptv: () => Promise<void>;
     loadChannelPage: (options: { page: number; q?: string; category?: string; providerId?: string }) => Promise<void>;
     openMatch: (matchId?: string) => void;
   }
@@ -113,6 +114,7 @@ function renderScreen(
           onStartIptvOperation={actions.startIptvOperation}
           onGetIptvOperation={actions.getIptvOperation}
           onCancelIptvOperation={actions.cancelIptvOperation}
+          onRefreshIptv={actions.refreshIptv}
         />
       );
     case "matchAssignment":
@@ -411,7 +413,7 @@ export function App() {
 
   const createProvider = useCallback(async (input: Parameters<typeof apiClient.createProvider>[0]) => {
     if (backendStatus !== "online") {
-      return;
+      throw new Error("backend_offline");
     }
     const provider = await apiClient.createProvider(input);
     setPreferredProviderId(provider.id);
@@ -419,6 +421,7 @@ export function App() {
     await refreshOperations("full");
     await new Promise((resolve) => window.setTimeout(resolve, 150));
     await refreshOperations("full");
+    return provider;
   }, [backendStatus, refreshOperations]);
 
   const updateProvider = useCallback(async (providerId: string, input: Partial<Parameters<typeof apiClient.createProvider>[0]>) => {
@@ -712,6 +715,7 @@ export function App() {
         startIptvOperation: apiClient.startIptvOperation,
         getIptvOperation: apiClient.getIptvOperation,
         cancelIptvOperation: apiClient.cancelIptvOperation
+        ,refreshIptv: () => refreshOperations("full")
         ,loadChannelPage
       }),
       [

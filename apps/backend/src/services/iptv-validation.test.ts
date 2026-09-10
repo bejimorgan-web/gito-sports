@@ -5,7 +5,7 @@ import { validateHttpStreamUrl } from "./url-validation.js";
 import { parseM3uPlaylist } from "./m3u-parser.js";
 import { buildXtreamEndpointCandidates, normalizeXtreamUrl, readResponseTextWithTimeout, testXtreamConnection } from "./xtream-codes.js";
 import { detectProviderType } from "./provider-type-detector.js";
-import { createProvider, getProviderById, listProviders, softDeleteProvider } from "../repositories/provider-repository.js";
+import { createProvider, getProviderById, listProviders, softDeleteProvider, syncProviderChannels, setProviderStatus } from "../repositories/provider-repository.js";
 import { getDatabase } from "../db/connection.js";
 
 test("accepts common non-http stream protocols", () => {
@@ -146,4 +146,24 @@ test("retries of the same validated provider payload do not create duplicate pro
     .prepare("SELECT COUNT(*) AS count FROM providers WHERE deleted = 0")
     .get() as { count: number };
   assert.equal(activeCount.count, activeCountBeforeDelete.count - 1);
+});
+
+test("successful Xtream channel sync persists channels before activating the provider", () => {
+  const provider = createProvider({
+    name: `Xtream Sync ${Date.now()}`,
+    baseUrl: `https://sync.example/${Date.now()}`,
+    type: "xtream",
+    authType: "basic",
+    username: "sync-user",
+    password: "sync-pass"
+  });
+
+  const channels = syncProviderChannels(provider.id, [
+    { name: "Sports One", url: "https://example.com/sports-one.m3u8", externalRef: "sports-one", groupName: "Sports" }
+  ]);
+  setProviderStatus(provider.id, "active");
+
+  assert.equal(channels.length, 1);
+  assert.equal(getProviderById(provider.id)?.status, "active");
+  assert.equal(getDatabase().prepare("SELECT COUNT(*) AS count FROM channels WHERE provider_id = ? AND status = 'active'").get(provider.id)!.count, 1);
 });

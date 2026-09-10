@@ -64,7 +64,7 @@ function scheduleCleanup(id: string) {
 }
 
 export const IptvOperationManager = {
-  start(type: IptvOperationType, task: OperationTask, createdBy?: string, timeoutMs = type.endsWith("validation") ? IPTV_VALIDATION_TIMEOUT_MS : undefined) {
+  start(type: IptvOperationType, task: OperationTask, createdBy?: string, timeoutMs = (type.endsWith("validation") || type.endsWith("sync")) ? IPTV_VALIDATION_TIMEOUT_MS : undefined) {
     const id = `iptv_${crypto.randomUUID()}`;
     const operation: IptvOperation = {
       id,

@@ -25,7 +25,7 @@ interface IptvManagementScreenProps {
   channelPage: PaginatedChannels<Channel>;
   onLoadChannelPage: (options: { page: number; q?: string; category?: string; providerId?: string }) => Promise<void>;
   providers: IPTVProvider[];
-  onCreateProvider: (input: CreateProviderRequest) => Promise<void>;
+  onCreateProvider: (input: CreateProviderRequest) => Promise<IPTVProvider>;
   onIngestM3u: (providerId: string, playlist: string) => Promise<void>;
   onUpdateProvider?: (providerId: string, input: Partial<CreateProviderRequest>) => Promise<void>;
   onDeleteProvider?: (providerId: string) => Promise<void>;
@@ -36,6 +36,7 @@ interface IptvManagementScreenProps {
   onStartIptvOperation: (type: IptvOperationType, input?: { providerId?: string; playlist?: string; baseUrl?: string; username?: string; password?: string }) => Promise<IptvOperation>;
   onGetIptvOperation: (operationId: string) => Promise<IptvOperation>;
   onCancelIptvOperation: (operationId: string) => Promise<IptvOperation>;
+  onRefreshIptv: () => Promise<void>;
 }
 
 export function IptvManagementScreen({
@@ -53,7 +54,8 @@ export function IptvManagementScreen({
   onSetProviderStatus,
   onStartIptvOperation,
   onGetIptvOperation,
-  onCancelIptvOperation
+  onCancelIptvOperation,
+  onRefreshIptv
 }: IptvManagementScreenProps) {
   const [selectedProviderId, setSelectedProviderId] = useState("");
   const [providerName, setProviderName] = useState("");
@@ -93,6 +95,7 @@ export function IptvManagementScreen({
       setStatusMessage(message);
       setImportStatus(message);
       setProviderAction("idle");
+      void onRefreshIptv();
       return;
     }
     const timer = window.setInterval(() => {
@@ -106,7 +109,7 @@ export function IptvManagementScreen({
         });
     }, 750);
     return () => window.clearInterval(timer);
-  }, [operation, onGetIptvOperation]);
+  }, [operation, onGetIptvOperation, onRefreshIptv]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -184,8 +187,11 @@ export function IptvManagementScreen({
         await onUpdateProvider(selectedProviderId, providerInput);
         setStatusMessage("Provider updated.");
       } else {
-        await onCreateProvider(providerInput);
-        setStatusMessage("Provider created.");
+        const createdProvider = await onCreateProvider(providerInput);
+        setStatusMessage("Provider created. Starting Xtream channel synchronization...");
+        if (createdProvider.type === "xtream") {
+          await startOperation("xtream_channel_sync", { providerId: createdProvider.id });
+        }
       }
     } catch (error) {
       setStatusMessage(getFriendlyErrorMessage(error) || "Provider save failed.");

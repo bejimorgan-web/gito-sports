@@ -320,35 +320,38 @@ export async function fetchXtreamChannels(
   baseUrl: string,
   username: string,
   password: string,
-  onInvalidStream?: (entry: XtreamParseError) => void
+  onInvalidStream?: (entry: XtreamParseError) => void,
+  signal?: AbortSignal
 ): Promise<ParsedChannel[]> {
   const endpointCandidates = buildXtreamEndpointCandidates(baseUrl);
   const categoryResponses = await Promise.allSettled(
     endpointCandidates.map((candidate) =>
-      fetchWithTimeout(
+      fetchTextWithTimeout(
         buildUrl(candidate, {
           username,
           password,
           action: "get_live_categories"
-        })
+        }),
+        { signal }
       )
     )
   );
 
   const streamsResponses = await Promise.allSettled(
     endpointCandidates.map((candidate) =>
-      fetchWithTimeout(
+      fetchTextWithTimeout(
         buildUrl(candidate, {
           username,
           password,
           action: "get_live_streams"
-        })
+        }),
+        { signal }
       )
     )
   );
 
-  const categoriesResponse = categoryResponses.find((result) => result.status === "fulfilled" && result.value.ok);
-  const streamsResponse = streamsResponses.find((result) => result.status === "fulfilled" && result.value.ok);
+  const categoriesResponse = categoryResponses.find((result) => result.status === "fulfilled" && result.value.response.ok);
+  const streamsResponse = streamsResponses.find((result) => result.status === "fulfilled" && result.value.response.ok);
 
   if (!categoriesResponse || !streamsResponse) {
     throw new Error("Xtream channel extraction failed.");
@@ -364,12 +367,12 @@ export async function fetchXtreamChannels(
   const categoriesResponseData = resolvedCategoriesResponse;
   const streamsResponseData = resolvedStreamsResponse;
 
-  if (!categoriesResponseData.ok || !streamsResponseData.ok) {
+  if (!categoriesResponseData.response.ok || !streamsResponseData.response.ok) {
     throw new Error("Xtream channel extraction failed.");
   }
 
-  const categories = (await categoriesResponseData.json()) as XtreamCategory[];
-  const streams = (await streamsResponseData.json()) as XtreamStream[];
+  const categories = JSON.parse(categoriesResponseData.text) as XtreamCategory[];
+  const streams = JSON.parse(streamsResponseData.text) as XtreamStream[];
   const categoryNames = new Map(categories.map((category) => [category.category_id, category.category_name]));
   const streamBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
 
