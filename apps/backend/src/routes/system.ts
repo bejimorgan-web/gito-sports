@@ -21,7 +21,8 @@ systemRouter.post("/backup", async (_req, res) => {
     res.json({ success: true, backup: { filename: backup.filename, size: backup.size, createdAt: backup.timestamp } });
   } catch (error) {
     console.error("[system] manual backup failed", error);
-    res.status(500).json({ success: false, error: String(error) });
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(message === "backup_in_progress" ? 409 : 500).json({ success: false, error: message });
   }
 });
 
@@ -56,7 +57,10 @@ systemRouter.get("/health", async (_req, res) => {
   const backupStats = await getBackupStats();
 
   const dbOk = health.db === "ok";
-  const status = dbOk && health.scoreService === "ok" && health.iptvService === "ok" ? "ok" : "degraded";
+  const diskPressure = backupStats.disk && backupStats.requiredBackupBytes
+    ? backupStats.disk.freeBytes < backupStats.requiredBackupBytes
+    : false;
+  const status = dbOk && health.scoreService === "ok" && health.iptvService === "ok" && !diskPressure && !backupStats.lastBackupError ? "ok" : "degraded";
 
   res.json({
     status,
@@ -71,7 +75,17 @@ systemRouter.get("/health", async (_req, res) => {
           ? "ok"
           : "warning",
       lastBackup: backupStats.latestBackup?.createdAt ?? null,
-      backupCount: backupStats.backupCount
+      backupCount: backupStats.backupCount,
+      retention: backupStats.retention ?? null,
+      totalBackupBytes: backupStats.totalBackupBytes ?? 0,
+      newestBackup: backupStats.latestBackup ?? null,
+      oldestRetainedBackup: backupStats.oldestRetainedBackup ?? null,
+      backupInProgress: backupStats.backupInProgress ?? false,
+      lastBackupCompletedAt: backupStats.lastBackupCompletedAt ?? null,
+      lastBackupError: backupStats.lastBackupError ?? null,
+      lastCleanupResult: backupStats.lastCleanupResult ?? null,
+      disk: backupStats.disk ?? null,
+      requiredBackupBytes: backupStats.requiredBackupBytes ?? null
     }
   });
 });
