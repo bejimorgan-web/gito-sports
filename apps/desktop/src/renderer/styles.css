@@ -380,6 +380,7 @@ textarea {
 .sports-workspace-screen .sport-selection-grid,
 .sports-workspace-screen .sports-workspace-grid {
   display: grid;
+  min-width: 0;
   gap: 16px;
 }
 
@@ -518,6 +519,13 @@ textarea {
 
 .entity-list:has(.entity-hero-card-team) {
   grid-template-columns: repeat(auto-fill, minmax(132px, 152px));
+}
+
+.sports-workspace-screen,
+.sports-workspace-screen .console-panel,
+.sports-workspace-screen .entity-panel,
+.sports-workspace-screen .entity-list {
+  min-width: 0;
 }
 
 @media (max-width: 560px) {
@@ -2613,5 +2621,37 @@ dd {
 
   .news-workspace-header {
     flex-direction: column;
+  }
+}
+
+@media (max-width: 980px) {
+  .sports-workspace-screen .sport-selection-grid {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+
+  .sports-workspace-screen .entity-list:has(.entity-hero-card) {
+    grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  }
+
+  .sports-workspace-screen .entity-list:has(.entity-hero-card-host) {
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  }
+
+  .sports-workspace-screen .entity-list:has(.entity-hero-card-competition) {
+    grid-template-columns: repeat(auto-fit, minmax(122px, 1fr));
+  }
+
+  .sports-workspace-screen .entity-list:has(.entity-hero-card-team) {
+    grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .sports-workspace-screen .sport-selection-grid,
+  .sports-workspace-screen .entity-list:has(.entity-hero-card),
+  .sports-workspace-screen .entity-list:has(.entity-hero-card-host),
+  .sports-workspace-screen .entity-list:has(.entity-hero-card-competition),
+  .sports-workspace-screen .entity-list:has(.entity-hero-card-team) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
