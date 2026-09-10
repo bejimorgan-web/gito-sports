@@ -510,11 +510,11 @@ textarea {
 }
 
 .entity-list:has(.entity-hero-card-host) {
-  grid-template-columns: repeat(auto-fill, minmax(164px, 188px));
+  grid-template-columns: repeat(auto-fill, minmax(140px, 160px));
 }
 
 .entity-list:has(.entity-hero-card-competition) {
-  grid-template-columns: repeat(auto-fill, minmax(148px, 172px));
+  grid-template-columns: repeat(auto-fill, minmax(140px, 160px));
 }
 
 .entity-list:has(.entity-hero-card-team) {
@@ -538,11 +538,11 @@ textarea {
   }
 
   .entity-list:has(.entity-hero-card-host) {
-    grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
   }
 
   .entity-list:has(.entity-hero-card-competition) {
-    grid-template-columns: repeat(auto-fill, minmax(126px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
   }
 
   .entity-list:has(.entity-hero-card-team) {
@@ -2634,11 +2634,11 @@ dd {
   }
 
   .sports-workspace-screen .entity-list:has(.entity-hero-card-host) {
-    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(124px, 1fr));
   }
 
   .sports-workspace-screen .entity-list:has(.entity-hero-card-competition) {
-    grid-template-columns: repeat(auto-fit, minmax(122px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(124px, 1fr));
   }
 
   .sports-workspace-screen .entity-list:has(.entity-hero-card-team) {
