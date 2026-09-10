@@ -6,7 +6,10 @@ export const healthRouter = Router();
 
 function getCount(database: ReturnType<typeof getDatabase>, table: string) {
   try {
-    const row = database.prepare(`SELECT COUNT(1) AS count FROM ${table}`).get() as { count: number };
+    const query = table === "providers"
+      ? "SELECT COUNT(1) AS count FROM providers WHERE deleted = 0"
+      : `SELECT COUNT(1) AS count FROM ${table}`;
+    const row = database.prepare(query).get() as { count: number };
     return Number(row?.count ?? 0);
   } catch {
     return 0;

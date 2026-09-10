@@ -121,7 +121,21 @@ test("retries of the same validated provider payload do not create duplicate pro
 
   assert.equal(matches.count, 1);
 
+  const activeCountBeforeDelete = getDatabase()
+    .prepare("SELECT COUNT(*) AS count FROM providers WHERE deleted = 0")
+    .get() as { count: number };
+
   softDeleteProvider(first.id);
   assert.equal(getProviderById(first.id), undefined);
   assert.ok(listProviders().some((provider) => provider.id === first.id) === false);
+
+  const deletedRow = getDatabase()
+    .prepare("SELECT deleted FROM providers WHERE id = ?")
+    .get(first.id) as { deleted: number };
+  assert.equal(deletedRow.deleted, 1);
+
+  const activeCount = getDatabase()
+    .prepare("SELECT COUNT(*) AS count FROM providers WHERE deleted = 0")
+    .get() as { count: number };
+  assert.equal(activeCount.count, activeCountBeforeDelete.count - 1);
 });
