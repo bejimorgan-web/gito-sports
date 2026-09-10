@@ -729,9 +729,9 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
   const sportSummary = selectedSport ? (
     <div className="dashboard-summary-grid">
       <article className="dashboard-metric-card">
-        <span>{isCatalogView ? "Hosts" : "Countries"}</span>
-        <strong>{supportedCountries.length}</strong>
-        <small>Supported by {selectedSport.name}</small>
+        <span>Hosts</span>
+        <strong>{sportHosts.length}</strong>
+        <small>Assigned to {selectedSport.name}</small>
       </article>
       <article className="dashboard-metric-card">
         <span>Competitions</span>

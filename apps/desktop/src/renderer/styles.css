@@ -363,15 +363,15 @@ textarea {
 
 .dashboard-summary-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(180px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .dashboard-metric-card {
   display: grid;
-  gap: 8px;
-  min-height: 120px;
-  padding: 18px 20px;
+  gap: 5px;
+  min-height: 88px;
+  padding: 12px 14px;
   border: 1px solid #253647;
   border-radius: 14px;
   background: linear-gradient(180deg, #111b25 0%, #0b1218 100%);
@@ -864,16 +864,17 @@ textarea {
   color: #8fa1b3;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  font-size: 0.82rem;
+  font-size: 0.7rem;
 }
 
 .dashboard-metric-card strong {
-  font-size: 2rem;
+  font-size: 1.55rem;
   color: #edf4ff;
 }
 
 .dashboard-metric-card small {
   color: #9fb5cc;
+  font-size: 0.72rem;
 }
 
 .unified-status {
