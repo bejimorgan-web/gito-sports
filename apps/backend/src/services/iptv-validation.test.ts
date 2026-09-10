@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { validateHttpStreamUrl } from "./url-validation.js";
 import { parseM3uPlaylist } from "./m3u-parser.js";
-import { buildXtreamEndpointCandidates, normalizeXtreamUrl, testXtreamConnection } from "./xtream-codes.js";
+import { buildXtreamEndpointCandidates, normalizeXtreamUrl, readResponseTextWithTimeout, testXtreamConnection } from "./xtream-codes.js";
 import { detectProviderType } from "./provider-type-detector.js";
 import { createProvider, getProviderById, listProviders, softDeleteProvider } from "../repositories/provider-repository.js";
 import { getDatabase } from "../db/connection.js";
@@ -66,6 +66,14 @@ test("classifies Xtream authentication, network, timeout, and malformed response
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("does not wait indefinitely for a provider response body", async () => {
+  const response = { text: () => new Promise<string>(() => undefined) } as unknown as Response;
+  const startedAt = Date.now();
+
+  await assert.rejects(() => readResponseTextWithTimeout(response, 10), /timed out/i);
+  assert.ok(Date.now() - startedAt < 1000);
 });
 
 test("parses m3u entries that include the stream URL inline", () => {

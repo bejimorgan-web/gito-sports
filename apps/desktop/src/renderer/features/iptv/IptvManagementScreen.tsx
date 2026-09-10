@@ -82,9 +82,28 @@ export function IptvManagementScreen({
   };
 
   useEffect(() => {
-    if (!operation || operation.status === "completed" || operation.status === "failed" || operation.status === "cancelled") return;
+    if (!operation) return;
+    const terminal = operation.status === "completed" || operation.status === "failed" || operation.status === "timeout" || operation.status === "cancelled";
+    if (terminal) {
+      const message = operation.status === "completed"
+        ? operation.currentMessage
+        : operation.status === "timeout"
+          ? "Validation timed out. Check the provider URL and retry."
+          : operation.currentMessage || "Validation failed. Check the provider details and retry.";
+      setStatusMessage(message);
+      setImportStatus(message);
+      setProviderAction("idle");
+      return;
+    }
     const timer = window.setInterval(() => {
-      void onGetIptvOperation(operation.id).then(setOperation).catch(() => undefined);
+      void onGetIptvOperation(operation.id)
+        .then(setOperation)
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : "Unable to read validation status.";
+          setStatusMessage(message);
+          setImportStatus(message);
+          setProviderAction("idle");
+        });
     }, 750);
     return () => window.clearInterval(timer);
   }, [operation, onGetIptvOperation]);

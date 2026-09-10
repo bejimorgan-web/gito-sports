@@ -76,11 +76,62 @@ interface XtreamStream {
 
 export async function fetchWithTimeout(input: string | URL, init: RequestInit = {}, timeoutMs = 15_000) {
   const controller = new AbortController();
+  const externalSignal = init.signal;
+  const abortFromExternal = () => controller.abort();
+  externalSignal?.addEventListener("abort", abortFromExternal, { once: true });
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(input, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timeout);
+    externalSignal?.removeEventListener("abort", abortFromExternal);
+  }
+}
+
+export async function readResponseTextWithTimeout(response: Response, timeoutMs = 15_000, signal?: AbortSignal): Promise<string> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let abortHandler: (() => void) | undefined;
+  const body = response.text();
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new DOMException("Response body timed out", "TimeoutError")), timeoutMs);
+    abortHandler = () => reject(new DOMException("Response body aborted", "AbortError"));
+    signal?.addEventListener("abort", abortHandler, { once: true });
+  });
+
+  try {
+    return await Promise.race([body, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (abortHandler) signal?.removeEventListener("abort", abortHandler);
+  }
+}
+
+export async function fetchTextWithTimeout(input: string | URL, init: RequestInit = {}, timeoutMs = 15_000) {
+  const controller = new AbortController();
+  const externalSignal = init.signal;
+  const abortFromExternal = () => controller.abort();
+  externalSignal?.addEventListener("abort", abortFromExternal, { once: true });
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(input, { ...init, signal: controller.signal });
+    const text = await response.text();
+    return { response, text };
+  } finally {
+    clearTimeout(timeout);
+    externalSignal?.removeEventListener("abort", abortFromExternal);
+  }
+}
+
+async function fetchJsonWithTimeout(input: string | URL, init: RequestInit = {}, timeoutMs = 15_000) {
+  const result = await fetchTextWithTimeout(input, init, timeoutMs);
+  if (!result.text.trim()) {
+    return { response: result.response, payload: null, parseError: false };
+  }
+
+  try {
+    return { response: result.response, payload: JSON.parse(result.text), parseError: false };
+  } catch {
+    return { response: result.response, payload: null, parseError: true };
   }
 }
 
@@ -99,7 +150,8 @@ function buildUrl(baseUrl: string, params: Record<string, string>) {
 export async function testXtreamConnection(
   baseUrl: string,
   username: string,
-  password: string
+  password: string,
+  signal?: AbortSignal
 ): Promise<ProviderConnectionTest> {
   // First validate and normalize the URL
   const urlResult = normalizeXtreamUrl(baseUrl);
@@ -125,11 +177,12 @@ export async function testXtreamConnection(
 
     const responses = await Promise.allSettled(
       endpointCandidates.map((candidate) =>
-        fetchWithTimeout(
+        fetchJsonWithTimeout(
           buildUrl(candidate, {
             username,
             password
-          })
+          }),
+          { signal }
         )
       )
     );
@@ -137,20 +190,20 @@ export async function testXtreamConnection(
     // Look for successful response
     let malformedResponse = false;
     for (const response of responses) {
-      if (response.status !== "fulfilled" || !response.value.ok) {
+      if (response.status !== "fulfilled" || !response.value.response.ok) {
         continue;
       }
 
       try {
-        const payload = await response.value.clone().json();
+        const payload = response.value.payload;
         if (payload && typeof payload === "object" && !Array.isArray(payload)) {
           return {
             ok: true,
-            statusCode: response.value.status,
+            statusCode: response.value.response.status,
             message: "Connected — credentials accepted."
           };
         }
-        malformedResponse = true;
+        malformedResponse = malformedResponse || response.value.parseError;
       } catch {
         malformedResponse = true;
       }
@@ -164,7 +217,7 @@ export async function testXtreamConnection(
 
     for (const response of responses) {
       if (response.status === "fulfilled") {
-        const status = response.value.status;
+        const status = response.value.response.status;
         lastStatusCode = status;
 
         if (status === 401 || status === 403) {

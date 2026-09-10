@@ -2,7 +2,7 @@ import { Router } from "express";
 import type { CreateProviderRequest } from "@gito/shared";
 import { IPTVService } from "../services/iptv-service.js";
 import { parseM3uPlaylist, M3uParseError } from "../services/m3u-parser.js";
-import { fetchXtreamChannels, fetchWithTimeout, testXtreamConnection, XtreamParseError, normalizeXtreamUrl } from "../services/xtream-codes.js";
+import { fetchXtreamChannels, fetchTextWithTimeout, fetchWithTimeout, testXtreamConnection, XtreamParseError, normalizeXtreamUrl } from "../services/xtream-codes.js";
 import { validateHttpStreamUrl } from "../services/url-validation.js";
 import { logChannelSyncTrace } from "../services/iptv-trace.js";
 import { detectProviderType } from "../services/provider-type-detector.js";
@@ -18,6 +18,7 @@ async function validateProviderConnection(input: {
   providerId?: string;
 }) {
   const { baseUrl, type, providerId } = input;
+  const validationId = `iptv_validation_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
   const storedCredentials = providerId ? IPTVService.getProviderCredentials(providerId) : undefined;
   const username = input.username ?? (storedCredentials as any)?.credential_username ?? undefined;
   const password = input.password ?? (storedCredentials as any)?.credential_password ?? undefined;
@@ -27,6 +28,7 @@ async function validateProviderConnection(input: {
   }
 
   const resolvedType = type && type !== "manual" ? type : "manual";
+  console.info("[iptv-validation] request_started", { validationId, providerType: resolvedType });
 
   try {
     // For Xtream, normalize and validate URL first
@@ -58,7 +60,8 @@ async function validateProviderConnection(input: {
       };
     }
 
-    const testResponse = await fetchWithTimeout(baseUrl, { method: "GET" });
+    const testResult = await fetchTextWithTimeout(baseUrl, { method: "GET" });
+    const testResponse = testResult.response;
 
     if (!testResponse.ok) {
       return {
@@ -68,7 +71,7 @@ async function validateProviderConnection(input: {
       };
     }
 
-    const bodyText = await testResponse.text();
+    const bodyText = testResult.text;
     const detectedType = await detectProviderType({ baseUrl, username, password, payload: bodyText });
     const inferredType = resolvedType === "manual" ? detectedType : resolvedType;
 
@@ -142,9 +145,17 @@ async function validateProviderConnection(input: {
       rejectedChannels: invalidChannels.slice(0, 10)
     };
   } catch (error) {
+    const errorName = error instanceof Error ? error.name : "unknown";
+    const timedOut = errorName === "AbortError" || errorName === "TimeoutError" || /timeout|aborted/i.test(String(error));
+    console.warn("[iptv-validation] request_failed", {
+      validationId,
+      providerType: resolvedType,
+      classification: timedOut ? "timeout" : "provider_error"
+    });
     return {
       ok: false,
-      message: error instanceof Error ? error.message : "Provider connection failed."
+      statusCode: timedOut ? 408 : undefined,
+      message: timedOut ? "The provider did not respond within the allowed time." : error instanceof Error ? error.message : "Provider connection failed."
     };
   }
 }
@@ -410,16 +421,17 @@ iptvRouter.post("/operations", async (request, response) => {
     return;
   }
 
-  const operation = IptvOperationManager.start(type, async (state, report) => {
+  const operation = IptvOperationManager.start(type, async (state, report, signal) => {
     if (type === "m3u_validation" || type === "m3u_import") {
       report({ currentStage: "parsing", currentMessage: "Parsing playlist." });
       let playlist = body.playlist ?? "";
       if (!playlist && body.providerId) {
         const provider = IPTVService.getProvider(body.providerId);
         if (!provider?.baseUrl) throw new Error("provider_not_found");
-        const playlistResponse = await fetchWithTimeout(provider.baseUrl);
+        const playlistResult = await fetchTextWithTimeout(provider.baseUrl, { signal });
+        const playlistResponse = playlistResult.response;
         if (!playlistResponse.ok) throw new Error(`Provider returned HTTP ${playlistResponse.status}.`);
-        playlist = await playlistResponse.text();
+        playlist = playlistResult.text;
       }
       const invalidEntries: M3uParseError[] = [];
       const parsed = parseM3uPlaylist(playlist, (entry) => invalidEntries.push(entry));
@@ -441,7 +453,7 @@ iptvRouter.post("/operations", async (request, response) => {
     const serverUrl = (provider as any).server_url ?? (provider as any).base_url ?? (provider as any).baseUrl;
     if (!username || !password || !serverUrl) throw new Error("stored_xtream_credentials_required");
     report({ currentStage: "authenticating", currentMessage: "Checking Xtream credentials." });
-    const connection = await testXtreamConnection(serverUrl, username, password);
+    const connection = await testXtreamConnection(serverUrl, username, password, signal);
     if (!connection.ok) throw new Error(connection.message);
     if (type === "xtream_validation") {
       report({ currentStage: "completed", currentMessage: "Server reachable and credentials accepted." });

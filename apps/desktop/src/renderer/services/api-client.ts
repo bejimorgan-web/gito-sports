@@ -67,6 +67,8 @@ console.log('[api-client] API_BASE_URL=', API_BASE_URL);
 
 export { API_BASE_URL };
 
+const REQUEST_TIMEOUT_MS = 35_000;
+
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
     ...((init?.headers as Record<string, string>) ?? {})
@@ -77,15 +79,26 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   let response: Response;
+  const controller = new AbortController();
+  const abortFromCaller = () => controller.abort();
+  init?.signal?.addEventListener("abort", abortFromCaller, { once: true });
+  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
       cache: "no-store",
-      headers
+      headers,
+      signal: controller.signal
     });
   } catch (fetchError) {
+    if (controller.signal.aborted) {
+      throw new Error(`Request to ${path} timed out. Retry the validation.`);
+    }
     const message = fetchError instanceof Error ? fetchError.message : String(fetchError);
     throw new Error(`Network request to ${API_BASE_URL}${path} failed: ${message}`);
+  } finally {
+    window.clearTimeout(timeout);
+    init?.signal?.removeEventListener("abort", abortFromCaller);
   }
 
   if (!response.ok) {
