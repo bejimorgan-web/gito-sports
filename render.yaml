@@ -18,6 +18,8 @@ services:
         value: /var/data/gito.sqlite
       - key: BACKUP_DIR
         value: /var/data/backups
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
       - key: AI_CLASSIFICATION_ENABLED
         value: "false"
       - key: JWT_SECRET
