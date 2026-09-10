@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { resolveEventState } from "@gito/shared";
-import type { Channel, MatchAssignmentRequest, MatchAssignmentResult, PublishedLiveMatch, Sport, Country, Competition, Team, Stream } from "@gito/shared";
+import type { Channel, MatchAssignmentRequest, MatchAssignmentResult, PublishedLiveMatch, Sport, Country, Competition, Team, Stream, ProviderChannelDiagnostics } from "@gito/shared";
 import { useRealtimeSync } from "@gito/shared";
 
 import { LiveMatchApprovalScreen } from "./features/approvals/LiveMatchApprovalScreen";
@@ -60,6 +60,7 @@ function renderScreen(
     previewedChannelId: string | undefined;
     selectedMatchId?: string | undefined;
     providers: ProviderList;
+    providerDiagnostics: Record<string, ProviderChannelDiagnostics>;
     selectedChannel: Channel | undefined;
     preferredProviderId: string | undefined;
     liveMode: boolean;
@@ -103,6 +104,7 @@ function renderScreen(
           channelPage={state.channelPage}
           onLoadChannelPage={actions.loadChannelPage}
           providers={state.providers}
+          providerDiagnostics={state.providerDiagnostics}
           onCreateProvider={actions.createProvider}
           onUpdateProvider={actions.updateProvider}
           onDeleteProvider={actions.deleteProvider}
@@ -240,6 +242,7 @@ export function App() {
   const [channelPage, setChannelPage] = useState<ChannelPage>({ items: [], page: 1, pageSize: 50, total: 0, totalPages: 1 });
   const [liveMatches, setLiveMatches] = useState<PublishedLiveMatch[]>([]);
   const [providers, setProviders] = useState<ProviderList>([]);
+  const [providerDiagnostics, setProviderDiagnostics] = useState<Record<string, ProviderChannelDiagnostics>>({});
   const [previewedChannelId, setPreviewedChannelId] = useState<string>();
   const [selectedChannel, setSelectedChannel] = useState<Channel>();
   const [preferredProviderId, setPreferredProviderId] = useState<string | undefined>(undefined);
@@ -354,6 +357,14 @@ export function App() {
       ]);
 
       setBackendStatus("online");
+      const diagnosticsEntries = await Promise.all(providerData.map(async (provider) => {
+        try {
+          return [provider.id, await apiClient.getProviderDiagnostics(provider.id)] as const;
+        } catch {
+          return null;
+        }
+      }));
+      setProviderDiagnostics(Object.fromEntries(diagnosticsEntries.filter((entry): entry is readonly [string, ProviderChannelDiagnostics] => entry !== null)));
       applyResolvedState("iptv:providers", providerData, setProviders, "api-refresh");
       const resolvedChannelPage = Array.isArray(channelData)
         ? { items: channelData, page: 1, pageSize: channelData.length, total: channelData.length, totalPages: 1 }
@@ -753,6 +764,7 @@ export function App() {
       liveMatches,
       previewedChannelId,
       providers,
+      providerDiagnostics,
       selectedChannel,
       preferredProviderId,
       liveMode,
@@ -770,6 +782,7 @@ export function App() {
       liveMatches,
       previewedChannelId,
       providers,
+      providerDiagnostics,
       selectedChannel,
       liveMode,
       channelSearch,

@@ -29,4 +29,8 @@ export class IptvProviderService {
   static setProviderStatus(id: string, status: 'active' | 'failed' | 'pending' | 'invalid' | 'inactive') {
     return LegacyProviderRepository.setProviderStatus(id, status);
   }
+
+  static updateProviderHealth(input: Parameters<typeof LegacyProviderRepository.updateProviderHealth>[0]) {
+    return LegacyProviderRepository.updateProviderHealth(input);
+  }
 }

@@ -1047,6 +1047,10 @@ function migrateExistingOperationalState(database: DatabaseSync) {
     database.exec("ALTER TABLE providers ADD COLUMN availability_status TEXT NOT NULL DEFAULT 'unknown';");
   }
 
+  if (!hasColumn(database, "channels", "content_type")) {
+    database.exec("ALTER TABLE channels ADD COLUMN content_type TEXT NOT NULL DEFAULT 'live';");
+  }
+
   if (!hasColumn(database, "providers", "sync_mode")) {
     database.exec("ALTER TABLE providers ADD COLUMN sync_mode TEXT NOT NULL DEFAULT 'partial';");
   }

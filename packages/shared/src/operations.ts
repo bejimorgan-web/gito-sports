@@ -47,6 +47,7 @@ export interface ParsedChannel {
   url: string;
   externalRef?: string;
   groupName?: string;
+  contentType?: "live" | "movie" | "series";
 }
 
 export interface ProviderIngestionResult {

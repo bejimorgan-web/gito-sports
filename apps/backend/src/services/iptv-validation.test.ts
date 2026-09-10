@@ -5,7 +5,7 @@ import { validateHttpStreamUrl } from "./url-validation.js";
 import { parseM3uPlaylist } from "./m3u-parser.js";
 import { buildXtreamEndpointCandidates, fetchXtreamChannels, normalizeXtreamUrl, readResponseTextWithTimeout, testXtreamConnection } from "./xtream-codes.js";
 import { detectProviderType } from "./provider-type-detector.js";
-import { createProvider, getProviderById, listProviders, softDeleteProvider, syncProviderChannels, setProviderStatus } from "../repositories/provider-repository.js";
+import { createProvider, getProviderById, getProviderChannelDiagnostics, listChannelsPage, listProviders, softDeleteProvider, syncProviderChannels, setProviderStatus, updateProviderHealth } from "../repositories/provider-repository.js";
 import { getDatabase } from "../db/connection.js";
 
 test("accepts common non-http stream protocols", () => {
@@ -244,4 +244,59 @@ test("successful Xtream channel sync persists channels before activating the pro
   assert.equal(channels.length, 1);
   assert.equal(getProviderById(provider.id)?.status, "active");
   assert.equal(getDatabase().prepare("SELECT COUNT(*) AS count FROM channels WHERE provider_id = ? AND status = 'active'").get(provider.id)!.count, 1);
+});
+
+test("provider diagnostics report canonical totals instead of the current page size", () => {
+  const provider = createProvider({
+    name: `Stats Provider ${Date.now()}`,
+    baseUrl: `https://stats.example/${Date.now()}`,
+    type: "xtream",
+    authType: "basic",
+    username: "stats-user",
+    password: "stats-pass"
+  });
+
+  syncProviderChannels(provider.id, [
+    { name: "Live One", url: "https://example.com/live-one.m3u8", externalRef: "live-1", contentType: "live" },
+    { name: "Movie One", url: "https://example.com/movie-one.m3u8", externalRef: "movie-1", contentType: "movie" },
+    { name: "Series One", url: "https://example.com/series-one.m3u8", externalRef: "series-1", contentType: "series" }
+  ]);
+  updateProviderHealth({ providerId: provider.id, success: true, impact: "success" });
+
+  const page = listChannelsPage({ providerId: provider.id }, 1, 2);
+  const diagnostics = getProviderChannelDiagnostics(provider.id)!;
+
+  assert.equal(page.items.length, 2);
+  assert.equal(page.total, 3);
+  assert.deepEqual(diagnostics.contentTotals, { live: 1, movies: 1, series: 1 });
+  assert.equal(diagnostics.totalChannels, 3);
+  assert.equal(diagnostics.availabilityStatus, "online");
+
+  syncProviderChannels(provider.id, [
+    { name: "Live One Updated", url: "https://example.com/live-one-updated.m3u8", externalRef: "live-1", contentType: "live" },
+    { name: "Movie One Updated", url: "https://example.com/movie-one-updated.m3u8", externalRef: "movie-1", contentType: "movie" },
+    { name: "Series One Updated", url: "https://example.com/series-one-updated.m3u8", externalRef: "series-1", contentType: "series" }
+  ]);
+  assert.equal(getProviderChannelDiagnostics(provider.id)!.totalChannels, 3);
+});
+
+test("28,277 synchronized live channels are reported as the provider total", () => {
+  const provider = createProvider({
+    name: `Large Stats Provider ${Date.now()}`,
+    baseUrl: `https://large-stats.example/${Date.now()}`,
+    type: "xtream",
+    authType: "basic",
+    username: "large-user",
+    password: "large-pass"
+  });
+  const channels = Array.from({ length: 28_277 }, (_, index) => ({
+    name: `Live Channel ${index + 1}`,
+    url: `https://example.com/live/${index + 1}.m3u8`,
+    externalRef: String(index + 1),
+    contentType: "live" as const
+  }));
+
+  syncProviderChannels(provider.id, channels);
+  assert.equal(getProviderChannelDiagnostics(provider.id)!.contentTotals.live, 28_277);
+  assert.equal(getProviderChannelDiagnostics(provider.id)!.totalChannels, 28_277);
 });

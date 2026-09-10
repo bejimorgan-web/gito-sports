@@ -44,6 +44,7 @@ export interface Channel {
   externalRef?: string;
   groupName?: string;
   url: string;
+  contentType?: "live" | "movie" | "series";
   status: EntityStatus;
   createdAt: string;
   updatedAt: string;
@@ -63,6 +64,11 @@ export interface ProviderChannelDiagnostics {
   syncMode?: ProviderSyncMode;
   lastSuccessfulStreamLoadAt?: string;
   totalChannels: number;
+  contentTotals: {
+    live: number;
+    movies: number;
+    series: number;
+  };
   counts: {
     active: number;
     inactive: number;

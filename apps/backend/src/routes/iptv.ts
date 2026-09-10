@@ -217,7 +217,7 @@ function startXtreamSyncOperation(providerId: string) {
       }
 
       const saved = IPTVService.syncProviderChannels(providerId, valid);
-      IPTVService.setProviderStatus(providerId, "active");
+      IPTVService.updateProviderHealth({ providerId, success: true, impact: "success" });
       report({
         processed: parsed.length,
         succeeded: saved.length,
@@ -225,7 +225,7 @@ function startXtreamSyncOperation(providerId: string) {
         currentMessage: `${saved.length} channels saved. Provider activated.`
       });
     } catch (error) {
-      IPTVService.setProviderStatus(providerId, "failed");
+      IPTVService.updateProviderHealth({ providerId, success: false, impact: "failure" });
       throw error;
     }
   });

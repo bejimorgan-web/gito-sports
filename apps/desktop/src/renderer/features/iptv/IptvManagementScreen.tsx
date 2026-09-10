@@ -1,6 +1,6 @@
 ﻿import { useEffect, useState } from "react";
 
-import type { Channel, CreateProviderRequest, IptvOperation, IptvOperationType, IPTVProvider, PaginatedChannels, ProviderConnectionTest } from "@gito/shared";
+import type { Channel, CreateProviderRequest, IptvOperation, IptvOperationType, IPTVProvider, PaginatedChannels, ProviderChannelDiagnostics, ProviderConnectionTest } from "@gito/shared";
 import { IptvImportScreen } from "./IptvImportScreen";
 import { IptvOperationProgress } from "./IptvOperationProgress";
 import { IptvProvidersScreen } from "./IptvProvidersScreen";
@@ -25,6 +25,7 @@ interface IptvManagementScreenProps {
   channelPage: PaginatedChannels<Channel>;
   onLoadChannelPage: (options: { page: number; q?: string; category?: string; providerId?: string }) => Promise<void>;
   providers: IPTVProvider[];
+  providerDiagnostics: Record<string, ProviderChannelDiagnostics>;
   onCreateProvider: (input: CreateProviderRequest) => Promise<IPTVProvider & { syncOperationId?: string }>;
   onIngestM3u: (providerId: string, playlist: string) => Promise<void>;
   onUpdateProvider?: (providerId: string, input: Partial<CreateProviderRequest>) => Promise<void>;
@@ -44,6 +45,7 @@ export function IptvManagementScreen({
   channelPage,
   onLoadChannelPage,
   providers,
+  providerDiagnostics,
   onCreateProvider,
   onIngestM3u,
   onUpdateProvider,
@@ -343,7 +345,7 @@ export function IptvManagementScreen({
       <div className="operations-grid">
         <IptvProvidersScreen
           providers={providers}
-          channels={channels}
+          providerDiagnostics={providerDiagnostics}
           selectedProviderId={selectedProviderId}
           providerName={providerName}
           baseUrl={baseUrl}

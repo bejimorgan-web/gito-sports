@@ -55,6 +55,7 @@ interface ChannelRow {
   external_ref: string | null;
   group_name: string | null;
   url: string;
+  content_type: "live" | "movie" | "series";
   status: "active" | "inactive" | "archived" | "stale";
   created_at: string;
   updated_at: string;
@@ -92,6 +93,7 @@ function mapChannel(row: ChannelRow): Channel {
     providerId: row.provider_id,
     name: row.name,
     url: row.url,
+    contentType: row.content_type,
     status: row.status as any,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -424,12 +426,12 @@ export function syncProviderChannels(providerId: string, channels: ParsedChannel
   const duplicateDetections: Array<{ channel: ParsedChannel; reason: "duplicate_externalRef" | "duplicate_url" | "duplicate_in_payload" }> = [];
 
   const insertStmt = database.prepare(
-    `INSERT INTO channels (id, provider_id, name, external_ref, group_name, url, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)`
+    `INSERT INTO channels (id, provider_id, name, external_ref, group_name, url, content_type, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`
   );
 
   const updateStmt = database.prepare(
-    `UPDATE channels SET name = ?, external_ref = ?, group_name = ?, url = ?, status = 'active', updated_at = ? WHERE id = ?`
+    `UPDATE channels SET name = ?, external_ref = ?, group_name = ?, url = ?, content_type = ?, status = 'active', updated_at = ? WHERE id = ?`
   );
 
   // De-duplicate incoming channels by normalized externalRef or normalized URL within the incoming payload only
@@ -474,13 +476,13 @@ export function syncProviderChannels(providerId: string, channels: ParsedChannel
 
     if (existingByExt) {
       channelId = existingByExt.id;
-      updateStmt.run(ch.name, ch.externalRef ?? null, ch.groupName ?? null, ch.url, timestamp, channelId);
+      updateStmt.run(ch.name, ch.externalRef ?? null, ch.groupName ?? null, ch.url, ch.contentType ?? "live", timestamp, channelId);
       traceChannelSync(ch, "update", "matched_existing_channel_by_external_ref", "persist");
       channelUpdates += 1;
       EventBus.emit("iptv:channel:updated", { providerId, channelId, externalRef: ch.externalRef ?? null });
     } else {
       channelId = crypto.randomUUID();
-      insertStmt.run(channelId, providerId, ch.name, ch.externalRef ?? null, ch.groupName ?? null, ch.url, timestamp, timestamp);
+      insertStmt.run(channelId, providerId, ch.name, ch.externalRef ?? null, ch.groupName ?? null, ch.url, ch.contentType ?? "live", timestamp, timestamp);
       traceChannelSync(ch, "insert", "created_new_channel_record", "persist");
       channelInserts += 1;
       EventBus.emit("iptv:channel:inserted", { providerId, channelId, externalRef: ch.externalRef ?? null });
@@ -715,13 +717,16 @@ export function getProviderChannelDiagnostics(providerId: string) {
     .prepare(
       `SELECT
          COUNT(*) AS total,
+         SUM(CASE WHEN content_type = 'live' THEN 1 ELSE 0 END) AS live,
+         SUM(CASE WHEN content_type = 'movie' THEN 1 ELSE 0 END) AS movies,
+         SUM(CASE WHEN content_type = 'series' THEN 1 ELSE 0 END) AS series,
          SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active,
          SUM(CASE WHEN status = 'inactive' THEN 1 ELSE 0 END) AS inactive,
          SUM(CASE WHEN status = 'stale' THEN 1 ELSE 0 END) AS stale,
          SUM(CASE WHEN status = 'archived' THEN 1 ELSE 0 END) AS archived
        FROM channels WHERE provider_id = ?`
     )
-    .get(providerId) as { total: number; active: number; inactive: number; stale: number; archived: number };
+    .get(providerId) as { total: number; live: number; movies: number; series: number; active: number; inactive: number; stale: number; archived: number };
 
   return {
     providerId: provider.id,
@@ -731,6 +736,11 @@ export function getProviderChannelDiagnostics(providerId: string) {
     syncMode: provider.sync_mode ?? undefined,
     lastSuccessfulStreamLoadAt: provider.last_successful_stream_load_at ?? undefined,
     totalChannels: counts.total ?? 0,
+    contentTotals: {
+      live: counts.live ?? 0,
+      movies: counts.movies ?? 0,
+      series: counts.series ?? 0
+    },
     counts: {
       active: counts.active ?? 0,
       inactive: counts.inactive ?? 0,

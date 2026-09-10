@@ -111,6 +111,10 @@ export const IPTVService = {
     return IptvProviderService.setProviderStatus(providerId, status);
   },
 
+  updateProviderHealth(input: Parameters<typeof IptvProviderService.updateProviderHealth>[0]) {
+    return IptvProviderService.updateProviderHealth(input);
+  },
+
   getLatestIngestionReport(providerId: string): any {
     return IptvChannelService.getLatestIngestionReport(providerId);
   },

@@ -1,21 +1,9 @@
 import { useMemo } from "react";
-import type { Channel, CreateProviderRequest, IPTVProvider } from "@gito/shared";
-
-function classifyChannelContent(channel: Channel) {
-  const sourceText = [channel.groupName ?? "", channel.externalRef ?? "", channel.name ?? ""].join(" ").toLowerCase();
-  const hasExplicitVodToken = /(^|[^a-z])(vod)([^a-z]|$)/.test(sourceText);
-  const hasExplicitMovieToken = /(^|[^a-z])(movies?|films?)([^a-z]|$)/.test(sourceText);
-  const hasExplicitSeriesToken = /(^|[^a-z])(series?|shows?|episodes?)([^a-z]|$)/.test(sourceText);
-
-  return {
-    isMovieContent: hasExplicitVodToken && hasExplicitMovieToken,
-    isSeriesContent: hasExplicitVodToken && hasExplicitSeriesToken
-  };
-}
+import type { CreateProviderRequest, IPTVProvider, ProviderChannelDiagnostics } from "@gito/shared";
 
 interface IptvProvidersScreenProps {
   providers: IPTVProvider[];
-  channels: Channel[];
+  providerDiagnostics: Record<string, ProviderChannelDiagnostics>;
   selectedProviderId: string;
   providerName: string;
   baseUrl: string;
@@ -42,7 +30,7 @@ interface IptvProvidersScreenProps {
 
 export function IptvProvidersScreen({
   providers,
-  channels,
+  providerDiagnostics,
   selectedProviderId,
   providerName,
   baseUrl,
@@ -69,27 +57,6 @@ export function IptvProvidersScreen({
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
   const activeProviders = useMemo(() => providers.filter((provider) => provider.status !== "inactive"), [providers]);
   const inactiveProviders = useMemo(() => providers.filter((provider) => provider.status === "inactive"), [providers]);
-  const providerChannelCounts = useMemo(() => {
-    const counts: Record<string, { total: number; movies: number; series: number }> = {};
-
-    for (const channel of channels) {
-      const current = counts[channel.providerId] ?? { total: 0, movies: 0, series: 0 };
-      const content = classifyChannelContent(channel);
-
-      current.total += 1;
-      if (content.isMovieContent) {
-        current.movies += 1;
-      }
-      if (content.isSeriesContent) {
-        current.series += 1;
-      }
-
-      counts[channel.providerId] = current;
-    }
-
-    return counts;
-  }, [channels]);
-
   return (
     <section className="console-panel">
       <div className="panel-heading">
@@ -173,7 +140,10 @@ export function IptvProvidersScreen({
         ) : (
           <>
             {activeProviders.map((provider) => {
-              const channelMetrics = providerChannelCounts[provider.id] ?? { total: 0, movies: 0, series: 0 };
+              const diagnostics = providerDiagnostics[provider.id];
+              const channelMetrics = diagnostics
+                ? { total: diagnostics.contentTotals.live, movies: diagnostics.contentTotals.movies, series: diagnostics.contentTotals.series }
+                : { total: 0, movies: 0, series: 0 };
               const isActive = provider.status === "active";
               const isPending = provider.status === "pending";
               const isInactive = provider.status === "inactive";

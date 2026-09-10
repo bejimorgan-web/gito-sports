@@ -160,6 +160,7 @@ CREATE TABLE IF NOT EXISTS channels (
   external_ref TEXT,
   group_name TEXT,
   url TEXT NOT NULL,
+  content_type TEXT NOT NULL DEFAULT 'live' CHECK (content_type IN ('live', 'movie', 'series')),
   status TEXT NOT NULL DEFAULT 'active',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
