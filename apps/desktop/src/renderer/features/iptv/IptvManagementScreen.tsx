@@ -5,6 +5,7 @@ import { IptvImportScreen } from "./IptvImportScreen";
 import { IptvOperationProgress } from "./IptvOperationProgress";
 import { IptvProvidersScreen } from "./IptvProvidersScreen";
 import { IptvChannelsScreen } from "./IptvChannelsScreen";
+import { IptvCatalogueScreen } from "./IptvCatalogueScreen";
 
 function getFriendlyErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
@@ -396,6 +397,13 @@ export function IptvManagementScreen({
         onProviderFilterChange={setChannelProviderFilter}
         onPageChange={loadChannelPage}
       />
+
+      {selectedProviderId ? <IptvCatalogueScreen providerId={selectedProviderId} /> : (
+        <section className="console-panel iptv-catalogue-empty">
+          <h3>IPTV Content Browser</h3>
+          <p className="field-note">Select a saved IPTV provider to browse its channel groups, movies, series, seasons, episodes, and guide data.</p>
+        </section>
+      )}
 
       {operation ? <IptvOperationProgress operation={operation} onCancel={async () => { await onCancelIptvOperation(operation.id); }} /> : null}
 

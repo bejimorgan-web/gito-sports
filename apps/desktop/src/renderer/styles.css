@@ -860,6 +860,138 @@ textarea {
   flex-wrap: wrap;
 }
 
+.iptv-catalogue-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.iptv-catalogue-counts button,
+.iptv-browser-groups button,
+.iptv-browser-items button {
+  border: 1px solid #253647;
+  border-radius: 8px;
+  color: #dce8f3;
+  background: #0d151f;
+  cursor: pointer;
+  text-align: left;
+}
+
+.iptv-catalogue-counts button {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+}
+
+.iptv-catalogue-counts button.active,
+.iptv-browser-items button.selected,
+.iptv-browser-groups button:hover,
+.iptv-browser-items button:hover {
+  border-color: #55d790;
+}
+
+.iptv-catalogue-counts strong {
+  font-size: 1.35rem;
+}
+
+.iptv-catalogue-counts span,
+.iptv-browser-items small,
+.iptv-browser-groups small,
+.iptv-guide-entry small {
+  color: #8fa1b3;
+  font-size: 0.72rem;
+}
+
+.iptv-browser-grid {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.7fr) minmax(240px, 1.3fr) minmax(240px, 1fr);
+  gap: 12px;
+  min-width: 0;
+}
+
+.iptv-browser-groups,
+.iptv-browser-items,
+.iptv-channel-guide {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  min-width: 0;
+  max-height: 520px;
+  overflow-y: auto;
+  padding: 10px;
+  border: 1px solid #253647;
+  border-radius: 8px;
+  background: #0a1119;
+}
+
+.iptv-browser-groups h4,
+.iptv-browser-items h4,
+.iptv-channel-guide h4 {
+  position: sticky;
+  top: -10px;
+  z-index: 1;
+  margin: -10px -10px 3px;
+  padding: 10px;
+  background: #0a1119;
+}
+
+.iptv-group-button,
+.iptv-browser-items button {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+}
+
+.iptv-browser-items button {
+  display: grid;
+  gap: 3px;
+}
+
+.iptv-guide-entry {
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  border-bottom: 1px solid #253647;
+}
+
+.iptv-guide-entry span,
+.iptv-channel-guide p {
+  color: #b8c7d5;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.iptv-channel-guide select {
+  min-height: 34px;
+}
+
+@media (max-width: 980px) {
+  .iptv-browser-grid {
+    grid-template-columns: minmax(130px, 0.8fr) minmax(200px, 1.2fr);
+  }
+
+  .iptv-channel-guide {
+    grid-column: 1 / -1;
+    max-height: 300px;
+  }
+}
+
+@media (max-width: 560px) {
+  .iptv-catalogue-counts,
+  .iptv-browser-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .iptv-browser-groups,
+  .iptv-browser-items,
+  .iptv-channel-guide {
+    max-height: 280px;
+  }
+}
+
 .dashboard-metric-card span {
   color: #8fa1b3;
   text-transform: uppercase;
