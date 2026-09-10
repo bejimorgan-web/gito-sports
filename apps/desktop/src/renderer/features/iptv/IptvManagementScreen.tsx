@@ -25,7 +25,7 @@ interface IptvManagementScreenProps {
   channelPage: PaginatedChannels<Channel>;
   onLoadChannelPage: (options: { page: number; q?: string; category?: string; providerId?: string }) => Promise<void>;
   providers: IPTVProvider[];
-  onCreateProvider: (input: CreateProviderRequest) => Promise<IPTVProvider>;
+  onCreateProvider: (input: CreateProviderRequest) => Promise<IPTVProvider & { syncOperationId?: string }>;
   onIngestM3u: (providerId: string, playlist: string) => Promise<void>;
   onUpdateProvider?: (providerId: string, input: Partial<CreateProviderRequest>) => Promise<void>;
   onDeleteProvider?: (providerId: string) => Promise<void>;
@@ -188,9 +188,10 @@ export function IptvManagementScreen({
         setStatusMessage("Provider updated.");
       } else {
         const createdProvider = await onCreateProvider(providerInput);
-        setStatusMessage("Provider created. Starting Xtream channel synchronization...");
-        if (createdProvider.type === "xtream") {
-          await startOperation("xtream_channel_sync", { providerId: createdProvider.id });
+        setStatusMessage(createdProvider.type === "xtream" ? "Provider created. Synchronizing Xtream catalogue..." : "Provider created.");
+        if (createdProvider.syncOperationId) {
+          const syncOperation = await onGetIptvOperation(createdProvider.syncOperationId);
+          setOperation(syncOperation);
         }
       }
     } catch (error) {

@@ -363,6 +363,26 @@ export function syncProviderChannels(providerId: string, channels: ParsedChannel
     }
   }
 
+  function redactSensitiveUrl(u: string | null | undefined) {
+    const normalized = normalizeUrl(u);
+    try {
+      const parsed = new URL(normalized);
+      const segments = parsed.pathname.split("/");
+      const liveIndex = segments.findIndex((segment) => segment.toLowerCase() === "live");
+      if (liveIndex >= 0 && segments.length > liveIndex + 2) {
+        segments[liveIndex + 1] = "[redacted]";
+        segments[liveIndex + 2] = "[redacted]";
+        parsed.pathname = segments.join("/");
+      }
+      for (const key of ["username", "user", "password", "pass", "token", "api_key"]) {
+        if (parsed.searchParams.has(key)) parsed.searchParams.set(key, "[redacted]");
+      }
+      return parsed.toString();
+    } catch {
+      return "[redacted-url]";
+    }
+  }
+
   function normalizeRef(r: string | null | undefined) {
     return r ? String(r).trim() : "";
   }
@@ -381,7 +401,7 @@ export function syncProviderChannels(providerId: string, channels: ParsedChannel
       reason,
       channel: {
         externalRef: channel.externalRef ?? null,
-        normalizedUrl: normalizeUrl(channel.url),
+        normalizedUrl: redactSensitiveUrl(channel.url),
         originalName: channel.name,
         groupName: channel.groupName ?? null
       }

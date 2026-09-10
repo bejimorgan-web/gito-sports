@@ -74,6 +74,14 @@ interface XtreamStream {
   category_id?: string;
 }
 
+function safeXtreamHost(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return "invalid-host";
+  }
+}
+
 export async function fetchWithTimeout(input: string | URL, init: RequestInit = {}, timeoutMs = 15_000) {
   const controller = new AbortController();
   const externalSignal = init.signal;
@@ -323,7 +331,10 @@ export async function fetchXtreamChannels(
   onInvalidStream?: (entry: XtreamParseError) => void,
   signal?: AbortSignal
 ): Promise<ParsedChannel[]> {
-  const endpointCandidates = buildXtreamEndpointCandidates(baseUrl);
+  const normalizedResult = normalizeXtreamUrl(baseUrl);
+  if (normalizedResult.error) throw new Error(normalizedResult.error);
+  const normalizedBaseUrl = normalizedResult.url;
+  const endpointCandidates = buildXtreamEndpointCandidates(normalizedBaseUrl);
   const categoryResponses = await Promise.allSettled(
     endpointCandidates.map((candidate) =>
       fetchTextWithTimeout(
@@ -373,8 +384,20 @@ export async function fetchXtreamChannels(
 
   const categories = JSON.parse(categoriesResponseData.text) as XtreamCategory[];
   const streams = JSON.parse(streamsResponseData.text) as XtreamStream[];
+  console.info("[iptv-validation] xtream_catalogue_received", {
+    host: safeXtreamHost(normalizedBaseUrl),
+    categoriesStatus: categoriesResponseData.response.status,
+    categoriesBytes: categoriesResponseData.text.length,
+    streamsStatus: streamsResponseData.response.status,
+    streamsBytes: streamsResponseData.text.length,
+    categoriesCount: Array.isArray(categories) ? categories.length : 0,
+    streamsCount: Array.isArray(streams) ? streams.length : 0
+  });
+  if (!Array.isArray(categories) || !Array.isArray(streams)) {
+    throw new Error("Xtream provider returned an invalid catalogue response.");
+  }
   const categoryNames = new Map(categories.map((category) => [category.category_id, category.category_name]));
-  const streamBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+  const streamBase = normalizedBaseUrl.endsWith("/") ? normalizedBaseUrl.slice(0, -1) : normalizedBaseUrl;
 
   return streams.flatMap((stream) => {
     if (!stream.stream_id || !stream.name) {

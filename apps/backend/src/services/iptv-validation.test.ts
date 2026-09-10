@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { validateHttpStreamUrl } from "./url-validation.js";
 import { parseM3uPlaylist } from "./m3u-parser.js";
-import { buildXtreamEndpointCandidates, normalizeXtreamUrl, readResponseTextWithTimeout, testXtreamConnection } from "./xtream-codes.js";
+import { buildXtreamEndpointCandidates, fetchXtreamChannels, normalizeXtreamUrl, readResponseTextWithTimeout, testXtreamConnection } from "./xtream-codes.js";
 import { detectProviderType } from "./provider-type-detector.js";
 import { createProvider, getProviderById, listProviders, softDeleteProvider, syncProviderChannels, setProviderStatus } from "../repositories/provider-repository.js";
 import { getDatabase } from "../db/connection.js";
@@ -74,6 +74,84 @@ test("does not wait indefinitely for a provider response body", async () => {
 
   await assert.rejects(() => readResponseTextWithTimeout(response, 10), /timed out/i);
   assert.ok(Date.now() - startedAt < 1000);
+});
+
+test("Xtream catalogue HTTP responses become normalized persisted channels", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: URL[] = [];
+  try {
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      requests.push(url);
+      assert.equal(url.searchParams.get("username"), "demo-user");
+      assert.equal(url.searchParams.get("password"), "demo-pass");
+
+      if (url.searchParams.get("action") === "get_live_categories") {
+        return new Response(JSON.stringify([{ category_id: "10", category_name: "Sports" }]), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+
+      if (url.searchParams.get("action") === "get_live_streams") {
+        return new Response(JSON.stringify([{ stream_id: 42, name: "Sports One", category_id: "10" }]), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        });
+      }
+
+      return new Response(JSON.stringify({ user_info: { auth: 1 } }), { status: 200 });
+    };
+
+    const channels = await fetchXtreamChannels("https://xtream.example:8080", "demo-user", "demo-pass");
+    assert.equal(channels.length, 1);
+    assert.deepEqual(channels[0], {
+      name: "Sports One",
+      externalRef: "42",
+      groupName: "Sports",
+      url: "https://xtream.example:8080/live/demo-user/demo-pass/42.m3u8"
+    });
+    assert.ok(requests.some((url) => url.searchParams.get("action") === "get_live_categories"));
+    assert.ok(requests.some((url) => url.searchParams.get("action") === "get_live_streams"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Xtream empty or malformed catalogue responses are explicit failures", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      if (url.searchParams.get("action") === "get_live_categories") {
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      return new Response(JSON.stringify([]), { status: 200 });
+    };
+    const emptyChannels = await fetchXtreamChannels("https://xtream.example", "user", "pass");
+    assert.deepEqual(emptyChannels, []);
+
+    globalThis.fetch = async () => new Response("not-json", { status: 200 });
+    await assert.rejects(() => fetchXtreamChannels("https://xtream.example", "user", "pass"), /invalid|Unexpected token/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Xtream sync removes player_api.php from the normalized playback base", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      if (url.searchParams.get("action") === "get_live_categories") return new Response("[]", { status: 200 });
+      return new Response(JSON.stringify([{ stream_id: 7, name: "Channel" }]), { status: 200 });
+    };
+
+    const channels = await fetchXtreamChannels("https://xtream.example:8080/player_api.php", "user", "pass");
+    assert.equal(channels[0]?.url, "https://xtream.example:8080/live/user/pass/7.m3u8");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("parses m3u entries that include the stream URL inline", () => {

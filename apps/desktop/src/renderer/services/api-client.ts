@@ -187,7 +187,7 @@ export const apiClient = {
     return request<IPTVProvider[]>("/iptv/providers");
   },
   createProvider(input: CreateProviderRequest) {
-    return request<IPTVProvider>("/iptv/providers", {
+    return request<IPTVProvider & { syncOperationId?: string }>("/iptv/providers", {
       method: "POST",
       body: JSON.stringify(input)
     });

@@ -181,6 +181,56 @@ async function persistValidatedProvider(
   return true;
 }
 
+function startXtreamSyncOperation(providerId: string) {
+  return IptvOperationManager.start("xtream_channel_sync", async (state, report, signal) => {
+    try {
+      const provider = IPTVService.getProviderCredentials(providerId);
+      if (!provider) throw new Error("provider_not_found");
+      const username = provider.credential_username;
+      const password = provider.credential_password;
+      const normalizedServerUrl = normalizeXtreamUrl(provider.base_url);
+      if (normalizedServerUrl.error) throw new Error(normalizedServerUrl.error);
+      const serverUrl = normalizedServerUrl.url;
+      if (!username || !password || !serverUrl) throw new Error("stored_xtream_credentials_required");
+
+      report({ currentStage: "authenticating", currentMessage: "Checking Xtream credentials." });
+      const connection = await testXtreamConnection(serverUrl, username, password, signal);
+      if (!connection.ok) throw new Error(connection.message);
+
+      report({ currentStage: "discovering_channels", currentMessage: "Loading Xtream categories and live streams." });
+      const invalidEntries: XtreamParseError[] = [];
+      const parsed = await fetchXtreamChannels(serverUrl, username, password, (entry) => invalidEntries.push(entry), signal);
+      const valid = parsed.filter((channel) => !validateHttpStreamUrl(channel.url));
+      report({
+        total: parsed.length,
+        processed: parsed.length,
+        succeeded: valid.length,
+        failed: invalidEntries.length,
+        currentStage: "saving_channels",
+        currentMessage: `${parsed.length} channels discovered.`
+      });
+
+      if (state.cancelled) return;
+      if (valid.length === 0) {
+        IPTVService.setProviderStatus(providerId, "failed");
+        throw new Error("Xtream sync completed with zero usable channels.");
+      }
+
+      const saved = IPTVService.syncProviderChannels(providerId, valid);
+      IPTVService.setProviderStatus(providerId, "active");
+      report({
+        processed: parsed.length,
+        succeeded: saved.length,
+        currentStage: "completed",
+        currentMessage: `${saved.length} channels saved. Provider activated.`
+      });
+    } catch (error) {
+      IPTVService.setProviderStatus(providerId, "failed");
+      throw error;
+    }
+  });
+}
+
 export const iptvRouter = Router();
 
 iptvRouter.get("/providers", (_request, response) => {
@@ -222,6 +272,7 @@ iptvRouter.post("/providers", async (request, response) => {
   const detectedType = (validation as { detectedType?: string } | undefined)?.detectedType ?? resolvedInput.type ?? "manual";
   const providerInput = {
     ...resolvedInput,
+    ...(detectedType === "xtream" ? { baseUrl: normalizeXtreamUrl(resolvedInput.baseUrl).url } : {}),
     type: detectedType as CreateProviderRequest["type"]
   };
 
@@ -248,7 +299,12 @@ iptvRouter.post("/providers", async (request, response) => {
     }
   }
 
-  response.status(201).json({ data: persistedProvider });
+  const syncOperation = detectedType === "xtream" && persistedProvider
+    ? startXtreamSyncOperation(persistedProvider.id)
+    : undefined;
+  response.status(201).json({
+    data: persistedProvider ? { ...persistedProvider, ...(syncOperation ? { syncOperationId: syncOperation.id } : {}) } : persistedProvider
+  });
 });
 
 iptvRouter.put("/providers/:providerId", async (request, response) => {
@@ -418,6 +474,12 @@ iptvRouter.post("/operations", async (request, response) => {
   }
   if (type === "xtream_channel_sync" && !body.providerId) {
     response.status(400).json({ error: "provider_id_required" });
+    return;
+  }
+
+  if (type === "xtream_channel_sync") {
+    const operation = startXtreamSyncOperation(body.providerId!);
+    response.status(202).json({ data: operation });
     return;
   }
 
