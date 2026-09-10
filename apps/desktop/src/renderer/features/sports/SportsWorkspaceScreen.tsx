@@ -71,6 +71,7 @@ function EntityHeroCard({
   name,
   logoUrl,
   detail,
+  size,
   selected,
   onClick,
   onDoubleClick,
@@ -80,6 +81,7 @@ function EntityHeroCard({
   name: string;
   logoUrl?: string | undefined;
   detail: string;
+  size: "sport" | "host" | "competition" | "team";
   selected?: boolean;
   onClick?: () => void;
   onDoubleClick?: () => void;
@@ -90,7 +92,7 @@ function EntityHeroCard({
 
   return (
     <article
-      className={`entity-hero-card ${selected ? "selected" : ""}`}
+      className={`entity-hero-card entity-hero-card-${size} ${selected ? "selected" : ""}`}
       tabIndex={0}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
@@ -705,6 +707,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
               name={sport.name}
               logoUrl={sport.logoUrl}
               detail={`${hosts.filter((host) => host.sportId === sport.id).length} host${hosts.filter((host) => host.sportId === sport.id).length === 1 ? "" : "s"} assigned`}
+              size="sport"
               selected={selectedSport?.id === sport.id}
               onClick={() => setSelectedSport(sport)}
               onDoubleClick={() => openSportEditor(sport)}
@@ -770,6 +773,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                       name={host.name}
                       logoUrl={host.logoUrl}
                       detail={`${host.type}${host.countryId ? ` · ${countries.find((country) => country.id === host.countryId)?.name ?? ""}` : ""}`}
+                      size="host"
                       onDoubleClick={() => openHostEditor(host)}
                       onDelete={() => queueDelete("host", host.id, host.name)}
                       deleteDisabled={isCatalogView || Boolean(hostActionId)}
@@ -794,6 +798,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                       name={competition.name}
                       logoUrl={competition.logoUrl}
                       detail={`${competition.type} · ${competition.participantType === "clubs" ? "Clubs" : "National Teams"}`}
+                      size="competition"
                       onDoubleClick={() => openCompetitionEditor(competition)}
                       onDelete={() => queueDelete("competition", competition.id, competition.name)}
                       deleteDisabled={isCatalogView}
@@ -824,6 +829,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                       name={team.name}
                       logoUrl={team.logoUrl}
                       detail={team.shortName ?? "Club"}
+                      size="team"
                       onDoubleClick={() => openTeamEditor(team)}
                       onDelete={() => queueDelete("team", team.id, team.name)}
                       deleteDisabled={isCatalogView}
@@ -850,6 +856,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                       name={team.name}
                       logoUrl={team.logoUrl}
                       detail={team.countryId ? countries.find((country) => country.id === team.countryId)?.name ?? "National Team" : "National Team"}
+                      size="team"
                       onDoubleClick={() => openTeamEditor(team)}
                       onDelete={() => queueDelete("team", team.id, team.name)}
                       deleteDisabled={isCatalogView}
