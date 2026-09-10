@@ -791,6 +791,8 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                 <button type="button" onClick={() => openCompetitionEditor()} disabled={isCatalogView}>
                   Add Competition
                 </button>
+              </div>
+              <div className="entity-list">
                 {sportCompetitions.length > 0 ? (
                   sportCompetitions.map((competition) => (
                     <EntityHeroCard

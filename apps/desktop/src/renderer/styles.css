@@ -510,11 +510,11 @@ textarea {
 }
 
 .entity-list:has(.entity-hero-card-host) {
-  grid-template-columns: repeat(auto-fill, minmax(140px, 160px));
+  grid-template-columns: repeat(auto-fill, minmax(132px, 152px));
 }
 
 .entity-list:has(.entity-hero-card-competition) {
-  grid-template-columns: repeat(auto-fill, minmax(140px, 160px));
+  grid-template-columns: repeat(auto-fill, minmax(132px, 152px));
 }
 
 .entity-list:has(.entity-hero-card-team) {
