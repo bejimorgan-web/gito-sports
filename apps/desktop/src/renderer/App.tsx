@@ -460,9 +460,6 @@ export function App() {
   }, [liveMode, refreshOperations]);
 
   const createProvider = useCallback(async (input: Parameters<typeof apiClient.createProvider>[0]) => {
-    if (backendStatus !== "online") {
-      throw new Error("backend_offline");
-    }
     const provider = await apiClient.createProvider(input);
     setPreferredProviderId(provider.id);
     setProviders([]);
@@ -473,8 +470,6 @@ export function App() {
   }, [backendStatus, refreshOperations]);
 
   const updateProvider = useCallback(async (providerId: string, input: Partial<Parameters<typeof apiClient.createProvider>[0]>) => {
-    if (backendStatus !== "online") return;
-
     await apiClient.updateProvider(providerId, input);
     setPreferredProviderId(providerId);
     setChannels([]);
@@ -485,8 +480,6 @@ export function App() {
   }, [backendStatus, refreshOperations]);
 
   const deleteProvider = useCallback(async (providerId: string) => {
-    if (backendStatus !== "online") return;
-
     await apiClient.deleteProvider(providerId);
 
     const currentSelectedChannel = selectedChannelRef.current;
@@ -498,26 +491,16 @@ export function App() {
   }, [backendStatus, refreshOperations, clearPreviewState]);
 
   const ingestM3u = useCallback(async (providerId: string, playlist: string) => {
-    if (backendStatus !== "online") {
-      return;
-    }
-
     await apiClient.ingestM3u(providerId, playlist);
     await refreshOperations("full");
   }, [backendStatus, refreshOperations]);
 
   const syncXtream = useCallback(async (providerId: string) => {
-    if (backendStatus !== "online") {
-      return;
-    }
-
     await apiClient.syncXtream(providerId);
     await refreshOperations("full");
   }, [backendStatus, refreshOperations]);
 
   const setProviderStatus = useCallback(async (providerId: string, status: string) => {
-    if (backendStatus !== "online") return;
-
     await apiClient.setProviderStatus(providerId, status);
     if (status === "active") {
       setPreferredProviderId(providerId);

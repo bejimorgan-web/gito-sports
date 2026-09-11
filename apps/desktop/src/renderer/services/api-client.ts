@@ -88,27 +88,38 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers["content-type"] = "application/json";
   }
 
-  let response: Response;
-  const controller = new AbortController();
-  const abortFromCaller = () => controller.abort();
-  init?.signal?.addEventListener("abort", abortFromCaller, { once: true });
-  const timeout = globalThis.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      ...init,
-      cache: "no-store",
-      headers,
-      signal: controller.signal
-    });
-  } catch (fetchError) {
-    if (controller.signal.aborted) {
+  const canRetry = !init?.method || init.method.toUpperCase() === "GET";
+  let response: Response | undefined;
+  let lastNetworkError: unknown;
+  for (let attempt = 0; attempt < (canRetry ? 3 : 1); attempt += 1) {
+    const controller = new AbortController();
+    const abortFromCaller = () => controller.abort();
+    init?.signal?.addEventListener("abort", abortFromCaller, { once: true });
+    const timeout = globalThis.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      response = await fetch(`${API_BASE_URL}${path}`, {
+        ...init,
+        cache: "no-store",
+        headers,
+        signal: controller.signal
+      });
+      if (response.ok || !canRetry || ![502, 503, 504].includes(response.status) || attempt === 2) break;
+    } catch (fetchError) {
+      lastNetworkError = fetchError;
+      if (!canRetry || attempt === 2 || controller.signal.aborted) break;
+    } finally {
+      globalThis.clearTimeout(timeout);
+      init?.signal?.removeEventListener("abort", abortFromCaller);
+    }
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 500 * (attempt + 1)));
+  }
+
+  if (!response) {
+    if (lastNetworkError && String(lastNetworkError).toLowerCase().includes("abort")) {
       throw new Error(`Request to ${path} timed out. Retry the validation.`);
     }
-    const message = fetchError instanceof Error ? fetchError.message : String(fetchError);
+    const message = lastNetworkError instanceof Error ? lastNetworkError.message : String(lastNetworkError ?? "unknown network error");
     throw new Error(`Network request to ${API_BASE_URL}${path} failed: ${message}`);
-  } finally {
-    globalThis.clearTimeout(timeout);
-    init?.signal?.removeEventListener("abort", abortFromCaller);
   }
 
   if (!response.ok) {
