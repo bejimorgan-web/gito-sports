@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { protectedRoute } from "../middleware/protected.js";
 import type { CreateProviderRequest } from "@gito/shared";
 import { IPTVService } from "../services/iptv-service.js";
 import { parseM3uPlaylist, M3uParseError } from "../services/m3u-parser.js";
@@ -23,6 +24,7 @@ import {
   syncXtreamSeriesDetailed,
   syncXtreamSeasonsDetailed,
   syncXtreamEpisodesDetailed,
+  getXtreamCatalogueTotals,
   type CatalogueListOptions,
   type IptvCategoryContentType
 } from "../repositories/iptv-catalogue-repository.js";
@@ -281,13 +283,18 @@ function startXtreamSyncOperation(providerId: string) {
       const saved = IPTVService.syncProviderChannels(providerId, valid);
       report({ currentStage: "syncing_catalogue", currentMessage: "Loading movies, series, seasons, and episodes." });
       const catalogue = await fetchXtreamCatalogue(serverUrl, username, password, signal);
+      if (signal.aborted || state.cancelled) return;
       syncXtreamCategories(providerId, "movie", catalogue.movieCategories);
       syncXtreamCategories(providerId, "series", catalogue.seriesCategories);
+      report({ currentStage: "saving_movies", total: catalogue.movies.length, processed: 0, currentMessage: `${catalogue.movies.length} movies discovered.` });
       const movieStats = syncXtreamMoviesDetailed(providerId, catalogue.movies);
+      report({ currentStage: "saving_series", total: catalogue.series.length, processed: 0, currentMessage: `${catalogue.series.length} series discovered.` });
       const seriesStats = syncXtreamSeriesDetailed(providerId, catalogue.series);
+      report({ currentStage: "saving_seasons", total: catalogue.seasons.length, processed: 0, currentMessage: `${catalogue.seasons.length} seasons discovered.` });
       const seasonStats = syncXtreamSeasonsDetailed(providerId, catalogue.seasons);
       let episodeStats = { fetched: 0, processed: 0, inserted: 0, updated: 0, unchanged: 0, failed: 0, archived: 0 };
       for (const seriesEpisodes of catalogue.episodes) {
+        if (signal.aborted || state.cancelled) return;
         const result = syncXtreamEpisodesDetailed(providerId, seriesEpisodes.seriesExternalId, seriesEpisodes.records);
         episodeStats = {
           fetched: episodeStats.fetched + result.fetched,
@@ -299,18 +306,22 @@ function startXtreamSyncOperation(providerId: string) {
           archived: episodeStats.archived + result.archived
         };
       }
+      report({ currentStage: "diagnostics", currentMessage: "Calculating canonical catalogue totals." });
+      const totals = getXtreamCatalogueTotals(providerId);
       IPTVService.updateProviderHealth({ providerId, success: true, impact: "success" });
+      IPTVService.setProviderStatus(providerId, "active");
       report({
         processed: live.channels.length + movieStats.processed + seriesStats.processed + seasonStats.processed + episodeStats.processed,
         succeeded: saved.length,
+        currentMessage: `${totals.movies} movies, ${totals.series} series, and ${totals.episodes} episodes are active.`,
         currentStage: "completed",
-        currentMessage: `${saved.length} channels, ${movieStats.processed} movies, and ${seriesStats.processed} series synchronized. Provider activated.`
+        total: live.channels.length + totals.movies + totals.series + totals.episodes
       });
     } catch (error) {
       IPTVService.updateProviderHealth({ providerId, success: false, impact: "failure" });
       throw error;
     }
-  });
+  }, undefined, 10 * 60 * 1000);
 }
 
 export const iptvRouter = Router();
@@ -445,7 +456,8 @@ iptvRouter.put("/providers/:providerId", async (request, response) => {
     throw error;
   }
 
-  response.json({ data: persistedUpdated });
+  const syncOperation = detectedType === "xtream" ? startXtreamSyncOperation(persistedUpdated.id) : undefined;
+  response.json({ data: { ...persistedUpdated, ...(syncOperation ? { syncOperationId: syncOperation.id } : {}) } });
 });
 
 iptvRouter.delete("/providers/:providerId", (request, response) => {
@@ -833,61 +845,8 @@ iptvRouter.post("/providers/:providerId/xtream/sync", async (request, response) 
     return;
   }
 
-  const username = (provider as any).credential_username ?? (provider as any).username ?? null;
-  const password = (provider as any).credential_password ?? (provider as any).password ?? null;
-  const serverUrl = (provider as any).server_url ?? (provider as any).base_url ?? (provider as any).baseUrl ?? null;
-
-  if (!username || !password) {
-    response.status(400).json({ error: "stored_xtream_credentials_required" });
-    return;
-  }
-
-  if (!serverUrl) {
-    response.status(400).json({ error: "stored_xtream_server_url_required" });
-    return;
-  }
-
-  const invalidEntries: XtreamParseError[] = [];
-  const parsedChannels = await fetchXtreamChannels(
-    serverUrl,
-    username,
-    password,
-    (entry) => invalidEntries.push(entry)
-  );
-
-  for (const invalid of invalidEntries) {
-    logChannelSyncTrace({
-      providerId: request.params.providerId,
-      providerMode: (provider as any).syncMode ?? (provider as any).sync_mode ?? "partial",
-      syncPhase: "parse",
-      action: "reject",
-      reason: invalid.reason,
-      payload: invalid
-    });
-  }
-  const validChannels: typeof parsedChannels = [];
-  const invalidChannels: { name: string; url: string; error: string }[] = [];
-
-  for (const ch of parsedChannels) {
-    const error = validateHttpStreamUrl(ch.url);
-    if (error) {
-      invalidChannels.push({ name: ch.name, url: ch.url, error });
-    } else {
-      validChannels.push(ch);
-    }
-  }
-
-  const channels = validChannels.length > 0 ? IPTVService.syncProviderChannels(request.params.providerId, validChannels) : [];
-
-  response.status(201).json({
-    data: {
-      channelsCreated: channels.length,
-      channelsParsed: parsedChannels.length,
-      channelsRejected: invalidChannels.length,
-      categories: Array.from(new Set(channels.map((channel) => (channel as any).category).filter(Boolean))),
-      rejectedChannels: invalidChannels.slice(0, 10)
-    }
-  });
+  const operation = startXtreamSyncOperation(request.params.providerId);
+  response.status(202).json({ data: operation });
 });
 
 // IPTV parity diagnostic endpoint: compares external expectations vs GiTO storage
@@ -903,7 +862,7 @@ iptvRouter.get("/parity/:providerId", (request, response) => {
 });
 
 // Phase 3: Catalogue API endpoints (public access, no authentication required)
-iptvRouter.get("/providers/:providerId/categories", (request, response) => {
+iptvRouter.get("/providers/:providerId/categories", protectedRoute, (request, response) => {
   const providerId = request.params.providerId;
   if (!providerId || !requireProvider(providerId, response)) return;
   const contentType = parseContentType(request.query.contentType);
@@ -916,7 +875,7 @@ iptvRouter.get("/providers/:providerId/categories", (request, response) => {
   response.json({ data: listIptvCategoriesPage(providerId, contentType, options) });
 });
 
-iptvRouter.get("/providers/:providerId/channels", (request, response) => {
+iptvRouter.get("/providers/:providerId/channels", protectedRoute, (request, response) => {
   const providerId = request.params.providerId;
   if (!providerId || !requireProvider(providerId, response)) return;
   const options = parseCatalogueQuery(request, response);
@@ -924,7 +883,7 @@ iptvRouter.get("/providers/:providerId/channels", (request, response) => {
   response.json({ data: listIptvChannelsPage(providerId, options) });
 });
 
-iptvRouter.get("/providers/:providerId/movies", (request, response) => {
+iptvRouter.get("/providers/:providerId/movies", protectedRoute, (request, response) => {
   const providerId = request.params.providerId;
   if (!providerId || !requireProvider(providerId, response)) return;
   const options = parseCatalogueQuery(request, response);
@@ -932,7 +891,7 @@ iptvRouter.get("/providers/:providerId/movies", (request, response) => {
   response.json({ data: listIptvMoviesPage(providerId, options) });
 });
 
-iptvRouter.get("/providers/:providerId/movies/:movieId", (request, response) => {
+iptvRouter.get("/providers/:providerId/movies/:movieId", protectedRoute, (request, response) => {
   const providerId = request.params.providerId;
   const movieId = request.params.movieId;
   if (!providerId || !movieId || !requireProvider(providerId, response)) return;
@@ -944,7 +903,7 @@ iptvRouter.get("/providers/:providerId/movies/:movieId", (request, response) => 
   response.json({ data: movie });
 });
 
-iptvRouter.get("/providers/:providerId/series", (request, response) => {
+iptvRouter.get("/providers/:providerId/series", protectedRoute, (request, response) => {
   const providerId = request.params.providerId;
   if (!providerId || !requireProvider(providerId, response)) return;
   const options = parseCatalogueQuery(request, response);
@@ -952,7 +911,7 @@ iptvRouter.get("/providers/:providerId/series", (request, response) => {
   response.json({ data: listIptvSeriesPage(providerId, options) });
 });
 
-iptvRouter.get("/providers/:providerId/series/:seriesId", (request, response) => {
+iptvRouter.get("/providers/:providerId/series/:seriesId", protectedRoute, (request, response) => {
   const providerId = request.params.providerId;
   const seriesId = request.params.seriesId;
   if (!providerId || !seriesId || !requireProvider(providerId, response)) return;
@@ -964,7 +923,7 @@ iptvRouter.get("/providers/:providerId/series/:seriesId", (request, response) =>
   response.json({ data: series });
 });
 
-iptvRouter.get("/providers/:providerId/series/:seriesId/seasons", (request, response) => {
+iptvRouter.get("/providers/:providerId/series/:seriesId/seasons", protectedRoute, (request, response) => {
   const providerId = request.params.providerId;
   const seriesId = request.params.seriesId;
   if (!providerId || !seriesId || !requireProvider(providerId, response)) return;
@@ -975,7 +934,7 @@ iptvRouter.get("/providers/:providerId/series/:seriesId/seasons", (request, resp
   response.json({ data: listIptvSeasonsPage(providerId, seriesId) });
 });
 
-iptvRouter.get("/providers/:providerId/seasons/:seasonId/episodes", (request, response) => {
+iptvRouter.get("/providers/:providerId/seasons/:seasonId/episodes", protectedRoute, (request, response) => {
   const providerId = request.params.providerId;
   const seasonId = request.params.seasonId;
   if (!providerId || !seasonId || !requireProvider(providerId, response)) return;
@@ -1010,6 +969,13 @@ iptvRouter.get("/providers/:providerId/epg/programmes", (request, response) => {
   if (request.query.upcoming !== undefined && request.query.upcoming !== "true" && request.query.upcoming !== "false") {
     response.status(400).json({ error: "invalid_upcoming_filter" });
     return;
+  }
+  for (const field of ["from", "to"] as const) {
+    const value = request.query[field];
+    if (value !== undefined && (typeof value !== "string" || !Number.isFinite(Date.parse(value)))) {
+      response.status(400).json({ error: `invalid_${field}_time` });
+      return;
+    }
   }
   response.json({
     data: listIptvEpgProgrammesPage(providerId, {

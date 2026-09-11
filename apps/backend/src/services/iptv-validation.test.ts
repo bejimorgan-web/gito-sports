@@ -108,6 +108,7 @@ test("Xtream catalogue HTTP responses become normalized persisted channels", asy
     assert.deepEqual(channels[0], {
       name: "Sports One",
       externalRef: "42",
+      categoryId: "10",
       groupName: "Sports",
       url: "https://xtream.example:8080/live/demo-user/demo-pass/42.m3u8"
     });

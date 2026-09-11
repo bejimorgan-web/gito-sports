@@ -74,6 +74,7 @@ interface XtreamStream {
   stream_id?: string | number;
   category_id?: string | number;
   container_extension?: string;
+  stream_icon?: string;
 }
 
 function unwrapXtreamArray<T>(payload: unknown, key: string): T[] | null {
@@ -514,6 +515,16 @@ export async function fetchXtreamChannels(
     )
   );
 
+  const hasInvalidJsonResponse = [...categoryResponses, ...streamsResponses].some((result) => {
+    if (result.status !== "fulfilled" || !result.value.response.ok || !result.value.text.trim()) return false;
+    try {
+      JSON.parse(result.value.text);
+      return false;
+    } catch {
+      return true;
+    }
+  });
+
   const categoriesResponse = categoryResponses.find((result) => {
     if (result.status !== "fulfilled" || !result.value.response.ok) return false;
     try { return unwrapXtreamArray(result.value.text.trim() ? JSON.parse(result.value.text) : null, "categories") !== null; } catch { return false; }
@@ -524,7 +535,7 @@ export async function fetchXtreamChannels(
   });
 
   if (!categoriesResponse || !streamsResponse) {
-    throw new Error("Xtream channel extraction failed.");
+    throw new Error(hasInvalidJsonResponse ? "Xtream invalid channel response." : "Xtream channel extraction failed.");
   }
 
   const resolvedCategoriesResponse = categoriesResponse.status === "fulfilled" ? categoriesResponse.value : null;
@@ -578,6 +589,10 @@ export async function fetchXtreamChannels(
       categoryId: stream.category_id === undefined ? undefined : String(stream.category_id),
       url: `${streamBase}/live/${encodeURIComponent(username)}/${encodeURIComponent(password)}/${encodeURIComponent(streamId)}.${extension}`
     };
+
+    if (stream.stream_icon) {
+      channel.logoUrl = stream.stream_icon;
+    }
 
     if (groupName) {
       channel.groupName = groupName;
