@@ -1,3 +1,4 @@
+import { IptvCatalogueScreen, type CataloguePreviewMetadata } from "./features/iptv/IptvCatalogueScreen";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { resolveEventState } from "@gito/shared";
@@ -9,7 +10,6 @@ import { BroadcastConsoleScreen, type ContentTypeOption } from "./features/broad
 import { DashboardShell } from "./features/dashboard/DashboardShell";
 import { MatchSchedulerScreen } from "./features/matches/MatchSchedulerScreen";
 import { IptvManagementScreen } from "./features/iptv/IptvManagementScreen";
-import { IptvCatalogueScreen } from "./features/iptv/IptvCatalogueScreen";
 import { SportsWorkspaceScreen } from "./features/sports/SportsWorkspaceScreen";
 import { StreamPreviewPanel } from "./features/preview/StreamPreviewPanel";
 import { AnalyticsOverviewScreen } from "./features/analytics/AnalyticsOverviewScreen";
@@ -70,6 +70,7 @@ function renderScreen(
     channelProviderFilter: string;
     channelContentType: "all" | "live" | "movies" | "series";
     matchAssignmentCatalogueContext: { providerId: string; contentType: ContentTypeOption; favoriteChannelIds: string[] };
+    cataloguePreviewMetadata: CataloguePreviewMetadata;
   },
   actions: {
     approveStream: (streamId: string) => Promise<void>;
@@ -85,6 +86,7 @@ function renderScreen(
     clearAssignment: () => void;
     setLiveMode: (enabled: boolean) => void;
     setMatchAssignmentCatalogueContext: (context: { providerId: string; contentType: ContentTypeOption; favoriteChannelIds: string[] }) => void;
+    setCataloguePreviewMetadata: (metadata: CataloguePreviewMetadata) => void;
     reassignStream: (streamId: string, channelId: string) => Promise<void>;
     deleteStream: (streamId: string) => Promise<void>;
     syncXtream: Parameters<typeof IptvManagementScreen>[0]["onSyncXtream"];
@@ -146,6 +148,7 @@ function renderScreen(
             onOpenMatch={actions.openMatch}
             showLegacyChannelBrowser={false}
             onCatalogueContextChange={actions.setMatchAssignmentCatalogueContext}
+            cataloguePreviewMetadata={state.cataloguePreviewMetadata}
             catalogueBrowser={state.preferredProviderId || state.providers.find((provider) => provider.status === "active")?.id ? (
               <IptvCatalogueScreen
                 providerId={state.matchAssignmentCatalogueContext.providerId || state.preferredProviderId || state.providers.find((provider) => provider.status === "active")!.id}
@@ -153,6 +156,7 @@ function renderScreen(
                 favoriteChannelIds={state.matchAssignmentCatalogueContext.favoriteChannelIds}
                 showContentTypeCounts={false}
                 onSelectChannel={actions.selectChannel}
+                onPreviewMetadataChange={actions.setCataloguePreviewMetadata}
               />
             ) : (
               <section className="console-panel">
@@ -272,6 +276,7 @@ export function App() {
     contentType: ContentTypeOption;
     favoriteChannelIds: string[];
   }>({ providerId: "", contentType: "live", favoriteChannelIds: [] });
+    const [cataloguePreviewMetadata, setCataloguePreviewMetadata] = useState<CataloguePreviewMetadata>({ guide: [] });
   const [selectedMatchId, setSelectedMatchId] = useState<string | undefined>(undefined);
   const [liveMode, setLiveMode] = useState(false);
   const [channelSearch, setChannelSearch] = useState("");
@@ -744,6 +749,7 @@ export function App() {
         reportStreamHealth,
         setLiveMode,
         setMatchAssignmentCatalogueContext,
+        setCataloguePreviewMetadata,
         selectChannel,
         setChannelSearch,
         setChannelCategory,
@@ -775,6 +781,7 @@ export function App() {
         reportStreamHealth,
         setLiveMode,
         setMatchAssignmentCatalogueContext,
+        setCataloguePreviewMetadata,
         selectChannel,
         setChannelSearch,
         setChannelCategory,
@@ -801,6 +808,7 @@ export function App() {
       providerDiagnostics,
       selectedChannel,
       preferredProviderId,
+      cataloguePreviewMetadata,
       liveMode,
       channelSearch,
       channelCategory,

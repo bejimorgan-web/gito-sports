@@ -41,6 +41,7 @@ interface BroadcastConsoleScreenProps {
   onOpenMatch?: (matchId?: string) => void;
   onCatalogueContextChange?: (context: { providerId: string; contentType: ContentTypeOption; favoriteChannelIds: string[] }) => void;
   catalogueBrowser?: ReactNode;
+    cataloguePreviewMetadata?: { title?: string; description?: string | null; guide: Array<{ title: string; description?: string | null; startAt?: string | null }> };
   showLegacyChannelBrowser?: boolean;
 }
 
@@ -308,6 +309,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
   onOpenMatch,
   onCatalogueContextChange,
   catalogueBrowser,
+    cataloguePreviewMetadata,
   showLegacyChannelBrowser = true
 }: BroadcastConsoleScreenProps) {
   const [selectedSportId, setSelectedSportId] = useState<string>("");
@@ -533,7 +535,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
   );
 
   const previewChannelMetadata = useMemo(() => {
-    return getGuideMetadataCopy({
+    const fallback = getGuideMetadataCopy({
       channel: selectedChannel,
       provider: selectedProvider,
       contentType: selectedContentType,
@@ -541,7 +543,15 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
       groupChannels: selectedGroupChannels,
       providerDiagnostics
     });
-  }, [providerDiagnostics, selectedChannel, selectedContentType, selectedProvider, selectedGroup, selectedGroupChannels]);
+    return {
+      ...fallback,
+      ...(cataloguePreviewMetadata?.title ? { title: cataloguePreviewMetadata.title } : {}),
+      ...(cataloguePreviewMetadata?.description !== undefined ? { description: cataloguePreviewMetadata.description || fallback.description } : {}),
+      ...(cataloguePreviewMetadata?.guide.length ? {
+        upcoming: cataloguePreviewMetadata.guide.map((programme) => `${programme.title}${programme.startAt ? ` · ${new Date(programme.startAt).toLocaleString()}` : ""}`)
+      } : {})
+    };
+  }, [cataloguePreviewMetadata, providerDiagnostics, selectedChannel, selectedContentType, selectedProvider, selectedGroup, selectedGroupChannels]);
 
   useEffect(() => {
     if (!showLegacyChannelBrowser) {

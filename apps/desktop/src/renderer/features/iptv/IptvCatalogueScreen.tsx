@@ -1,3 +1,4 @@
+export type CataloguePreviewMetadata = { title?: string; description?: string | null; guide: GuideProgramme[] };
 import { useEffect, useMemo, useState } from "react";
 import type { Channel } from "@gito/shared";
 import { apiClient } from "../../services/api-client";
@@ -8,6 +9,7 @@ interface Props {
   contentType?: "live" | "movies" | "series" | "favorites";
   favoriteChannelIds?: string[];
   showContentTypeCounts?: boolean;
+  onPreviewMetadataChange?: (metadata: CataloguePreviewMetadata) => void;
 }
 type Category = { id: string; name: string; slug?: string | null };
 type Item = { id: string; title: string; description?: string | null; categoryId?: string | null; category?: { name: string } | null; posterUrl?: string | null; playbackReference?: string | null };
@@ -32,7 +34,7 @@ function toPreviewChannel(item: { id: string; providerId?: string; title?: strin
   };
 }
 
-export function IptvCatalogueScreen({ providerId, onSelectChannel, contentType: requestedContentType = "live", favoriteChannelIds = [], showContentTypeCounts = true }: Props) {
+export function IptvCatalogueScreen({ providerId, onSelectChannel, contentType: requestedContentType = "live", favoriteChannelIds = [], showContentTypeCounts = true, onPreviewMetadataChange }: Props) {
   const [liveCategories, setLiveCategories] = useState<Category[]>([]);
   const [movieCategories, setMovieCategories] = useState<Category[]>([]);
   const [seriesCategories, setSeriesCategories] = useState<Category[]>([]);
@@ -104,7 +106,8 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel, contentType: 
     setEpisodes([]);
     setGuide([]);
     setGuideStatus("Select a channel or movie.");
-  }, [contentType, providerId]);
+    onPreviewMetadataChange?.({ guide: [] });
+  }, [contentType, onPreviewMetadataChange, providerId]);
 
   useEffect(() => {
     if (contentType !== "series" || !selectedItem || !("title" in selectedItem)) return;
@@ -129,17 +132,27 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel, contentType: 
     }
     setGuideStatus("Loading EPG...");
     void apiClient.listIptvEpgChannels(providerId).then(async (channels) => {
-      const channel = channels.items.find((item) => item.name === selectedItem.name || item.channelId === selectedItem.id);
+      const channel = channels.items.find((item) =>
+        item.name === selectedItem.name ||
+        item.channelId === selectedItem.id ||
+        item.channelExternalRef === ("externalRef" in selectedItem ? selectedItem.externalRef : undefined)
+      );
       if (!channel) {
         setGuide([]);
         setGuideStatus("No EPG data for this channel.");
+        onPreviewMetadataChange?.({ title: selectedItem.name, guide: [] });
         return;
       }
       const programmes = await apiClient.listIptvEpgProgrammes(providerId, channel.id, false, true);
       setGuide(programmes.items);
+      onPreviewMetadataChange?.({ title: selectedItem.name, guide: programmes.items });
       setGuideStatus(programmes.items.length ? "Upcoming programmes" : "No upcoming programmes.");
-    }).catch(() => setGuideStatus("Unable to load EPG."));
-  }, [contentType, providerId, selectedItem]);
+    }).catch(() => {
+      setGuide([]);
+      setGuideStatus("Unable to load EPG.");
+      onPreviewMetadataChange?.({ title: selectedItem.name, guide: [] });
+    });
+  }, [contentType, onPreviewMetadataChange, providerId, selectedItem]);
 
   const groups = (categories: Category[], items: Item[]) => categories.map((category) => ({
     ...category,
@@ -233,6 +246,8 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel, contentType: 
               if (contentType === "live" && "url" in item) onSelectChannel(item);
               if (contentType === "movie") {
                 const previewChannel = toPreviewChannel(item, providerId, "movie");
+                const movie = item as Item;
+                onPreviewMetadataChange?.({ title: movie.title, description: movie.description ?? null, guide: [] });
                 if (previewChannel) onSelectChannel(previewChannel);
               }
             }}><strong>{title}</strong><small>{"name" in item ? (item.groupName || "Uncategorized") : (item.category?.name || "Uncategorized")}</small></button>;
