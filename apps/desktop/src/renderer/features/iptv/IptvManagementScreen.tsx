@@ -131,7 +131,11 @@ export function IptvManagementScreen({
       const firstActiveProvider = providers.find((provider) => provider.status === "active");
       if (firstActiveProvider) setSelectedProviderId(firstActiveProvider.id);
     }
-  }, [providers, selectedProviderId]);
+    if (!channelProviderFilter) {
+      const firstActiveProvider = providers.find((provider) => provider.status === "active");
+      if (firstActiveProvider) setChannelProviderFilter(firstActiveProvider.id);
+    }
+  }, [channelProviderFilter, providers, selectedProviderId]);
 
   const loadChannelPage = (page: number) => {
     void onLoadChannelPage({
@@ -400,9 +404,9 @@ export function IptvManagementScreen({
 
       <IptvChannelsScreen
         providers={providers}
-        selectedProviderId={selectedProviderId || channelProviderFilter}
+        selectedProviderId={channelProviderFilter}
         onProviderFilterChange={setChannelProviderFilter}
-        below={selectedProviderId || channelProviderFilter ? <IptvCatalogueScreen providerId={selectedProviderId || channelProviderFilter} /> : (
+        below={channelProviderFilter ? <IptvCatalogueScreen providerId={channelProviderFilter} /> : (
           <section className="console-panel iptv-catalogue-empty">
             <h3>IPTV Content Browser</h3>
             <p className="field-note">Select a saved IPTV provider to browse its channel groups, movies, series, seasons, episodes, and guide data.</p>

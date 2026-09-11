@@ -75,14 +75,13 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel, contentType: 
   useEffect(() => {
     let cancelled = false;
     setStatus("Loading catalogue groups...");
-    const emptyPage = { items: [], total: 0 };
     void Promise.all([
-      apiClient.listIptvCatalogueCategories(providerId, "live").catch(() => emptyPage),
-      apiClient.listIptvCatalogueCategories(providerId, "movie").catch(() => emptyPage),
-      apiClient.listIptvCatalogueCategories(providerId, "series").catch(() => emptyPage),
-      apiClient.listIptvChannels(providerId).catch(() => emptyPage),
-      apiClient.listIptvMovies(providerId).catch(() => emptyPage),
-      apiClient.listIptvSeries(providerId).catch(() => emptyPage)
+      apiClient.listIptvCatalogueCategories(providerId, "live"),
+      apiClient.listIptvCatalogueCategories(providerId, "movie"),
+      apiClient.listIptvCatalogueCategories(providerId, "series"),
+      apiClient.listIptvChannels(providerId),
+      apiClient.listIptvMovies(providerId),
+      apiClient.listIptvSeries(providerId)
     ]).then(([live, movie, seriesGroup, liveItems, movieItems, seriesItems]) => {
       if (cancelled) return;
       setCatalogueTotals({ live: liveItems.total, movie: movieItems.total, series: seriesItems.total });
@@ -94,6 +93,8 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel, contentType: 
       setMovies(movieItems.items);
       setSeries(seriesItems.items);
       setStatus("Catalogue loaded from the provider catalogue.");
+    }).catch((error) => {
+      if (!cancelled) setStatus(error instanceof Error ? error.message : "Unable to load IPTV catalogue data.");
     });
     return () => { cancelled = true; };
   }, [favoriteChannelIds, providerId, requestedContentType]);
