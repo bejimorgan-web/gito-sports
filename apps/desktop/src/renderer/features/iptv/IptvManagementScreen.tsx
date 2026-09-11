@@ -246,11 +246,8 @@ export function IptvManagementScreen({
         });
         setStatusMessage("Validation started. Follow the progress below.");
       } else if (type === "m3u") {
-        await startOperation("m3u_validation", {
-          ...(selectedProviderId ? { providerId: selectedProviderId } : {}),
-          ...(playlist.trim() ? { playlist } : {})
-        });
-        setStatusMessage("M3U validation started. No channels will be saved.");
+        const result = await onTestProvider(providerInput);
+        setStatusMessage(result.message || "M3U playlist validated. No channels were saved.");
       } else if (selectedProviderId && onTestProviderById) {
         const result = await onTestProviderById(selectedProviderId);
         setStatusMessage(result?.message ?? "Provider test completed.");
