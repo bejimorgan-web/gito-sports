@@ -89,11 +89,14 @@ if (runtimeConfig.errorReportingEnabled && runtimeConfig.sentryDsn) {
 
 (async () => {
   const app = createApp();
-  markInitialReadiness();
-
   const port = env.port;
   app.listen(port, "0.0.0.0", async () => {
     console.log(`GiTO backend listening on port ${port}`);
+
+    // Bind the Render port before synchronous SQLite migration work begins.
+    // This lets health checks observe a starting state instead of timing out.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    markInitialReadiness();
 
     const footballReady = await initializeFootballService();
     if (footballReady) {

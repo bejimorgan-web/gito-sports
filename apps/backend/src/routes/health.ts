@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getDatabase } from "../db/connection.js";
+import { getDatabase, isDatabaseInitialized } from "../db/connection.js";
 import { isMigrationImported, getMigrationMetadata } from "../db/migration-import.js";
 
 export const healthRouter = Router();
@@ -45,6 +45,18 @@ function databaseSchemaReady(database: ReturnType<typeof getDatabase>): boolean 
 }
 
 healthRouter.get("/", (_request, response) => {
+  if (!isDatabaseInitialized()) {
+    response.status(200).json({
+      status: "starting",
+      service: "gito-backend",
+      databaseReady: false,
+      migrationImported: false,
+      recordCounts: {},
+      timestamp: new Date().toISOString()
+    });
+    return;
+  }
+
   const db = getDatabase();
 
   const counts = {

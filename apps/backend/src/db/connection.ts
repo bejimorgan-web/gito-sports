@@ -18,6 +18,10 @@ import { NewsService } from "../services/news-service.js";
 let database: DatabaseSync | null = null;
 const EXPECTED_SCHEMA_VERSION = 1;
 
+export function isDatabaseInitialized() {
+  return database !== null;
+}
+
 function getCount(database: DatabaseSync, table: string) {
   if (!hasTable(database, table)) {
     return 0;
