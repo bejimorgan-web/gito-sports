@@ -424,6 +424,21 @@ async function fetchXtreamAction(baseUrl: string, username: string, password: st
   throw new Error(`Xtream action failed: ${action}`);
 }
 
+export async function fetchXtreamShortEpg(baseUrl: string, username: string, password: string, streamId: string, signal?: AbortSignal) {
+  const payload = await fetchXtreamAction(baseUrl, username, password, "get_short_epg", signal, { stream_id: streamId });
+  return asRecords(payload, "epg_listings").map((programme: any) => {
+    const start = Number(programme.start_timestamp ?? programme.start ?? 0);
+    const end = Number(programme.stop_timestamp ?? programme.end ?? 0);
+    return {
+      title: String(programme.title ?? "Untitled programme"),
+      description: programme.description ? String(programme.description) : null,
+      startAt: Number.isFinite(start) && start > 0 ? new Date(start * 1000).toISOString() : null,
+      endAt: Number.isFinite(end) && end > 0 ? new Date(end * 1000).toISOString() : null,
+      externalProgrammeId: String(programme.id ?? programme.epg_id ?? `${streamId}:${start}:${programme.title ?? "programme"}`)
+    };
+  });
+}
+
 function asRecords(payload: unknown, key: string): any[] {
   return unwrapXtreamArray<any>(payload, key) ?? [];
 }

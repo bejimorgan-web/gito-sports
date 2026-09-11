@@ -143,7 +143,7 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel, contentType: 
         onPreviewMetadataChange?.({ title: selectedItem.name, guide: [] });
         return;
       }
-      const programmes = await apiClient.listIptvEpgProgrammes(providerId, channel.id, false, true);
+      const programmes = await apiClient.listIptvEpgProgrammes(providerId, channel.id, false, true, "externalRef" in selectedItem ? selectedItem.externalRef : undefined);
       setGuide(programmes.items);
       onPreviewMetadataChange?.({ title: selectedItem.name, guide: programmes.items });
       setGuideStatus(programmes.items.length ? "Upcoming programmes" : "No upcoming programmes.");

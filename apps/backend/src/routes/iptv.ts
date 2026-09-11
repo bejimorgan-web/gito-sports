@@ -3,7 +3,7 @@ import { protectedRoute } from "../middleware/protected.js";
 import type { CreateProviderRequest } from "@gito/shared";
 import { IPTVService } from "../services/iptv-service.js";
 import { parseM3uPlaylist, M3uParseError } from "../services/m3u-parser.js";
-import { fetchXtreamCatalogue, fetchXtreamLiveCatalogue, fetchXtreamChannels, fetchTextWithTimeout, fetchWithTimeout, testXtreamConnection, XtreamParseError, normalizeXtreamUrl } from "../services/xtream-codes.js";
+import { fetchXtreamCatalogue, fetchXtreamLiveCatalogue, fetchXtreamChannels, fetchXtreamShortEpg, fetchTextWithTimeout, fetchWithTimeout, testXtreamConnection, XtreamParseError, normalizeXtreamUrl } from "../services/xtream-codes.js";
 import { validateHttpStreamUrl } from "../services/url-validation.js";
 import { logChannelSyncTrace } from "../services/iptv-trace.js";
 import { detectProviderType } from "../services/provider-type-detector.js";
@@ -980,6 +980,25 @@ iptvRouter.get("/providers/:providerId/epg/programmes", (request, response) => {
       response.status(400).json({ error: `invalid_${field}_time` });
       return;
     }
+  }
+  const channelExternalRef = typeof request.query.channelExternalRef === "string" ? request.query.channelExternalRef : undefined;
+  if (channelExternalRef) {
+    void (async () => {
+      const provider = IPTVService.getProviderCredentials(providerId);
+      if (!provider || provider.type !== "xtream" || !provider.credential_username || !provider.credential_password) {
+        response.json({ data: { items: [], page: 1, pageSize: options.pageSize ?? 20, total: 0, totalPages: 1 } });
+        return;
+      }
+      try {
+        const baseUrl = normalizeXtreamUrl(provider.base_url);
+        if (baseUrl.error) throw new Error(baseUrl.error);
+        const items = await fetchXtreamShortEpg(baseUrl.url, provider.credential_username, provider.credential_password, channelExternalRef);
+        response.json({ data: { items, page: 1, pageSize: options.pageSize ?? 20, total: items.length, totalPages: 1 } });
+      } catch {
+        response.json({ data: { items: [], page: 1, pageSize: options.pageSize ?? 20, total: 0, totalPages: 1 } });
+      }
+    })();
+    return;
   }
   response.json({
     data: listIptvEpgProgrammesPage(providerId, {

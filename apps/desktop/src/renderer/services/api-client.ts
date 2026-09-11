@@ -306,8 +306,9 @@ export const apiClient = {
   listIptvEpgChannels(providerId: string) {
     return request<{ items: Array<{ id: string; externalEpgChannelId: string; channelId?: string | null; channelExternalRef?: string | null; name: string }> }>(`/iptv/providers/${encodeURIComponent(providerId)}/epg/channels?pageSize=100`);
   },
-  listIptvEpgProgrammes(providerId: string, epgChannelId: string, current = false, upcoming = false) {
+  listIptvEpgProgrammes(providerId: string, epgChannelId: string, current = false, upcoming = false, channelExternalRef?: string) {
     const params = new URLSearchParams({ page: "1", pageSize: "20", epgChannelId });
+    if (channelExternalRef) params.set("channelExternalRef", channelExternalRef);
     if (current) params.set("current", "true");
     if (upcoming) params.set("upcoming", "true");
     return request<{ items: Array<{ title: string; description?: string | null; startAt?: string | null; endAt?: string | null; externalProgrammeId: string }> }>(`/iptv/providers/${encodeURIComponent(providerId)}/epg/programmes?${params}`);
