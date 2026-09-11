@@ -88,14 +88,18 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers["content-type"] = "application/json";
   }
 
-  const canRetry = !init?.method || init.method.toUpperCase() === "GET";
+  const method = init?.method?.toUpperCase() ?? "GET";
+  const canRetry = method === "GET";
+  const requestTimeoutMs = path.startsWith("/iptv/providers") && ["POST", "PUT"].includes(method)
+    ? 120_000
+    : REQUEST_TIMEOUT_MS;
   let response: Response | undefined;
   let lastNetworkError: unknown;
   for (let attempt = 0; attempt < (canRetry ? 3 : 1); attempt += 1) {
     const controller = new AbortController();
     const abortFromCaller = () => controller.abort();
     init?.signal?.addEventListener("abort", abortFromCaller, { once: true });
-    const timeout = globalThis.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timeout = globalThis.setTimeout(() => controller.abort(), requestTimeoutMs);
     try {
       response = await fetch(`${API_BASE_URL}${path}`, {
         ...init,
