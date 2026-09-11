@@ -44,7 +44,7 @@ function isSelectedChannelStillValid(
   }
 
   return (
-    channels.some((channel) => channel.id === selectedChannel.id) &&
+    (selectedChannel.contentType !== "live" || channels.some((channel) => channel.id === selectedChannel.id)) &&
     providers.some((provider) => provider.id === selectedChannel.providerId)
   );
 }

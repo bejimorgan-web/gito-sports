@@ -544,6 +544,10 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
   }, [providerDiagnostics, selectedChannel, selectedContentType, selectedProvider, selectedGroup, selectedGroupChannels]);
 
   useEffect(() => {
+    if (!showLegacyChannelBrowser) {
+      return;
+    }
+
     if (!filteredSelectedGroupChannels.length) {
       return;
     }
@@ -564,7 +568,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
         onSelectChannel(firstChannel);
       }
     }
-  }, [filteredSelectedGroupChannels, onSelectChannel, selectedChannel, selectedProviderId]);
+  }, [filteredSelectedGroupChannels, onSelectChannel, selectedChannel, selectedProviderId, showLegacyChannelBrowser]);
 
   useEffect(() => {
     if (selectedCompetition && selectedSportId && selectedCompetition.sportId !== selectedSportId) {

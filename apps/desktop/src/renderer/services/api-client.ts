@@ -290,7 +290,7 @@ export const apiClient = {
     const params = new URLSearchParams({ page: "1", pageSize: "100" });
     if (categoryId) params.set("categoryId", categoryId);
     if (search) params.set("search", search);
-    return request<{ items: Array<{ id: string; title: string; description?: string | null; categoryId?: string | null; category?: { name: string } | null; posterUrl?: string | null }>; total: number }>(`/iptv/providers/${encodeURIComponent(providerId)}/movies?${params}`);
+    return request<{ items: Array<{ id: string; title: string; description?: string | null; categoryId?: string | null; category?: { name: string } | null; posterUrl?: string | null; playbackReference?: string | null }>; total: number }>(`/iptv/providers/${encodeURIComponent(providerId)}/movies?${params}`);
   },
   listIptvSeries(providerId: string, categoryId?: string) {
     const params = new URLSearchParams({ page: "1", pageSize: "100" });

@@ -10,11 +10,27 @@ interface Props {
   showContentTypeCounts?: boolean;
 }
 type Category = { id: string; name: string; slug?: string | null };
-type Item = { id: string; title: string; description?: string | null; categoryId?: string | null; category?: { name: string } | null; posterUrl?: string | null };
+type Item = { id: string; title: string; description?: string | null; categoryId?: string | null; category?: { name: string } | null; posterUrl?: string | null; playbackReference?: string | null };
 type LiveItem = Channel;
 type Season = { id: string; seriesId: string; seasonNumber?: number | null; name?: string | null };
 type Episode = { id: string; title?: string | null; episodeNumber?: number | null; playbackReference: string };
 type GuideProgramme = { title: string; description?: string | null; startAt?: string | null; endAt?: string | null; externalProgrammeId: string };
+
+function toPreviewChannel(item: { id: string; providerId?: string; title?: string; name?: string; playbackReference?: string | null; categoryId?: string | null; category?: { name: string } | null }, providerId: string, contentType: "movie" | "series"): Channel | undefined {
+  if (!item.playbackReference) return undefined;
+  return {
+    id: item.id,
+    providerId: item.providerId ?? providerId,
+    name: item.title ?? item.name ?? "Untitled",
+    url: item.playbackReference,
+    contentType,
+    status: "active",
+    createdAt: "",
+    updatedAt: "",
+    ...(item.categoryId ? { categoryId: item.categoryId } : {}),
+    ...(item.category?.name ? { groupName: item.category.name } : {})
+  };
+}
 
 export function IptvCatalogueScreen({ providerId, onSelectChannel, contentType: requestedContentType = "live", favoriteChannelIds = [], showContentTypeCounts = true }: Props) {
   const [liveCategories, setLiveCategories] = useState<Category[]>([]);
@@ -211,13 +227,24 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel, contentType: 
           {selectedGroupItems.map((item) => {
             const itemId = "name" in item ? item.id : item.id;
             const title = "name" in item ? item.name : item.title;
-            return <button type="button" key={itemId} className={selectedItem && selectedItem.id === itemId ? "selected" : ""} onClick={() => { setSelectedItem(item); if (contentType === "live" && onSelectChannel && "url" in item) onSelectChannel(item); }}><strong>{title}</strong><small>{"name" in item ? (item.groupName || "Uncategorized") : (item.category?.name || "Uncategorized")}</small></button>;
+            return <button type="button" key={itemId} className={selectedItem && selectedItem.id === itemId ? "selected" : ""} onClick={() => {
+              setSelectedItem(item);
+              if (!onSelectChannel) return;
+              if (contentType === "live" && "url" in item) onSelectChannel(item);
+              if (contentType === "movie") {
+                const previewChannel = toPreviewChannel(item, providerId, "movie");
+                if (previewChannel) onSelectChannel(previewChannel);
+              }
+            }}><strong>{title}</strong><small>{"name" in item ? (item.groupName || "Uncategorized") : (item.category?.name || "Uncategorized")}</small></button>;
           })}
         </section>
         {contentType === "series" ? <aside className="iptv-channel-guide">
           <h4>Series Guide</h4>
           {contentType === "series" && selectedItem ? <select value={selectedSeasonId} onChange={(event) => setSelectedSeasonId(event.target.value)}><option value="">Select season</option>{seasons.map((season) => <option key={season.id} value={season.id}>{season.name || `Season ${season.seasonNumber ?? ""}`}</option>)}</select> : null}
-          {contentType === "series" ? episodes.map((episode) => <div className="iptv-guide-entry" key={episode.id}><strong>Episode {episode.episodeNumber ?? ""}: {episode.title || "Untitled"}</strong><small>{episode.playbackReference}</small></div>) : guide.length ? guide.map((programme) => <div className="iptv-guide-entry" key={programme.externalProgrammeId}><strong>{programme.title}</strong><small>{programme.startAt ? new Date(programme.startAt).toLocaleString() : ""}</small><span>{programme.description || ""}</span></div>) : selectedItem && contentType === "movie" ? <p>{(selectedItem as Item).description || "No description supplied by the provider."}</p> : <p className="field-note">{guideStatus}</p>}
+          {contentType === "series" ? episodes.map((episode) => <button type="button" className="iptv-guide-entry" key={episode.id} onClick={() => {
+            const previewChannel = toPreviewChannel({ id: episode.id, providerId, ...(episode.title ? { title: episode.title } : {}), playbackReference: episode.playbackReference }, providerId, "series");
+            if (previewChannel) onSelectChannel?.(previewChannel);
+          }}><strong>Episode {episode.episodeNumber ?? ""}: {episode.title || "Untitled"}</strong><small>{episode.playbackReference}</small></button>) : guide.length ? guide.map((programme) => <div className="iptv-guide-entry" key={programme.externalProgrammeId}><strong>{programme.title}</strong><small>{programme.startAt ? new Date(programme.startAt).toLocaleString() : ""}</small><span>{programme.description || ""}</span></div>) : selectedItem && contentType === "movie" ? <p>{(selectedItem as Item).description || "No description supplied by the provider."}</p> : <p className="field-note">{guideStatus}</p>}
         </aside> : null}
       </div>
     </section>
