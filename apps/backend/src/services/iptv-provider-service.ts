@@ -10,6 +10,10 @@ export class IptvProviderService {
     return LegacyProviderRepository.updateProvider(id, patch);
   }
 
+  static updateProviderExpiry(id: string, expiresAt: string | null) {
+    return LegacyProviderRepository.updateProviderExpiry(id, expiresAt);
+  }
+
   static getProvider(id: string) {
     return LegacyProviderRepository.getProviderById(id);
   }

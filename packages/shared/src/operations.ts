@@ -6,6 +6,7 @@ export interface ProviderConnectionTest {
   ok: boolean;
   statusCode?: number;
   message: string;
+  expiresAt?: string | null;
   detectedType?: ProviderType;
   channelsAvailable?: number;
   categories?: string[];

@@ -55,6 +55,10 @@ export const IPTVService = {
     return IptvProviderService.updateProvider(providerId, input) ?? null;
   },
 
+  updateProviderExpiry(providerId: string, expiresAt: string | null) {
+    return IptvProviderService.updateProviderExpiry(providerId, expiresAt);
+  },
+
   deleteProvider(providerId: string): boolean {
     return IptvProviderService.deleteProvider(providerId);
   },

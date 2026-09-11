@@ -233,6 +233,10 @@ async function persistValidatedProvider(
     return false;
   }
 
+  if (input.type === "xtream" || validation.detectedType === "xtream") {
+    IPTVService.updateProviderExpiry(providerId, (validation as { expiresAt?: string | null }).expiresAt ?? null);
+  }
+
   if (input.type && input.type !== "manual" && Array.isArray(validation.channels) && validation.channels.length > 0) {
     IPTVService.syncProviderChannels(providerId, validation.channels as any[]);
   }

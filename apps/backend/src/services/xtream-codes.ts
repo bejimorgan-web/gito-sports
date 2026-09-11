@@ -93,6 +93,20 @@ function isXtreamAuthFailure(payload: unknown): boolean {
   return info.auth === 0 || String(info.auth).toLowerCase() === "false" || ["disabled", "expired", "banned"].includes(String(info.status ?? "").toLowerCase());
 }
 
+function readXtreamExpiry(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const userInfo = (payload as Record<string, unknown>).user_info;
+  if (!userInfo || typeof userInfo !== "object") return null;
+  const rawExpiry = (userInfo as Record<string, unknown>).exp_date;
+  if (rawExpiry === undefined || rawExpiry === null || rawExpiry === "") return null;
+  const numericExpiry = Number(rawExpiry);
+  if (Number.isFinite(numericExpiry) && numericExpiry > 0) {
+    return new Date(numericExpiry < 10_000_000_000 ? numericExpiry * 1000 : numericExpiry).toISOString();
+  }
+  const parsedExpiry = new Date(String(rawExpiry));
+  return Number.isNaN(parsedExpiry.getTime()) ? null : parsedExpiry.toISOString();
+}
+
 function safeXtreamHost(baseUrl: string): string {
   try {
     return new URL(baseUrl).host;
@@ -230,6 +244,7 @@ export async function testXtreamConnection(
           return {
             ok: true,
             statusCode: response.value.response.status,
+            expiresAt: readXtreamExpiry(payload),
             message: "Connected — credentials accepted."
           };
         }

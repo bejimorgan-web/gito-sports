@@ -256,6 +256,10 @@ export function updateProvider(providerId: string, input: Partial<CreateProvider
   return updated;
 }
 
+export function updateProviderExpiry(providerId: string, expiresAt: string | null): void {
+  getDatabase().prepare("UPDATE providers SET expires_at = ?, updated_at = ? WHERE id = ? AND deleted = 0").run(expiresAt, now(), providerId);
+}
+
 export function softDeleteProvider(providerId: string): boolean {
   const database = getDatabase();
   const timestamp = now();

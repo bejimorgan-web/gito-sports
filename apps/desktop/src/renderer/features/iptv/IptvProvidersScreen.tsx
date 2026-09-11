@@ -219,6 +219,9 @@ export function IptvProvidersScreen({
               <div><small>Movies</small><strong>{providerDiagnostics[detailsProvider.id]?.contentTotals.movies ?? 0}</strong></div>
               <div><small>Series</small><strong>{providerDiagnostics[detailsProvider.id]?.contentTotals.series ?? 0}</strong></div>
             </div>
+            <div className="provider-card-identity-row">
+              <div><small>Expiration</small><strong>{detailsProvider.expiresAt ? new Date(detailsProvider.expiresAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : detailsProvider.type === "xtream" ? "No expiry on file" : "M3U playlist source"}</strong></div>
+            </div>
             <div className="form-grid premium-editor-grid">
               <label className="full-width">
                 Account name
@@ -266,10 +269,6 @@ export function IptvProvidersScreen({
         ) : (
           <>
             {activeProviders.map((provider) => {
-              const diagnostics = providerDiagnostics[provider.id];
-              const channelMetrics = diagnostics
-                ? { total: diagnostics.contentTotals.live, movies: diagnostics.contentTotals.movies, series: diagnostics.contentTotals.series }
-                : { total: 0, movies: 0, series: 0 };
               const isActive = provider.status === "active";
               const isPending = provider.status === "pending";
               const isInactive = provider.status === "inactive";
@@ -302,21 +301,6 @@ export function IptvProvidersScreen({
                     <div>
                       <small>Expiration</small>
                       <strong>{expiryText}</strong>
-                    </div>
-                  </div>
-
-                  <div className="provider-card-details">
-                    <div>
-                      <small>Channels</small>
-                      <strong>{channelMetrics.total}</strong>
-                    </div>
-                    <div>
-                      <small>Movies</small>
-                      <strong>{channelMetrics.movies}</strong>
-                    </div>
-                    <div>
-                      <small>Series</small>
-                      <strong>{channelMetrics.series}</strong>
                     </div>
                   </div>
 

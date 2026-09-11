@@ -40,8 +40,10 @@ test("normalizes legitimate Xtream URLs and rejects unsafe input", () => {
 test("classifies Xtream authentication, network, timeout, and malformed responses", async () => {
   const originalFetch = globalThis.fetch;
   try {
-    globalThis.fetch = async () => new Response(JSON.stringify({ user_info: { auth: 1 } }), { status: 200 });
-    assert.equal((await testXtreamConnection("https://example.com", "user", "pass")).ok, true);
+    globalThis.fetch = async () => new Response(JSON.stringify({ user_info: { auth: 1, exp_date: "1893456000" } }), { status: 200 });
+    const connected = await testXtreamConnection("https://example.com", "user", "pass");
+    assert.equal(connected.ok, true);
+    assert.equal(connected.expiresAt, "2030-01-01T00:00:00.000Z");
 
     globalThis.fetch = async () => new Response("", { status: 401 });
     const authResult = await testXtreamConnection("https://example.com", "user", "wrong");
