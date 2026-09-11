@@ -1,5 +1,4 @@
 import { Router } from "express";
-import { protectedRoute } from "../middleware/protected.js";
 import type { CreateProviderRequest } from "@gito/shared";
 import { IPTVService } from "../services/iptv-service.js";
 import { parseM3uPlaylist, M3uParseError } from "../services/m3u-parser.js";
@@ -392,7 +391,10 @@ iptvRouter.post("/providers", async (request, response) => {
 
   if (persistedProvider) {
     try {
-      await persistValidatedProvider(persistedProvider.id, validation, providerInput, { activate: false });
+      await persistValidatedProvider(persistedProvider.id, validation, providerInput, { activate: detectedType !== "xtream" });
+      if (detectedType !== "xtream") {
+        IPTVService.setProviderStatus(persistedProvider.id, "active");
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (/foreign key|constraint/i.test(message)) {
@@ -880,7 +882,7 @@ iptvRouter.get("/parity/:providerId", (request, response) => {
 });
 
 // Phase 3: Catalogue API endpoints (public access, no authentication required)
-iptvRouter.get("/providers/:providerId/categories", protectedRoute, (request, response) => {
+iptvRouter.get("/providers/:providerId/categories", (request, response) => {
   const providerId = request.params.providerId;
   if (!providerId || !requireProvider(providerId, response)) return;
   const contentType = parseContentType(request.query.contentType);
@@ -893,7 +895,7 @@ iptvRouter.get("/providers/:providerId/categories", protectedRoute, (request, re
   response.json({ data: listIptvCategoriesPage(providerId, contentType, options) });
 });
 
-iptvRouter.get("/providers/:providerId/channels", protectedRoute, (request, response) => {
+iptvRouter.get("/providers/:providerId/channels", (request, response) => {
   const providerId = request.params.providerId;
   if (!providerId || !requireProvider(providerId, response)) return;
   const options = parseCatalogueQuery(request, response);
@@ -901,7 +903,7 @@ iptvRouter.get("/providers/:providerId/channels", protectedRoute, (request, resp
   response.json({ data: listIptvChannelsPage(providerId, options) });
 });
 
-iptvRouter.get("/providers/:providerId/movies", protectedRoute, (request, response) => {
+iptvRouter.get("/providers/:providerId/movies", (request, response) => {
   const providerId = request.params.providerId;
   if (!providerId || !requireProvider(providerId, response)) return;
   const options = parseCatalogueQuery(request, response);
@@ -909,7 +911,7 @@ iptvRouter.get("/providers/:providerId/movies", protectedRoute, (request, respon
   response.json({ data: listIptvMoviesPage(providerId, options) });
 });
 
-iptvRouter.get("/providers/:providerId/movies/:movieId", protectedRoute, (request, response) => {
+iptvRouter.get("/providers/:providerId/movies/:movieId", (request, response) => {
   const providerId = request.params.providerId;
   const movieId = request.params.movieId;
   if (!providerId || !movieId || !requireProvider(providerId, response)) return;
@@ -921,7 +923,7 @@ iptvRouter.get("/providers/:providerId/movies/:movieId", protectedRoute, (reques
   response.json({ data: movie });
 });
 
-iptvRouter.get("/providers/:providerId/series", protectedRoute, (request, response) => {
+iptvRouter.get("/providers/:providerId/series", (request, response) => {
   const providerId = request.params.providerId;
   if (!providerId || !requireProvider(providerId, response)) return;
   const options = parseCatalogueQuery(request, response);
@@ -929,7 +931,7 @@ iptvRouter.get("/providers/:providerId/series", protectedRoute, (request, respon
   response.json({ data: listIptvSeriesPage(providerId, options) });
 });
 
-iptvRouter.get("/providers/:providerId/series/:seriesId", protectedRoute, (request, response) => {
+iptvRouter.get("/providers/:providerId/series/:seriesId", (request, response) => {
   const providerId = request.params.providerId;
   const seriesId = request.params.seriesId;
   if (!providerId || !seriesId || !requireProvider(providerId, response)) return;
@@ -941,7 +943,7 @@ iptvRouter.get("/providers/:providerId/series/:seriesId", protectedRoute, (reque
   response.json({ data: series });
 });
 
-iptvRouter.get("/providers/:providerId/series/:seriesId/seasons", protectedRoute, (request, response) => {
+iptvRouter.get("/providers/:providerId/series/:seriesId/seasons", (request, response) => {
   const providerId = request.params.providerId;
   const seriesId = request.params.seriesId;
   if (!providerId || !seriesId || !requireProvider(providerId, response)) return;
@@ -952,7 +954,7 @@ iptvRouter.get("/providers/:providerId/series/:seriesId/seasons", protectedRoute
   response.json({ data: listIptvSeasonsPage(providerId, seriesId) });
 });
 
-iptvRouter.get("/providers/:providerId/seasons/:seasonId/episodes", protectedRoute, (request, response) => {
+iptvRouter.get("/providers/:providerId/seasons/:seasonId/episodes", (request, response) => {
   const providerId = request.params.providerId;
   const seasonId = request.params.seasonId;
   if (!providerId || !seasonId || !requireProvider(providerId, response)) return;

@@ -91,11 +91,11 @@ test("catalogue API returns normalized provider-scoped hierarchy and canonical p
   }
 });
 
-test("catalogue API enforces authentication and missing-record errors", async () => {
+test("catalogue API allows public provider-scoped requests and returns missing-record errors", async () => {
   const provider = createProvider({ name: `Auth API Provider ${Date.now()}`, baseUrl: `https://auth-api.example/${Date.now()}`, type: "xtream", authType: "basic", username: "user", password: "pass" });
   const { server, baseUrl } = await startTestServer();
   try {
-    assert.equal((await request(baseUrl, `/iptv/providers/${provider.id}/movies`, false)).status, 401);
+    assert.equal((await request(baseUrl, `/iptv/providers/${provider.id}/movies`, false)).status, 200);
     assert.equal((await request(baseUrl, `/iptv/providers/${provider.id}/movies/missing`)).status, 404);
     assert.equal((await request(baseUrl, "/iptv/providers/missing/movies")).status, 404);
   } finally {
