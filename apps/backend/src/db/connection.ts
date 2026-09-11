@@ -1136,6 +1136,10 @@ function repairBrokenChannelsProviderReference(database: DatabaseSync) {
 }
 
 export function migrateExistingOperationalState(database: DatabaseSync) {
+  const purgedProviderCount = purgeDeletedProviderData(database);
+  if (purgedProviderCount > 0) {
+    console.log(`[startup] permanently deleted ${purgedProviderCount} removed IPTV provider record(s) and their owned data`);
+  }
   repairBrokenChannelsProviderReference(database);
 
   if (hasTable(database, "providers")) {
@@ -1545,5 +1549,53 @@ export function migrateExistingOperationalState(database: DatabaseSync) {
         END
         WHERE status IN ('completed', 'scheduled')`
     );
+  }
+}
+
+function deleteProviderOwnedRows(database: DatabaseSync, providerId: string) {
+  const statements = [
+    ["iptv_series_episodes", "series_id IN (SELECT id FROM iptv_series WHERE provider_id = ?)"] as const,
+    ["iptv_seasons", "provider_id = ?"] as const,
+    ["iptv_movies", "provider_id = ?"] as const,
+    ["iptv_series", "provider_id = ?"] as const,
+    ["iptv_epg_programmes", "provider_id = ?"] as const,
+    ["iptv_epg_channels", "provider_id = ?"] as const,
+    ["iptv_categories", "provider_id = ?"] as const,
+    ["iptv_channel_index", "provider_id = ?"] as const,
+    ["iptv_channels", "provider_id = ?"] as const,
+    ["iptv_provider_health", "provider_id = ?"] as const,
+    ["iptv_logs", "provider_id = ?"] as const,
+    ["channels", "provider_id = ?"] as const,
+    ["iptv_providers", "id = ?"] as const
+  ];
+
+  for (const [table, predicate] of statements) {
+    if (hasTable(database, table)) {
+      database.prepare(`DELETE FROM ${table} WHERE ${predicate}`).run(providerId);
+    }
+  }
+}
+
+function purgeDeletedProviderData(database: DatabaseSync): number {
+  if (!hasTable(database, "providers")) return 0;
+
+  const providerIds = database.prepare("SELECT id FROM providers WHERE deleted = 1").all() as Array<{ id: string }>;
+  const orphanIds = hasTable(database, "channels")
+    ? database.prepare("SELECT DISTINCT c.provider_id AS id FROM channels c LEFT JOIN providers p ON p.id = c.provider_id WHERE p.id IS NULL").all() as Array<{ id: string }>
+    : [];
+  const ids = [...new Set([...providerIds, ...orphanIds].map((row) => row.id))];
+  if (ids.length === 0) return 0;
+
+  database.exec("BEGIN TRANSACTION;");
+  try {
+    for (const providerId of ids) {
+      deleteProviderOwnedRows(database, providerId);
+      database.prepare("DELETE FROM providers WHERE id = ?").run(providerId);
+    }
+    database.exec("COMMIT;");
+    return ids.length;
+  } catch (error) {
+    database.exec("ROLLBACK;");
+    throw error;
   }
 }

@@ -262,21 +262,69 @@ export function updateProviderExpiry(providerId: string, expiresAt: string | nul
 
 export function softDeleteProvider(providerId: string): boolean {
   const database = getDatabase();
-  const timestamp = now();
-
-  const res = database
-    .prepare("UPDATE providers SET deleted = 1, updated_at = ? WHERE id = ? AND deleted = 0")
-    .run(timestamp, providerId);
-
-  if (res.changes > 0) {
-    // Archive any channels belonging to this provider so they no longer appear
-    // in regular channel listings. Use 'archived' status to allow recovery if needed.
-    database.prepare("UPDATE channels SET status = 'archived', updated_at = ? WHERE provider_id = ?").run(timestamp, providerId);
-    EventBus.emit("iptv:provider:updated", { providerId, deleted: true });
-    return true;
+  if (!database.prepare("SELECT 1 FROM providers WHERE id = ?").get(providerId)) {
+    return false;
   }
 
-  return false;
+  database.exec("BEGIN TRANSACTION;");
+  try {
+    deleteProviderOwnedRows(database, providerId);
+    database.prepare("DELETE FROM providers WHERE id = ?").run(providerId);
+    database.exec("COMMIT;");
+    EventBus.emit("iptv:provider:updated", { providerId, deleted: true });
+    return true;
+  } catch (error) {
+    database.exec("ROLLBACK;");
+    throw error;
+  }
+}
+
+function deleteProviderOwnedRows(database: ReturnType<typeof getDatabase>, providerId: string) {
+  const statements = [
+    ["iptv_series_episodes", "series_id IN (SELECT id FROM iptv_series WHERE provider_id = ?)"] as const,
+    ["iptv_seasons", "provider_id = ?"] as const,
+    ["iptv_movies", "provider_id = ?"] as const,
+    ["iptv_series", "provider_id = ?"] as const,
+    ["iptv_epg_programmes", "provider_id = ?"] as const,
+    ["iptv_epg_channels", "provider_id = ?"] as const,
+    ["iptv_categories", "provider_id = ?"] as const,
+    ["iptv_channel_index", "provider_id = ?"] as const,
+    ["iptv_channels", "provider_id = ?"] as const,
+    ["iptv_provider_health", "provider_id = ?"] as const,
+    ["iptv_logs", "provider_id = ?"] as const,
+    ["channels", "provider_id = ?"] as const,
+    ["iptv_providers", "id = ?"] as const
+  ];
+
+  for (const [table, predicate] of statements) {
+    if (database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)) {
+      database.prepare(`DELETE FROM ${table} WHERE ${predicate}`).run(providerId);
+    }
+  }
+}
+
+export function purgeDeletedProviderData(database: ReturnType<typeof getDatabase>): number {
+  if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'providers'").get()) {
+    return 0;
+  }
+
+  const providerIds = database.prepare("SELECT id FROM providers WHERE deleted = 1").all() as Array<{ id: string }>;
+  const orphanIds = database.prepare("SELECT DISTINCT c.provider_id AS id FROM channels c LEFT JOIN providers p ON p.id = c.provider_id WHERE p.id IS NULL").all() as Array<{ id: string }>;
+  const ids = [...new Set([...providerIds, ...orphanIds].map((row) => row.id))];
+  if (ids.length === 0) return 0;
+
+  database.exec("BEGIN TRANSACTION;");
+  try {
+    for (const providerId of ids) {
+      deleteProviderOwnedRows(database, providerId);
+      database.prepare("DELETE FROM providers WHERE id = ?").run(providerId);
+    }
+    database.exec("COMMIT;");
+    return ids.length;
+  } catch (error) {
+    database.exec("ROLLBACK;");
+    throw error;
+  }
 }
 
 export function getProviderCredentials(providerId: string) {
