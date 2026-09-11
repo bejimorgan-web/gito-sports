@@ -31,6 +31,18 @@ import {
 
 type ChannelListMode = "active" | "includeInactive" | "debug" | "raw";
 
+function normalizePlaylistUrl(value: string) {
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol === "http:" && url.hostname.endsWith("github.io")) {
+      url.protocol = "https:";
+    }
+    return url.toString();
+  } catch {
+    return value.trim();
+  }
+}
+
 const catalogueStatuses = new Set(["active", "inactive", "archived", "stale"]);
 
 function parseCatalogueQuery(request: any, response: any): CatalogueListOptions | undefined {
@@ -123,7 +135,8 @@ async function validateProviderConnection(input: {
       };
     }
 
-    const testResult = await fetchTextWithTimeout(baseUrl, { method: "GET" });
+    const playlistUrl = normalizePlaylistUrl(baseUrl);
+    const testResult = await fetchTextWithTimeout(playlistUrl, { method: "GET" }, 60_000);
     const testResponse = testResult.response;
 
     if (!testResponse.ok) {
@@ -135,7 +148,7 @@ async function validateProviderConnection(input: {
     }
 
     const bodyText = testResult.text;
-    const detectedType = await detectProviderType({ baseUrl, username, password, payload: bodyText });
+    const detectedType = await detectProviderType({ baseUrl: playlistUrl, username, password, payload: bodyText });
     const inferredType = resolvedType === "manual" ? detectedType : resolvedType;
 
     if (inferredType === "xtream") {
@@ -369,6 +382,7 @@ iptvRouter.post("/providers", async (request, response) => {
   const detectedType = (validation as { detectedType?: string } | undefined)?.detectedType ?? resolvedInput.type ?? "manual";
   const providerInput = {
     ...resolvedInput,
+    ...(detectedType !== "xtream" ? { baseUrl: normalizePlaylistUrl(resolvedInput.baseUrl) } : {}),
     ...(detectedType === "xtream" ? { baseUrl: normalizeXtreamUrl(resolvedInput.baseUrl).url } : {}),
     type: detectedType as CreateProviderRequest["type"]
   };
@@ -588,7 +602,7 @@ iptvRouter.post("/operations", async (request, response) => {
       if (!playlist && body.providerId) {
         const provider = IPTVService.getProvider(body.providerId);
         if (!provider?.baseUrl) throw new Error("provider_not_found");
-        const playlistResult = await fetchTextWithTimeout(provider.baseUrl, { signal });
+        const playlistResult = await fetchTextWithTimeout(normalizePlaylistUrl(provider.baseUrl), { signal }, 60_000);
         const playlistResponse = playlistResult.response;
         if (!playlistResponse.ok) throw new Error(`Provider returned HTTP ${playlistResponse.status}.`);
         playlist = playlistResult.text;
