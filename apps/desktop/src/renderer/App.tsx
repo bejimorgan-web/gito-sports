@@ -411,7 +411,7 @@ export function App() {
         clearPreviewState();
       }
     } catch {
-      setBackendStatus("offline");
+      setBackendStatus((current) => current === "online" ? "reconnecting" : "offline");
     }
   }, [clearPreviewState]);
 
@@ -462,7 +462,7 @@ export function App() {
   const createProvider = useCallback(async (input: Parameters<typeof apiClient.createProvider>[0]) => {
     const provider = await apiClient.createProvider(input);
     setPreferredProviderId(provider.id);
-    setProviders([]);
+    setProviders((current) => current.some((item) => item.id === provider.id) ? current : [...current, provider]);
     await refreshOperations("full");
     await new Promise((resolve) => window.setTimeout(resolve, 150));
     await refreshOperations("full");
@@ -473,7 +473,6 @@ export function App() {
     await apiClient.updateProvider(providerId, input);
     setPreferredProviderId(providerId);
     setChannels([]);
-    setProviders([]);
     await refreshOperations("full");
     await new Promise((resolve) => window.setTimeout(resolve, 150));
     await refreshOperations("full");
