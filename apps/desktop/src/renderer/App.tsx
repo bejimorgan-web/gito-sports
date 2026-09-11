@@ -146,21 +146,21 @@ function renderScreen(
             onOpenMatch={actions.openMatch}
             showLegacyChannelBrowser={false}
             onCatalogueContextChange={actions.setMatchAssignmentCatalogueContext}
+            catalogueBrowser={state.preferredProviderId || state.providers.find((provider) => provider.status === "active")?.id ? (
+              <IptvCatalogueScreen
+                providerId={state.matchAssignmentCatalogueContext.providerId || state.preferredProviderId || state.providers.find((provider) => provider.status === "active")!.id}
+                contentType={state.matchAssignmentCatalogueContext.contentType}
+                favoriteChannelIds={state.matchAssignmentCatalogueContext.favoriteChannelIds}
+                showContentTypeCounts={false}
+                onSelectChannel={actions.selectChannel}
+              />
+            ) : (
+              <section className="console-panel">
+                <h3>IPTV Content Browser</h3>
+                <p className="field-note">Create or activate an IPTV provider in IPTV Management to browse its catalogue.</p>
+              </section>
+            )}
           />
-          {state.preferredProviderId || state.providers.find((provider) => provider.status === "active")?.id ? (
-            <IptvCatalogueScreen
-              providerId={state.matchAssignmentCatalogueContext.providerId || state.preferredProviderId || state.providers.find((provider) => provider.status === "active")!.id}
-              contentType={state.matchAssignmentCatalogueContext.contentType}
-              favoriteChannelIds={state.matchAssignmentCatalogueContext.favoriteChannelIds}
-              showContentTypeCounts={false}
-              onSelectChannel={actions.selectChannel}
-            />
-          ) : (
-            <section className="console-panel">
-              <h3>IPTV Content Browser</h3>
-              <p className="field-note">Create or activate an IPTV provider in IPTV Management to browse its catalogue.</p>
-            </section>
-          )}
         </>
       );
     case "preview":

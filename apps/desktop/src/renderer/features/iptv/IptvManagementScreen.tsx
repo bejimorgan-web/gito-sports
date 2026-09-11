@@ -400,9 +400,9 @@ export function IptvManagementScreen({
 
       <IptvChannelsScreen
         providers={providers}
-        selectedProviderId={channelProviderFilter}
+        selectedProviderId={selectedProviderId || channelProviderFilter}
         onProviderFilterChange={setChannelProviderFilter}
-        below={selectedProviderId ? <IptvCatalogueScreen providerId={selectedProviderId} /> : (
+        below={selectedProviderId || channelProviderFilter ? <IptvCatalogueScreen providerId={selectedProviderId || channelProviderFilter} /> : (
           <section className="console-panel iptv-catalogue-empty">
             <h3>IPTV Content Browser</h3>
             <p className="field-note">Select a saved IPTV provider to browse its channel groups, movies, series, seasons, episodes, and guide data.</p>

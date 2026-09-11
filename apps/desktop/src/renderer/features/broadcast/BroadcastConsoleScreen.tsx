@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import type {
   Channel,
@@ -40,6 +40,7 @@ interface BroadcastConsoleScreenProps {
   onSetLiveMode: (enabled: boolean) => void;
   onOpenMatch?: (matchId?: string) => void;
   onCatalogueContextChange?: (context: { providerId: string; contentType: ContentTypeOption; favoriteChannelIds: string[] }) => void;
+  catalogueBrowser?: ReactNode;
   showLegacyChannelBrowser?: boolean;
 }
 
@@ -306,6 +307,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
   onSetLiveMode,
   onOpenMatch,
   onCatalogueContextChange,
+  catalogueBrowser,
   showLegacyChannelBrowser = true
 }: BroadcastConsoleScreenProps) {
   const [selectedSportId, setSelectedSportId] = useState<string>("");
@@ -1183,6 +1185,8 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
               </aside>
             </div> : null}
           </div>
+
+          {catalogueBrowser}
 
           <div className="match-control-layout">
             <section className="match-control-panel console-panel">
