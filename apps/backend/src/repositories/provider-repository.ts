@@ -736,6 +736,14 @@ export function getProviderChannelDiagnostics(providerId: string) {
     )
     .get(providerId) as { total: number; live: number; movies: number; series: number; active: number; inactive: number; stale: number; archived: number };
 
+  const catalogueCounts = db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM iptv_movies WHERE provider_id = ? AND status = 'active') AS movies,
+      (SELECT COUNT(*) FROM iptv_series WHERE provider_id = ? AND status = 'active') AS series
+  `).get(providerId, providerId) as { movies: number; series: number };
+  const movieCount = Number(catalogueCounts?.movies ?? 0) || Number(counts.movies ?? 0);
+  const seriesCount = Number(catalogueCounts?.series ?? 0) || Number(counts.series ?? 0);
+
   return {
     providerId: provider.id,
     status: provider.status as any,
@@ -746,8 +754,8 @@ export function getProviderChannelDiagnostics(providerId: string) {
     totalChannels: counts.total ?? 0,
     contentTotals: {
       live: counts.live ?? 0,
-      movies: counts.movies ?? 0,
-      series: counts.series ?? 0
+      movies: movieCount,
+      series: seriesCount
     },
     counts: {
       active: counts.active ?? 0,

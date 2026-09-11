@@ -34,6 +34,21 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel }: Props) {
   const [guideStatus, setGuideStatus] = useState("Select a channel or movie.");
   const [status, setStatus] = useState("Loading catalogue groups...");
 
+  const mapLiveItem = (item: { id: string; providerId: string; externalRef?: string | null; name: string; categoryId?: string | null; category?: { name: string } | null; playbackReference: string; logoUrl?: string | null; status?: string }): LiveItem => ({
+    id: item.id,
+    providerId: item.providerId,
+    name: item.name,
+    url: item.playbackReference,
+    contentType: "live",
+    status: (item.status as Channel["status"]) ?? "active",
+    createdAt: "",
+    updatedAt: "",
+    ...(item.externalRef ? { externalRef: item.externalRef } : {}),
+    ...(item.categoryId ? { categoryId: item.categoryId } : {}),
+    ...(item.category?.name ? { groupName: item.category.name } : {}),
+    ...(item.logoUrl ? { logoUrl: item.logoUrl } : {})
+  });
+
   useEffect(() => {
     let cancelled = false;
     setStatus("Loading catalogue groups...");
@@ -41,7 +56,7 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel }: Props) {
       apiClient.listIptvCatalogueCategories(providerId, "live"),
       apiClient.listIptvCatalogueCategories(providerId, "movie"),
       apiClient.listIptvCatalogueCategories(providerId, "series"),
-      apiClient.listChannelPage(providerId, { page: 1, pageSize: 100 }),
+      apiClient.listIptvChannels(providerId),
       apiClient.listIptvMovies(providerId),
       apiClient.listIptvSeries(providerId)
     ]).then(([live, movie, seriesGroup, liveItems, movieItems, seriesItems]) => {
@@ -50,7 +65,7 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel }: Props) {
       setLiveCategories(live.items);
       setMovieCategories(movie.items);
       setSeriesCategories(seriesGroup.items);
-      setLiveChannels(liveItems.items);
+      setLiveChannels(liveItems.items.map(mapLiveItem));
       setMovies(movieItems.items);
       setSeries(seriesItems.items);
       setStatus("Catalogue loaded from the provider catalogue.");
@@ -139,9 +154,9 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel }: Props) {
     setSelectedGroupItems([]);
     const categoryId = selectedGroup.id;
     if (contentType === "live") {
-      void apiClient.listChannelPage(providerId, { page: 1, pageSize: 100, category: categoryId }).then((page) => {
+      void apiClient.listIptvChannels(providerId, categoryId).then((page) => {
         if (!cancelled) {
-          setSelectedGroupItems(page.items);
+          setSelectedGroupItems(page.items.map(mapLiveItem));
           setGroupCounts((current) => ({ ...current, [categoryId]: page.total }));
         }
       }).catch(() => { if (!cancelled) setSelectedGroupItems([]); });

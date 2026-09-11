@@ -281,6 +281,11 @@ export const apiClient = {
   listIptvCatalogueCategories(providerId: string, contentType: "live" | "movie" | "series") {
     return request<{ items: Array<{ id: string; providerId: string; contentType: string; name: string; slug?: string | null }>; total: number }>(`/iptv/providers/${encodeURIComponent(providerId)}/categories?contentType=${contentType}&pageSize=100`);
   },
+  listIptvChannels(providerId: string, categoryId?: string) {
+    const params = new URLSearchParams({ page: "1", pageSize: "100" });
+    if (categoryId) params.set("categoryId", categoryId);
+    return request<{ items: Array<{ id: string; providerId: string; externalRef?: string | null; name: string; categoryId?: string | null; category?: { name: string } | null; playbackReference: string; logoUrl?: string | null; status?: string }>; total: number }>(`/iptv/providers/${encodeURIComponent(providerId)}/channels?${params}`);
+  },
   listIptvMovies(providerId: string, categoryId?: string, search?: string) {
     const params = new URLSearchParams({ page: "1", pageSize: "100" });
     if (categoryId) params.set("categoryId", categoryId);
