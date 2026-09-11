@@ -1,6 +1,9 @@
 import { getDatabase } from "../db/connection.js";
 
 type JobFn = () => Promise<void> | void;
+const scheduledIntervals = new Set<ReturnType<typeof setInterval>>();
+const scheduledImmediates = new Set<ReturnType<typeof setImmediate>>();
+const scheduledStops = new Set<() => void>();
 
 // Ensure lock table exists
 function ensureLockTable() {
@@ -38,8 +41,10 @@ function releaseLock(name: string) {
 
 export function scheduleBackgroundJob(name: string, intervalMs: number, jobFn: JobFn) {
   ensureLockTable();
+  let active = true;
 
   async function tick() {
+    if (!active) return;
     try {
       const acquired = tryAcquireLock(name, Math.max(5_000, Math.floor(intervalMs / 2)));
       if (!acquired) return;
@@ -58,6 +63,24 @@ export function scheduleBackgroundJob(name: string, intervalMs: number, jobFn: J
   }
 
   // immediately schedule first tick and then interval
-  setImmediate(() => void tick());
-  setInterval(() => void tick(), intervalMs);
+  const immediate = setImmediate(() => {
+    scheduledImmediates.delete(immediate);
+    void tick();
+  });
+  scheduledImmediates.add(immediate);
+  const interval = setInterval(() => void tick(), intervalMs);
+  interval.unref?.();
+  scheduledIntervals.add(interval);
+  scheduledStops.add(() => {
+    active = false;
+    clearInterval(interval);
+  });
+}
+
+export function stopBackgroundJobs() {
+  for (const stop of scheduledStops) stop();
+  scheduledStops.clear();
+  for (const immediate of scheduledImmediates) clearImmediate(immediate);
+  scheduledImmediates.clear();
+  scheduledIntervals.clear();
 }

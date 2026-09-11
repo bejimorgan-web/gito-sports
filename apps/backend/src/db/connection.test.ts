@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-import { syncAdminOperatorUserPassword } from "./connection.js";
+import { closeDatabase, syncAdminOperatorUserPassword } from "./connection.js";
 import { allowSqliteInstantiation, DatabaseSync } from "./sqlite.js";
 
 test("persistent database migration copies a valid legacy database only when the target is absent", async () => {
@@ -130,4 +130,8 @@ test("syncAdminOperatorUserPassword updates an existing admin password to match 
       fs.rmSync(tempDbPath, { force: true });
     }
   });
+});
+
+test.after(() => {
+  closeDatabase();
 });

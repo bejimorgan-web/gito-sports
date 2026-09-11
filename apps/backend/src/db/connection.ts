@@ -8,8 +8,9 @@ import { env, runtimeConfig } from "../config/env.js";
 import { listBackups } from "../services/database-backup-service.js";
 import { readInitialSchema, readNewsSchema } from "./schema.js";
 import { rehydrateSyncStateOnStartup } from "../system/startup.js";
-import { startBackupService } from "../services/database-backup-service.js";
+import { startBackupService, stopBackupService } from "../services/database-backup-service.js";
 import { scheduleBackgroundJob } from "../background/backgroundJobRunner.js";
+import { stopBackgroundJobs } from "../background/backgroundJobRunner.js";
 import { importMigrationFile, isDatabaseCatalogEmpty, isMigrationImported } from "./migration-import.js";
 import { NewsCollectionScheduler } from "../services/news-collection-scheduler.js";
 import { NewsService } from "../services/news-service.js";
@@ -395,6 +396,15 @@ export function getDatabase(): DatabaseSync {
   }
 
   return database;
+}
+
+export function closeDatabase(): void {
+  stopBackupService();
+  stopBackgroundJobs();
+  if (database) {
+    database.close();
+    database = null;
+  }
 }
 
 function hasColumn(database: DatabaseSync, tableName: string, columnName: string): boolean {

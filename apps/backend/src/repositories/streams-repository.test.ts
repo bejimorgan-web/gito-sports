@@ -9,7 +9,7 @@ process.env.NODE_ENV = "test";
 process.env.DATABASE_PATH = databasePath;
 process.env.AUTO_RESTORE_BACKUP = "false";
 
-const { getDatabase } = await import("../db/connection.js");
+const { closeDatabase, getDatabase } = await import("../db/connection.js");
 const { createCanonicalFixture } = await import("./fixtures-repository.js");
 const { createCanonicalStream, deleteCanonicalStream, getStreamById, listStreams, updateCanonicalStream } = await import("./streams-repository.js");
 
@@ -45,8 +45,7 @@ test("canonical stream lifecycle uses matches and preserves legacy tables", () =
 });
 
 test.after(() => {
-  const db = getDatabase() as unknown as { close?: () => void };
-  db.close?.();
+  closeDatabase();
   for (const suffix of ["", "-wal", "-shm"]) {
     try { fs.unlinkSync(`${databasePath}${suffix}`); } catch { /* temporary test artifact */ }
   }

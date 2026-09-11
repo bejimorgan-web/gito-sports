@@ -96,7 +96,7 @@ const backupDir = process.env.BACKUP_DIR
   : nodeEnv === "production"
   ? path.resolve(path.dirname(resolvedDatabasePath), "backups")
   : canonicalBackupDir;
-const backupIntervalMs = Number(process.env.BACKUP_INTERVAL_MS ?? 15 * 60 * 1000);
+const backupIntervalMs = Number(process.env.BACKUP_INTERVAL_MS ?? 12 * 60 * 60 * 1000);
 const autoRestoreBackup = (process.env.AUTO_RESTORE_BACKUP ?? "true").toLowerCase() === "true";
 const errorReportingEnabled = (process.env.ERROR_REPORTING_ENABLED ?? "true").toLowerCase() === "true";
 const sentryDsn = process.env.SENTRY_DSN ?? "";

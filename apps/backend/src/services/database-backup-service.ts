@@ -36,6 +36,10 @@ let backupInFlight = false;
 let lastBackupError: string | null = null;
 let lastBackupCompletedAt: string | null = null;
 let lastCleanupResult: BackupCleanupResult | null = null;
+let backupScheduleTimeout: ReturnType<typeof setTimeout> | null = null;
+let backupScheduleInterval: ReturnType<typeof setInterval> | null = null;
+let backupCleanupInterval: ReturnType<typeof setInterval> | null = null;
+let backupInitialImmediate: ReturnType<typeof setImmediate> | null = null;
 
 export interface BackupResult {
   success: true;
@@ -105,14 +109,68 @@ function requiredBackupSpace(databasePath: string) {
   return databaseSize * 2 + minimumBackupHeadroomBytes;
 }
 
-function openDatabaseConnection(readOnly = false): DatabaseSync {
-  const dbPath = env.absoluteDatabasePath;
-  return allowSqliteInstantiation(() => new DatabaseSync(dbPath, readOnly ? { readonly: true } : undefined));
+function openDatabaseConnection(databasePath = env.absoluteDatabasePath, readOnly = false): DatabaseSync {
+  return allowSqliteInstantiation(() => new DatabaseSync(databasePath, readOnly ? { readonly: true } : undefined));
 }
 
 function queryIntegrity(database: DatabaseSync): string {
   const row = database.prepare("PRAGMA integrity_check").get() as { integrity_check?: string } | undefined;
   return String(row?.integrity_check ?? "unknown");
+}
+
+function quoteIdentifier(value: string): string {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+function getSchemaObjects(database: DatabaseSync) {
+  return database.prepare(`
+    SELECT type, name, sql FROM sqlite_master
+    WHERE type IN ('table', 'index', 'trigger', 'view')
+    AND sql IS NOT NULL
+    ORDER BY CASE type
+      WHEN 'table' THEN 0
+      WHEN 'index' THEN 1
+      WHEN 'trigger' THEN 2
+      WHEN 'view' THEN 3
+      ELSE 4
+    END, name
+  `).all() as Array<{ type: string; name: string; sql: string }>;
+}
+
+function validateBackupContents(
+  sourceDb: DatabaseSync,
+  backupDb: DatabaseSync,
+  tables: Array<{ name: string }>,
+  sourceSchemaObjects: Array<{ type: string; name: string; sql: string }>
+) {
+  const backupSchemaObjects = getSchemaObjects(backupDb);
+  const sourceSchema = new Map(sourceSchemaObjects.map((object) => [`${object.type}:${object.name}`, object.sql]));
+  const backupSchema = new Map(backupSchemaObjects.map((object) => [`${object.type}:${object.name}`, object.sql]));
+
+  for (const [key, sql] of sourceSchema) {
+    if (backupSchema.get(key) !== sql) {
+      throw new Error(`Backup schema mismatch for ${key}`);
+    }
+  }
+  if (backupSchema.size !== sourceSchema.size) {
+    throw new Error(`Backup schema object count mismatch: source=${sourceSchema.size} backup=${backupSchema.size}`);
+  }
+
+  for (const { name } of tables) {
+    const identifier = quoteIdentifier(name);
+    const sourceCount = Number((sourceDb.prepare(`SELECT COUNT(*) AS count FROM ${identifier}`).get() as { count: number }).count);
+    const backupCount = Number((backupDb.prepare(`SELECT COUNT(*) AS count FROM ${identifier}`).get() as { count: number }).count);
+    const expectedCount = EXCLUDED_REGENERABLE_TABLES.has(name) ? 0 : sourceCount;
+
+    if (backupCount !== expectedCount) {
+      throw new Error(`Backup row count mismatch for ${name}: source=${sourceCount} backup=${backupCount} expected=${expectedCount}`);
+    }
+  }
+
+  const fkResults = backupDb.prepare("PRAGMA foreign_key_check").all() as Array<unknown>;
+  if (fkResults.length > 0) {
+    throw new Error(`Backup foreign_key_check failed with ${fkResults.length} violation(s)`);
+  }
 }
 
 async function createSchemaPreservingBackup(sourcePath: string, backupPath: string): Promise<void> {
@@ -123,7 +181,7 @@ async function createSchemaPreservingBackup(sourcePath: string, backupPath: stri
   let backupDb: DatabaseSync | null = null;
 
   try {
-    sourceDb = openDatabaseConnection(true); // read-only connection to production
+    sourceDb = openDatabaseConnection(sourcePath, true); // read-only connection to the source snapshot
     
     // Verify production database integrity
     const sourceIntegrity = queryIntegrity(sourceDb);
@@ -148,12 +206,7 @@ async function createSchemaPreservingBackup(sourcePath: string, backupPath: stri
     // Step 1: Recreate ALL schema objects (tables, indexes, triggers, views) from sqlite_master
     console.log("[backup] Copying complete schema from production database...");
     
-    const schemaObjects = sourceDb.prepare(`
-      SELECT type, name, sql FROM sqlite_master 
-      WHERE type IN ('table', 'index', 'trigger', 'view')
-      AND sql IS NOT NULL
-      ORDER BY type DESC, name
-    `).all() as Array<{ type: string; name: string; sql: string }>;
+    const schemaObjects = getSchemaObjects(sourceDb);
 
     if (!schemaObjects || schemaObjects.length === 0) {
       throw new Error("Failed to read schema objects from production database");
@@ -166,15 +219,14 @@ async function createSchemaPreservingBackup(sourcePath: string, backupPath: stri
       try {
         backupDb.exec(obj.sql);
       } catch (err) {
-        // Some objects might fail during recreation (e.g., duplicate constraints)
-        // Log but continue to preserve schema
-        console.debug(`[backup] Note on ${obj.type} '${obj.name}': ${err instanceof Error ? err.message : String(err)}`);
+        throw new Error(`[backup] ERROR creating ${obj.type} '${obj.name}': ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
     // Step 2: Attach source database and copy data from retained tables
     console.log("[backup] Attaching source database for data copy...");
     backupDb.exec(`ATTACH DATABASE '${sourcePath.replace(/'/g, "''")}' AS src`);
+    backupDb.exec("PRAGMA foreign_keys = OFF");
 
     // Get list of all tables
     const tables = sourceDb.prepare(`
@@ -191,31 +243,32 @@ async function createSchemaPreservingBackup(sourcePath: string, backupPath: stri
 
     for (const table of tables) {
       const tableName = table.name;
-      try {
-        if (EXCLUDED_REGENERABLE_TABLES.has(tableName)) {
-          // Schema exists but no data copied
-          console.log(`[backup] ${tableName}: excluded (schema preserved, 0 rows)`);
-          totalRowsExcluded++;
-        } else {
-          // Copy all data from source table to backup table
-          backupDb.prepare(`INSERT INTO main.${tableName} SELECT * FROM src.${tableName}`).run();
-          
-          const count = backupDb.prepare(`SELECT COUNT(*) as cnt FROM ${tableName}`).get() as { cnt: number };
-          if (count.cnt > 0) {
-            console.log(`[backup] ${tableName}: ${count.cnt} rows copied`);
-            totalRowsCopied += count.cnt;
-          }
-        }
-      } catch (err) {
-        console.error(`[backup] Error copying table ${tableName}:`, err instanceof Error ? err.message : String(err));
-        // Continue with next table
+      if (EXCLUDED_REGENERABLE_TABLES.has(tableName)) {
+        // Schema exists but no data is copied.
+        console.log(`[backup] ${tableName}: excluded (schema preserved, 0 rows)`);
+        totalRowsExcluded++;
+        continue;
       }
+
+      try {
+        backupDb.prepare(`INSERT INTO main.${quoteIdentifier(tableName)} SELECT * FROM src.${quoteIdentifier(tableName)}`).run();
+        const count = backupDb.prepare(`SELECT COUNT(*) AS count FROM main.${quoteIdentifier(tableName)}`).get() as { count: number };
+        console.log(`[backup] ${tableName}: ${count.count} rows copied`);
+        totalRowsCopied += count.count;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new Error(`[backup] ERROR copying retained table ${tableName}: ${message}`);
+        }
     }
 
     console.log(`[backup] Data copy complete: ${totalRowsCopied} rows retained, ${totalRowsExcluded} tables excluded`);
 
     // Step 3: Detach source database
     backupDb.exec("DETACH DATABASE src");
+    backupDb.exec("PRAGMA foreign_keys = ON");
+
+    // Row counts and schema comparison are required; integrity checks alone do not detect missing rows.
+    validateBackupContents(sourceDb, backupDb, tables, schemaObjects);
 
     // Step 4: Verify integrity of backup database
     console.log("[backup] Verifying backup integrity...");
@@ -224,17 +277,7 @@ async function createSchemaPreservingBackup(sourcePath: string, backupPath: stri
       throw new Error(`Backup database integrity_check failed: ${backupIntegrity}`);
     }
 
-    // Step 5: Check for foreign key violations (advisory, may be expected)
-    try {
-      const fkResults = backupDb.prepare("PRAGMA foreign_key_check").all() as Array<any>;
-      if (fkResults && fkResults.length > 0) {
-        console.debug(`[backup] Warning: ${fkResults.length} foreign key constraints may be violated (expected if references are in excluded tables)`);
-      }
-    } catch {
-      console.debug("[backup] Foreign key check unavailable (expected on some SQLite versions)");
-    }
-
-    // Step 6: Vacuum backup to reclaim space from excluded tables
+    // Step 5: Vacuum backup to reclaim space from excluded tables
     console.log("[backup] Optimizing backup size via VACUUM...");
     backupDb.exec("VACUUM");
 
@@ -243,9 +286,9 @@ async function createSchemaPreservingBackup(sourcePath: string, backupPath: stri
     backupCloseable.close?.();
     backupDb = null;
 
-    // Step 7: Validate backup file independently
+    // Step 6: Validate backup file independently
     console.log("[backup] Validating backup file as standalone SQLite database...");
-    const validation = await validateBackupPath(temporaryPath);
+    const validation = await validateBackupPath(temporaryPath, sourcePath);
     if (!validation.valid) {
       try { fs.unlinkSync(temporaryPath); } catch { /* best effort */ }
       throw new Error(`backup_integrity_check_failed: ${validation.integrity}`);
@@ -291,14 +334,31 @@ async function safeCreateBackupFile(backupPath: string): Promise<void> {
   }
 }
 
-async function validateBackupPath(backupPath: string) {
+async function validateBackupPath(backupPath: string, sourcePath?: string) {
   const db = allowSqliteInstantiation(() => new DatabaseSync(backupPath, { readonly: true }));
+  const sourceDb = sourcePath ? openDatabaseConnection(sourcePath, true) : null;
   try {
     const row = db.prepare("PRAGMA integrity_check").get() as { integrity_check?: string } | undefined;
-    return { valid: row?.integrity_check === "ok", integrity: row?.integrity_check ?? "unknown" };
+    if (row?.integrity_check !== "ok") {
+      return { valid: false, integrity: row?.integrity_check ?? "unknown" };
+    }
+    const fkResults = db.prepare("PRAGMA foreign_key_check").all();
+    if (fkResults.length > 0) {
+      return { valid: false, integrity: `foreign_key_check: ${fkResults.length} violation(s)` };
+    }
+    if (sourceDb) {
+      const tables = sourceDb.prepare(`
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND NOT name LIKE 'sqlite_%'
+        ORDER BY name
+      `).all() as Array<{ name: string }>;
+      validateBackupContents(sourceDb, db, tables, getSchemaObjects(sourceDb));
+    }
+    return { valid: true, integrity: "ok" };
   } finally {
     const closeable = db as unknown as { close?: () => void };
     closeable.close?.();
+    sourceDb?.close?.();
   }
 }
 
@@ -528,7 +588,9 @@ export async function getBackupStats(): Promise<{
 }
 
 export function startBackupService() {
-  setImmediate(() => {
+  stopBackupService();
+  backupInitialImmediate = setImmediate(() => {
+    backupInitialImmediate = null;
     void (async () => {
       try {
         await enforceBackupRetention();
@@ -543,21 +605,35 @@ export function startBackupService() {
   const now = Date.now();
   const delay = intervalMs - (now % intervalMs);
 
-  setTimeout(() => {
+  backupScheduleTimeout = setTimeout(() => {
     void createBackup().catch((error) => {
       console.error("[backup_failed] scheduled backup failed", error);
     });
 
-    setInterval(() => {
+    backupScheduleInterval = setInterval(() => {
       void createBackup().catch((error) => {
         console.error("[backup_failed] scheduled backup failed", error);
       });
     }, intervalMs);
+    backupScheduleInterval.unref?.();
   }, delay);
+  backupScheduleTimeout.unref?.();
 
-  setInterval(() => {
+  backupCleanupInterval = setInterval(() => {
     void enforceBackupRetention().catch((error) => {
       console.error("[database-backup-service] cleanup interval failed", error);
     });
   }, cleanupIntervalMs);
+  backupCleanupInterval.unref?.();
+}
+
+export function stopBackupService() {
+  if (backupInitialImmediate) clearImmediate(backupInitialImmediate);
+  if (backupScheduleTimeout) clearTimeout(backupScheduleTimeout);
+  if (backupScheduleInterval) clearInterval(backupScheduleInterval);
+  if (backupCleanupInterval) clearInterval(backupCleanupInterval);
+  backupScheduleTimeout = null;
+  backupScheduleInterval = null;
+  backupCleanupInterval = null;
+  backupInitialImmediate = null;
 }
