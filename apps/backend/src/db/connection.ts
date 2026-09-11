@@ -19,6 +19,10 @@ let database: DatabaseSync | null = null;
 const EXPECTED_SCHEMA_VERSION = 1;
 
 function getCount(database: DatabaseSync, table: string) {
+  if (!hasTable(database, table)) {
+    return 0;
+  }
+
   const row = database.prepare(`SELECT COUNT(1) AS count FROM ${table}`).get() as { count: number };
   return Number(row?.count ?? 0);
 }
@@ -408,12 +412,20 @@ export function closeDatabase(): void {
 }
 
 function hasColumn(database: DatabaseSync, tableName: string, columnName: string): boolean {
+  if (!hasTable(database, tableName)) {
+    return false;
+  }
+
   const rows = database.prepare(`PRAGMA table_info(${tableName})`).all() as { name: string }[];
 
   return rows.some((row) => row.name === columnName);
 }
 
 function isColumnNotNullable(database: DatabaseSync, tableName: string, columnName: string): boolean {
+  if (!hasTable(database, tableName)) {
+    return false;
+  }
+
   const rows = database.prepare(`PRAGMA table_info(${tableName})`).all() as { name: string; notnull: number }[];
 
   return rows.some((row) => row.name === columnName && row.notnull === 1);
@@ -1123,166 +1135,192 @@ function repairBrokenChannelsProviderReference(database: DatabaseSync) {
   }
 }
 
-function migrateExistingOperationalState(database: DatabaseSync) {
+export function migrateExistingOperationalState(database: DatabaseSync) {
   repairBrokenChannelsProviderReference(database);
 
-  if (!hasColumn(database, "providers", "expires_at")) {
-    database.exec("ALTER TABLE providers ADD COLUMN expires_at TEXT;");
+  if (hasTable(database, "providers")) {
+    if (!hasColumn(database, "providers", "expires_at")) {
+      database.exec("ALTER TABLE providers ADD COLUMN expires_at TEXT;");
+    }
+
+    if (!hasColumn(database, "providers", "availability_status")) {
+      database.exec("ALTER TABLE providers ADD COLUMN availability_status TEXT NOT NULL DEFAULT 'unknown';");
+    }
+
+    if (!hasColumn(database, "providers", "sync_mode")) {
+      database.exec("ALTER TABLE providers ADD COLUMN sync_mode TEXT NOT NULL DEFAULT 'partial';");
+    }
+
+    if (!hasColumn(database, "providers", "last_successful_stream_load_at")) {
+      database.exec("ALTER TABLE providers ADD COLUMN last_successful_stream_load_at TEXT;");
+    }
+
+    if (!hasColumn(database, "providers", "failed_channel_loads")) {
+      database.exec("ALTER TABLE providers ADD COLUMN failed_channel_loads INTEGER NOT NULL DEFAULT 0;");
+    }
+
+    if (!hasColumn(database, "providers", "health_score")) {
+      database.exec("ALTER TABLE providers ADD COLUMN health_score INTEGER NOT NULL DEFAULT 100;");
+    }
+
+    if (!hasColumn(database, "providers", "deleted")) {
+      database.exec("ALTER TABLE providers ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;");
+    }
   }
 
-  if (!hasColumn(database, "streams", "status")) {
-    database.exec("ALTER TABLE streams ADD COLUMN status TEXT NOT NULL DEFAULT 'idle';");
+  if (hasTable(database, "streams")) {
+    if (!hasColumn(database, "streams", "status")) {
+      database.exec("ALTER TABLE streams ADD COLUMN status TEXT NOT NULL DEFAULT 'idle';");
+    }
+
+    if (!hasColumn(database, "streams", "health_status")) {
+      database.exec("ALTER TABLE streams ADD COLUMN health_status TEXT NOT NULL DEFAULT 'unknown';");
+    }
+
+    if (!hasColumn(database, "streams", "health_reason")) {
+      database.exec("ALTER TABLE streams ADD COLUMN health_reason TEXT;");
+    }
+
+    if (!hasColumn(database, "streams", "failure_count")) {
+      database.exec("ALTER TABLE streams ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0;");
+    }
+
+    if (!hasColumn(database, "streams", "last_health_at")) {
+      database.exec("ALTER TABLE streams ADD COLUMN last_health_at TEXT;");
+    }
   }
 
-  if (!hasColumn(database, "streams", "health_status")) {
-    database.exec("ALTER TABLE streams ADD COLUMN health_status TEXT NOT NULL DEFAULT 'unknown';");
+  if (hasTable(database, "channels")) {
+    if (!hasColumn(database, "channels", "logo_url")) {
+      database.exec("ALTER TABLE channels ADD COLUMN logo_url TEXT;");
+    }
+
+    if (!hasColumn(database, "channels", "content_type")) {
+      database.exec("ALTER TABLE channels ADD COLUMN content_type TEXT NOT NULL DEFAULT 'live';");
+    }
   }
 
-  if (!hasColumn(database, "streams", "health_reason")) {
-    database.exec("ALTER TABLE streams ADD COLUMN health_reason TEXT;");
-  }
-
-  if (!hasColumn(database, "streams", "failure_count")) {
-    database.exec("ALTER TABLE streams ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0;");
-  }
-
-  if (!hasColumn(database, "streams", "last_health_at")) {
-    database.exec("ALTER TABLE streams ADD COLUMN last_health_at TEXT;");
-  }
-
-  if (!hasColumn(database, "providers", "availability_status")) {
-    database.exec("ALTER TABLE providers ADD COLUMN availability_status TEXT NOT NULL DEFAULT 'unknown';");
-  }
-
-  if (!hasColumn(database, "channels", "content_type")) {
-    database.exec("ALTER TABLE channels ADD COLUMN content_type TEXT NOT NULL DEFAULT 'live';");
-  }
-
-  if (!hasColumn(database, "providers", "sync_mode")) {
-    database.exec("ALTER TABLE providers ADD COLUMN sync_mode TEXT NOT NULL DEFAULT 'partial';");
-  }
-
-  if (!hasColumn(database, "providers", "last_successful_stream_load_at")) {
-    database.exec("ALTER TABLE providers ADD COLUMN last_successful_stream_load_at TEXT;");
-  }
-
-  if (!hasColumn(database, "providers", "failed_channel_loads")) {
-    database.exec("ALTER TABLE providers ADD COLUMN failed_channel_loads INTEGER NOT NULL DEFAULT 0;");
-  }
-
-  if (!hasColumn(database, "providers", "health_score")) {
-    database.exec("ALTER TABLE providers ADD COLUMN health_score INTEGER NOT NULL DEFAULT 100;");
-  }
-
-  if (!hasColumn(database, "providers", "deleted")) {
-    database.exec("ALTER TABLE providers ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;");
-  }
-
-  if (!hasColumn(database, "sports", "logo_url")) {
+  if (hasTable(database, "sports") && !hasColumn(database, "sports", "logo_url")) {
     database.exec("ALTER TABLE sports ADD COLUMN logo_url TEXT;");
   }
 
-  if (!hasColumn(database, "countries", "flag_url")) {
-    database.exec("ALTER TABLE countries ADD COLUMN flag_url TEXT;");
+  if (hasTable(database, "countries")) {
+    if (!hasColumn(database, "countries", "flag_url")) {
+      database.exec("ALTER TABLE countries ADD COLUMN flag_url TEXT;");
 
-    if (hasColumn(database, "countries", "logo_url")) {
-      database.exec("UPDATE countries SET flag_url = logo_url WHERE flag_url IS NULL;");
+      if (hasColumn(database, "countries", "logo_url")) {
+        database.exec("UPDATE countries SET flag_url = logo_url WHERE flag_url IS NULL;");
+      }
+    }
+
+    if (!hasColumn(database, "countries", "created_at")) {
+      database.exec("ALTER TABLE countries ADD COLUMN created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP;");
+    }
+
+    if (!hasColumn(database, "countries", "updated_at")) {
+      database.exec("ALTER TABLE countries ADD COLUMN updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP;");
     }
   }
 
-  if (!hasColumn(database, "countries", "created_at")) {
-    database.exec("ALTER TABLE countries ADD COLUMN created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP;");
-  }
-
-  if (!hasColumn(database, "countries", "updated_at")) {
-    database.exec("ALTER TABLE countries ADD COLUMN updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP;");
-  }
-
-  if (!hasColumn(database, "teams", "slug")) {
+  if (hasTable(database, "teams") && !hasColumn(database, "teams", "slug")) {
     database.exec("ALTER TABLE teams ADD COLUMN slug TEXT;");
   }
 
-  if (!hasColumn(database, "matches", "external_provider")) {
-    database.exec("ALTER TABLE matches ADD COLUMN external_provider TEXT;");
-  }
-
-  if (!hasColumn(database, "matches", "external_match_id")) {
-    database.exec("ALTER TABLE matches ADD COLUMN external_match_id TEXT;");
-  }
-
-  if (!hasColumn(database, "scheduling_matches", "season_id")) {
-    database.exec("ALTER TABLE scheduling_matches ADD COLUMN season_id TEXT;");
-  }
-
-  if (!hasColumn(database, "scheduling_matches", "venue_name")) {
-    database.exec("ALTER TABLE scheduling_matches ADD COLUMN venue_name TEXT;");
-  }
-
-  if (!hasColumn(database, "scheduling_matches", "external_provider")) {
-    database.exec("ALTER TABLE scheduling_matches ADD COLUMN external_provider TEXT;");
-  }
-
-  if (!hasColumn(database, "scheduling_matches", "external_match_id")) {
-    database.exec("ALTER TABLE scheduling_matches ADD COLUMN external_match_id TEXT;");
-  }
-
-  database.exec(`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_matches_external_identity
-      ON matches(external_provider, external_match_id)
-      WHERE external_provider IS NOT NULL AND external_match_id IS NOT NULL;
-
-    CREATE TABLE IF NOT EXISTS scheduling_match_links (
-      scheduling_match_id TEXT PRIMARY KEY,
-      match_id TEXT NOT NULL UNIQUE,
-      link_status TEXT NOT NULL DEFAULT 'unresolved' CHECK (link_status IN ('linked', 'ambiguous', 'unresolved', 'rejected')),
-      confidence TEXT NOT NULL CHECK (confidence IN ('high', 'medium', 'low')),
-      linked_at TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      FOREIGN KEY (scheduling_match_id) REFERENCES scheduling_matches(id),
-      FOREIGN KEY (match_id) REFERENCES matches(id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_scheduling_match_links_match ON scheduling_match_links(match_id);
-    CREATE INDEX IF NOT EXISTS idx_scheduling_match_links_status ON scheduling_match_links(link_status);
-  `);
-
-  const teamsWithoutSlugs = database.prepare("SELECT id, sport_id, country_id, name FROM teams WHERE slug IS NULL OR slug = ''").all() as Array<{
-    id: string;
-    sport_id: string | null;
-    country_id: string | null;
-    name: string;
-  }>;
-  for (const team of teamsWithoutSlugs) {
-    const baseSlug = team.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "team";
-    let slug = baseSlug;
-    let suffix = 1;
-    while (database.prepare("SELECT 1 FROM teams WHERE sport_id IS ? AND country_id IS ? AND slug = ? AND id != ?").get(team.sport_id, team.country_id, slug, team.id)) {
-      suffix += 1;
-      slug = `${baseSlug}-${suffix}`;
+  if (hasTable(database, "matches")) {
+    if (!hasColumn(database, "matches", "external_provider")) {
+      database.exec("ALTER TABLE matches ADD COLUMN external_provider TEXT;");
     }
-    database.prepare("UPDATE teams SET slug = ? WHERE id = ?").run(slug, team.id);
-  }
-  database.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_sport_country_slug ON teams(sport_id, country_id, slug);");
 
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS competition_season_teams (
-      id TEXT PRIMARY KEY,
-      competition_id TEXT NOT NULL,
-      season_id TEXT NOT NULL,
-      team_id TEXT NOT NULL,
-      membership_status TEXT NOT NULL DEFAULT 'active',
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      FOREIGN KEY (competition_id) REFERENCES competitions(id),
-      FOREIGN KEY (season_id) REFERENCES seasons(id),
-      FOREIGN KEY (team_id) REFERENCES teams(id),
-      UNIQUE (competition_id, season_id, team_id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_competition_season_teams_competition ON competition_season_teams(competition_id);
-    CREATE INDEX IF NOT EXISTS idx_competition_season_teams_season ON competition_season_teams(season_id);
-    CREATE INDEX IF NOT EXISTS idx_competition_season_teams_team ON competition_season_teams(team_id);
-    CREATE INDEX IF NOT EXISTS idx_competition_season_teams_competition_season ON competition_season_teams(competition_id, season_id);
-  `);
+    if (!hasColumn(database, "matches", "external_match_id")) {
+      database.exec("ALTER TABLE matches ADD COLUMN external_match_id TEXT;");
+    }
+  }
+
+  if (hasTable(database, "scheduling_matches")) {
+    if (!hasColumn(database, "scheduling_matches", "season_id")) {
+      database.exec("ALTER TABLE scheduling_matches ADD COLUMN season_id TEXT;");
+    }
+
+    if (!hasColumn(database, "scheduling_matches", "venue_name")) {
+      database.exec("ALTER TABLE scheduling_matches ADD COLUMN venue_name TEXT;");
+    }
+
+    if (!hasColumn(database, "scheduling_matches", "external_provider")) {
+      database.exec("ALTER TABLE scheduling_matches ADD COLUMN external_provider TEXT;");
+    }
+
+    if (!hasColumn(database, "scheduling_matches", "external_match_id")) {
+      database.exec("ALTER TABLE scheduling_matches ADD COLUMN external_match_id TEXT;");
+    }
+  }
+
+  if (hasTable(database, "matches")) {
+    database.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_matches_external_identity
+        ON matches(external_provider, external_match_id)
+        WHERE external_provider IS NOT NULL AND external_match_id IS NOT NULL;
+    `);
+  }
+
+  if (hasTable(database, "scheduling_matches") || hasTable(database, "matches")) {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS scheduling_match_links (
+        scheduling_match_id TEXT PRIMARY KEY,
+        match_id TEXT NOT NULL UNIQUE,
+        link_status TEXT NOT NULL DEFAULT 'unresolved' CHECK (link_status IN ('linked', 'ambiguous', 'unresolved', 'rejected')),
+        confidence TEXT NOT NULL CHECK (confidence IN ('high', 'medium', 'low')),
+        linked_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (scheduling_match_id) REFERENCES scheduling_matches(id),
+        FOREIGN KEY (match_id) REFERENCES matches(id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_scheduling_match_links_match ON scheduling_match_links(match_id);
+      CREATE INDEX IF NOT EXISTS idx_scheduling_match_links_status ON scheduling_match_links(link_status);
+    `);
+  }
+
+  if (hasTable(database, "teams")) {
+    const teamsWithoutSlugs = database.prepare("SELECT id, sport_id, country_id, name FROM teams WHERE slug IS NULL OR slug = ''").all() as Array<{
+      id: string;
+      sport_id: string | null;
+      country_id: string | null;
+      name: string;
+    }>;
+    for (const team of teamsWithoutSlugs) {
+      const baseSlug = team.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "team";
+      let slug = baseSlug;
+      let suffix = 1;
+      while (database.prepare("SELECT 1 FROM teams WHERE sport_id IS ? AND country_id IS ? AND slug = ? AND id != ?").get(team.sport_id, team.country_id, slug, team.id)) {
+        suffix += 1;
+        slug = `${baseSlug}-${suffix}`;
+      }
+      database.prepare("UPDATE teams SET slug = ? WHERE id = ?").run(slug, team.id);
+    }
+    database.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_sport_country_slug ON teams(sport_id, country_id, slug);");
+  }
+
+  if (hasTable(database, "competitions") && hasTable(database, "seasons") && hasTable(database, "teams")) {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS competition_season_teams (
+        id TEXT PRIMARY KEY,
+        competition_id TEXT NOT NULL,
+        season_id TEXT NOT NULL,
+        team_id TEXT NOT NULL,
+        membership_status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (competition_id) REFERENCES competitions(id),
+        FOREIGN KEY (season_id) REFERENCES seasons(id),
+        FOREIGN KEY (team_id) REFERENCES teams(id),
+        UNIQUE (competition_id, season_id, team_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_competition_season_teams_competition ON competition_season_teams(competition_id);
+      CREATE INDEX IF NOT EXISTS idx_competition_season_teams_season ON competition_season_teams(season_id);
+      CREATE INDEX IF NOT EXISTS idx_competition_season_teams_team ON competition_season_teams(team_id);
+      CREATE INDEX IF NOT EXISTS idx_competition_season_teams_competition_season ON competition_season_teams(competition_id, season_id);
+    `);
+  }
 
   if (!hasTable(database, "mobile_analytics_events")) {
     database.exec(`CREATE TABLE IF NOT EXISTS mobile_analytics_events (
@@ -1322,48 +1360,50 @@ function migrateExistingOperationalState(database: DatabaseSync) {
     );`);
   }
 
-  if (!hasColumn(database, "competitions", "country_id")) {
+  if (hasTable(database, "competitions") && !hasColumn(database, "competitions", "country_id")) {
     database.exec("ALTER TABLE competitions ADD COLUMN country_id TEXT;");
   }
 
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS hosts (
-      id TEXT PRIMARY KEY,
-      sport_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      host_type TEXT NOT NULL CHECK (host_type IN ('country', 'organization', 'federation', 'association', 'regional', 'international', 'other')),
-      country_id TEXT,
-      logo_url TEXT,
-      status TEXT NOT NULL DEFAULT 'active',
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      FOREIGN KEY (sport_id) REFERENCES sports(id),
-      FOREIGN KEY (country_id) REFERENCES countries(id)
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_hosts_sport_name ON hosts(sport_id, name);
-  `);
+  if (hasTable(database, "sports")) {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS hosts (
+        id TEXT PRIMARY KEY,
+        sport_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        host_type TEXT NOT NULL CHECK (host_type IN ('country', 'organization', 'federation', 'association', 'regional', 'international', 'other')),
+        country_id TEXT,
+        logo_url TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (sport_id) REFERENCES sports(id),
+        FOREIGN KEY (country_id) REFERENCES countries(id)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_hosts_sport_name ON hosts(sport_id, name);
+    `);
+  }
 
-  if (!hasColumn(database, "competitions", "host_id")) {
+  if (hasTable(database, "competitions") && !hasColumn(database, "competitions", "host_id")) {
     database.exec("ALTER TABLE competitions ADD COLUMN host_id TEXT;");
   }
 
-  if (!hasColumn(database, "competitions", "competition_type")) {
+  if (hasTable(database, "competitions") && !hasColumn(database, "competitions", "competition_type")) {
     database.exec("ALTER TABLE competitions ADD COLUMN competition_type TEXT NOT NULL DEFAULT 'league';");
   }
 
-  if (!hasColumn(database, "competitions", "participant_type")) {
+  if (hasTable(database, "competitions") && !hasColumn(database, "competitions", "participant_type")) {
     database.exec("ALTER TABLE competitions ADD COLUMN participant_type TEXT NOT NULL DEFAULT 'clubs';");
   }
 
-  if (!hasColumn(database, "competitions", "logo_url")) {
+  if (hasTable(database, "competitions") && !hasColumn(database, "competitions", "logo_url")) {
     database.exec("ALTER TABLE competitions ADD COLUMN logo_url TEXT;");
   }
 
-  if (!hasColumn(database, "teams", "logo_url")) {
+  if (hasTable(database, "teams") && !hasColumn(database, "teams", "logo_url")) {
     database.exec("ALTER TABLE teams ADD COLUMN logo_url TEXT;");
   }
 
-  if (!hasColumn(database, "teams", "host_id")) {
+  if (hasTable(database, "teams") && !hasColumn(database, "teams", "host_id")) {
     database.exec("ALTER TABLE teams ADD COLUMN host_id TEXT REFERENCES hosts(id);");
   }
 
@@ -1442,16 +1482,16 @@ function migrateExistingOperationalState(database: DatabaseSync) {
   }
 
   // Add password columns to operator_users for bootstrapping and password-based auth
-  if (!hasColumn(database, "operator_users", "password_hash")) {
+  if (hasTable(database, "operator_users") && !hasColumn(database, "operator_users", "password_hash")) {
     database.exec("ALTER TABLE operator_users ADD COLUMN password_hash TEXT;");
   }
-  if (!hasColumn(database, "operator_users", "password_salt")) {
+  if (hasTable(database, "operator_users") && !hasColumn(database, "operator_users", "password_salt")) {
     database.exec("ALTER TABLE operator_users ADD COLUMN password_salt TEXT;");
   }
-  if (!hasColumn(database, "operator_users", "password_iterations")) {
+  if (hasTable(database, "operator_users") && !hasColumn(database, "operator_users", "password_iterations")) {
     database.exec("ALTER TABLE operator_users ADD COLUMN password_iterations INTEGER;");
   }
-  if (!hasColumn(database, "operator_users", "password_algo")) {
+  if (hasTable(database, "operator_users") && !hasColumn(database, "operator_users", "password_algo")) {
     database.exec("ALTER TABLE operator_users ADD COLUMN password_algo TEXT;");
   }
 
@@ -1468,36 +1508,42 @@ function migrateExistingOperationalState(database: DatabaseSync) {
 
   seedShadowCatalogLayer(database);
 
-  database.exec(
-    `UPDATE providers
-      SET status = CASE
-        WHEN status IN ('active', 'pending', 'failed', 'invalid') THEN status
-        WHEN status = 'inactive' THEN 'failed'
-        WHEN status = 'archived' THEN 'invalid'
-        ELSE 'pending'
-      END`
-  );
+  if (hasTable(database, "providers")) {
+    database.exec(
+      `UPDATE providers
+        SET status = CASE
+          WHEN status IN ('active', 'pending', 'failed', 'invalid') THEN status
+          WHEN status = 'inactive' THEN 'failed'
+          WHEN status = 'archived' THEN 'invalid'
+          ELSE 'pending'
+        END`
+    );
+  }
 
-  database.exec(
-    `UPDATE streams
-      SET status = CASE approval_status
-        WHEN 'pending_review' THEN 'assigned'
-        WHEN 'draft' THEN 'idle'
-        WHEN 'rejected' THEN 'failed'
-        WHEN 'suspended' THEN 'disabled'
-        WHEN 'approved' THEN CASE WHEN published_at IS NULL THEN 'approved' ELSE 'active' END
-        ELSE status
-      END
-      WHERE approval_status IN ('pending_review', 'draft', 'rejected', 'suspended', 'approved')`
-  );
+  if (hasTable(database, "streams")) {
+    database.exec(
+      `UPDATE streams
+        SET status = CASE approval_status
+          WHEN 'pending_review' THEN 'assigned'
+          WHEN 'draft' THEN 'idle'
+          WHEN 'rejected' THEN 'failed'
+          WHEN 'suspended' THEN 'disabled'
+          WHEN 'approved' THEN CASE WHEN published_at IS NULL THEN 'approved' ELSE 'active' END
+          ELSE status
+        END
+        WHERE approval_status IN ('pending_review', 'draft', 'rejected', 'suspended', 'approved')`
+    );
+  }
 
-  database.exec(
-    `UPDATE matches
-      SET status = CASE
-        WHEN status = 'completed' THEN 'ended'
-        WHEN status = 'scheduled' AND id IN (SELECT match_id FROM streams) THEN 'assigned'
-        ELSE status
-      END
-      WHERE status IN ('completed', 'scheduled')`
-  );
+  if (hasTable(database, "matches") && hasTable(database, "streams")) {
+    database.exec(
+      `UPDATE matches
+        SET status = CASE
+          WHEN status = 'completed' THEN 'ended'
+          WHEN status = 'scheduled' AND id IN (SELECT match_id FROM streams) THEN 'assigned'
+          ELSE status
+        END
+        WHERE status IN ('completed', 'scheduled')`
+    );
+  }
 }

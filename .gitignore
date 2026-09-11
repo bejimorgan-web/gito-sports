@@ -15,6 +15,10 @@ win-unpacked/
 data/*.sqlite
 data/*.sqlite-shm
 data/*.sqlite-wal
+**/data/*.sqlite
+**/data/*.sqlite-shm
+**/data/*.sqlite-wal
+**/tmp/
 logs/
 *.log
 

@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-import { closeDatabase, syncAdminOperatorUserPassword } from "./connection.js";
+import { closeDatabase, migrateExistingOperationalState, syncAdminOperatorUserPassword } from "./connection.js";
 import { allowSqliteInstantiation, DatabaseSync } from "./sqlite.js";
 
 test("persistent database migration copies a valid legacy database only when the target is absent", async () => {
@@ -56,6 +56,47 @@ test("persistent database migration copies a valid legacy database only when the
   assert.equal(secondResult.migrated, false);
 
   fs.rmSync(tempRoot, { recursive: true, force: true });
+});
+
+test("migrateExistingOperationalState adds missing logo_url to the channels table", () => {
+  const tempDbPath = path.join(process.cwd(), "tmp", `channels-logo-migration-${Date.now()}.sqlite`);
+  fs.mkdirSync(path.dirname(tempDbPath), { recursive: true });
+
+  allowSqliteInstantiation(() => {
+    const db = new DatabaseSync(tempDbPath);
+
+    try {
+      db.exec(`
+        CREATE TABLE providers (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE channels (
+          id TEXT PRIMARY KEY,
+          provider_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          external_ref TEXT,
+          url TEXT NOT NULL,
+          content_type TEXT NOT NULL DEFAULT 'live',
+          status TEXT NOT NULL DEFAULT 'active',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
+        );
+      `);
+
+      migrateExistingOperationalState(db);
+
+      const columns = db.prepare("PRAGMA table_info(channels)").all() as Array<{ name: string }>;
+      assert.ok(columns.some((column) => column.name === "logo_url"));
+    } finally {
+      db.close();
+      fs.rmSync(tempDbPath, { force: true });
+    }
+  });
 });
 
 test("syncAdminOperatorUserPassword updates an existing admin password to match the configured local dev value", () => {

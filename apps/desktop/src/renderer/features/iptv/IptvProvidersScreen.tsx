@@ -193,6 +193,9 @@ export function IptvProvidersScreen({
                 </>
               ) : null}
             </div>
+            <div className="status-line">
+              <small>{statusMessage}</small>
+            </div>
             <div className="button-row">
               <button type="button" className="primary-button" disabled={providerAction !== "idle"} onClick={handleSaveAccount}>
                 {providerAction === "saving" ? "Saving…" : providerAction === "validating" ? "Validating…" : selectedProvider ? "Validate & Save" : "Create & Save"}
@@ -241,6 +244,9 @@ export function IptvProvidersScreen({
                 Password
                 <input type="password" value={providerCredentials[detailsProvider.id]?.password ?? password} onChange={(event) => setProviderCredentials((current) => ({ ...current, [detailsProvider.id]: { username: current[detailsProvider.id]?.username ?? username, password: event.target.value } }))} />
               </label>
+            </div>
+            <div className="status-line">
+              <small>{statusMessage}</small>
             </div>
             <div className="button-row">
               <button type="button" className="primary-button" onClick={handleDetailSave}>Validate & Save</button>
