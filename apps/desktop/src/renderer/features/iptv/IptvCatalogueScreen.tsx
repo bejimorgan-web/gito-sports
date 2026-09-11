@@ -5,8 +5,10 @@ import { apiClient } from "../../services/api-client";
 interface Props {
   providerId: string;
   onSelectChannel?: (channel: Channel) => void;
+  contentType?: "live" | "movies" | "series" | "favorites";
+  favoriteChannelIds?: string[];
+  showContentTypeCounts?: boolean;
 }
-
 type Category = { id: string; name: string; slug?: string | null };
 type Item = { id: string; title: string; description?: string | null; categoryId?: string | null; category?: { name: string } | null; posterUrl?: string | null };
 type LiveItem = Channel;
@@ -14,14 +16,14 @@ type Season = { id: string; seriesId: string; seasonNumber?: number | null; name
 type Episode = { id: string; title?: string | null; episodeNumber?: number | null; playbackReference: string };
 type GuideProgramme = { title: string; description?: string | null; startAt?: string | null; endAt?: string | null; externalProgrammeId: string };
 
-export function IptvCatalogueScreen({ providerId, onSelectChannel }: Props) {
+export function IptvCatalogueScreen({ providerId, onSelectChannel, contentType: requestedContentType = "live", favoriteChannelIds = [], showContentTypeCounts = true }: Props) {
   const [liveCategories, setLiveCategories] = useState<Category[]>([]);
   const [movieCategories, setMovieCategories] = useState<Category[]>([]);
   const [seriesCategories, setSeriesCategories] = useState<Category[]>([]);
   const [liveChannels, setLiveChannels] = useState<LiveItem[]>([]);
   const [movies, setMovies] = useState<Item[]>([]);
   const [series, setSeries] = useState<Item[]>([]);
-  const [contentType, setContentType] = useState<"live" | "movie" | "series">("live");
+  const [contentType, setContentType] = useState<"live" | "movie" | "series">(requestedContentType === "movies" ? "movie" : requestedContentType === "series" ? "series" : "live");
   const [selectedGroupId, setSelectedGroupId] = useState("");
   const [selectedGroupItems, setSelectedGroupItems] = useState<Array<Item | LiveItem>>([]);
   const [groupCounts, setGroupCounts] = useState<Record<string, number>>({});
@@ -33,6 +35,9 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel }: Props) {
   const [catalogueTotals, setCatalogueTotals] = useState({ live: 0, movie: 0, series: 0 });
   const [guideStatus, setGuideStatus] = useState("Select a channel or movie.");
   const [status, setStatus] = useState("Loading catalogue groups...");
+  useEffect(() => {
+    setContentType(requestedContentType === "movies" ? "movie" : requestedContentType === "series" ? "series" : "live");
+  }, [requestedContentType]);
 
   const mapLiveItem = (item: { id: string; providerId: string; externalRef?: string | null; name: string; categoryId?: string | null; category?: { name: string } | null; playbackReference: string; logoUrl?: string | null; status?: string }): LiveItem => ({
     id: item.id,
@@ -65,7 +70,8 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel }: Props) {
       setLiveCategories(live.items);
       setMovieCategories(movie.items);
       setSeriesCategories(seriesGroup.items);
-      setLiveChannels(liveItems.items.map(mapLiveItem));
+      const favoriteSet = new Set(favoriteChannelIds);
+      setLiveChannels(liveItems.items.map(mapLiveItem).filter((channel) => requestedContentType !== "favorites" || favoriteSet.has(channel.id)));
       setMovies(movieItems.items);
       setSeries(seriesItems.items);
       setStatus("Catalogue loaded from the provider catalogue.");
@@ -73,7 +79,7 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel }: Props) {
       if (!cancelled) setStatus("Unable to load catalogue groups.");
     });
     return () => { cancelled = true; };
-  }, [providerId]);
+  }, [favoriteChannelIds, providerId, requestedContentType]);
 
   useEffect(() => {
     setSelectedItem(undefined);
@@ -156,8 +162,10 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel }: Props) {
     if (contentType === "live") {
       void apiClient.listIptvChannels(providerId, categoryId).then((page) => {
         if (!cancelled) {
-          setSelectedGroupItems(page.items.map(mapLiveItem));
-          setGroupCounts((current) => ({ ...current, [categoryId]: page.total }));
+          const favoriteSet = new Set(favoriteChannelIds);
+          const items = page.items.map(mapLiveItem).filter((channel) => requestedContentType !== "favorites" || favoriteSet.has(channel.id));
+          setSelectedGroupItems(items);
+          setGroupCounts((current) => ({ ...current, [categoryId]: requestedContentType === "favorites" ? items.length : page.total }));
         }
       }).catch(() => { if (!cancelled) setSelectedGroupItems([]); });
     } else if (contentType === "movie") {
@@ -176,7 +184,7 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel }: Props) {
       }).catch(() => { if (!cancelled) setSelectedGroupItems([]); });
     }
     return () => { cancelled = true; };
-  }, [contentType, providerId, selectedGroup?.id]);
+  }, [contentType, favoriteChannelIds, providerId, requestedContentType, selectedGroup?.id]);
 
   return (
     <section className="console-panel iptv-catalogue-panel">
@@ -184,11 +192,11 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel }: Props) {
         <h3>IPTV Content Browser</h3>
         <span>{status}</span>
       </div>
-      <div className="iptv-catalogue-counts">
+      {showContentTypeCounts ? <div className="iptv-catalogue-counts">
         <button type="button" className={contentType === "live" ? "active" : ""} onClick={() => setContentType("live")}><strong>{counts.live}</strong><span>Channels</span></button>
         <button type="button" className={contentType === "movie" ? "active" : ""} onClick={() => setContentType("movie")}><strong>{counts.movie}</strong><span>Movies</span></button>
         <button type="button" className={contentType === "series" ? "active" : ""} onClick={() => setContentType("series")}><strong>{counts.series}</strong><span>Series</span></button>
-      </div>
+      </div> : null}
       <div className={`iptv-browser-grid iptv-browser-${contentType}`}>
         <aside className="iptv-browser-groups">
           <h4>{contentType === "live" ? "Channel Groups" : contentType === "movie" ? "Movie Groups" : "Series Groups"}</h4>

@@ -39,6 +39,7 @@ interface BroadcastConsoleScreenProps {
   onClearAssignment: () => void;
   onSetLiveMode: (enabled: boolean) => void;
   onOpenMatch?: (matchId?: string) => void;
+  onCatalogueContextChange?: (context: { providerId: string; contentType: ContentTypeOption; favoriteChannelIds: string[] }) => void;
   showLegacyChannelBrowser?: boolean;
 }
 
@@ -177,7 +178,7 @@ function getOperatorMessage(input: {
   return "No critical action required.";
 }
 
-type ContentTypeOption = "live" | "movies" | "series" | "favorites";
+export type ContentTypeOption = "live" | "movies" | "series" | "favorites";
 
 function matchesContentType(channel: Channel, contentType: ContentTypeOption) {
   const sourceText = [channel.groupName ?? "", channel.externalRef ?? "", channel.name ?? ""].join(" ").toLowerCase();
@@ -304,6 +305,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
   onClearAssignment,
   onSetLiveMode,
   onOpenMatch,
+  onCatalogueContextChange,
   showLegacyChannelBrowser = true
 }: BroadcastConsoleScreenProps) {
   const [selectedSportId, setSelectedSportId] = useState<string>("");
@@ -349,6 +351,11 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
 
   const previewConfirmed = Boolean(selectedChannel) && previewedChannelId === selectedChannel?.id;
   const visibleProviders = useMemo(() => providers.filter((provider) => provider.status === "active"), [providers]);
+  useEffect(() => {
+    if (selectedProviderId) {
+      onCatalogueContextChange?.({ providerId: selectedProviderId, contentType: selectedContentType, favoriteChannelIds });
+    }
+  }, [favoriteChannelIds, onCatalogueContextChange, selectedContentType, selectedProviderId]);
   const favoriteChannelIdSet = useMemo(() => new Set(favoriteChannelIds), [favoriteChannelIds]);
   const visibleProviderIds = useMemo(() => new Set(visibleProviders.map((provider) => provider.id)), [visibleProviders]);
   const selectedCompetition = useMemo(
@@ -932,7 +939,15 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
               >
                 <span style={{ fontSize: "1.1rem" }}>{option.icon}</span>
                 <strong>{option.label}</strong>
-                {option.key === "favorites" ? <span style={{ color: "#8fa1b3", fontSize: "0.8rem" }}>{favoriteChannelIds.length} saved</span> : null}
+                <span style={{ color: "#8fa1b3", fontSize: "0.8rem" }}>
+                  {option.key === "favorites"
+                    ? `${favoriteChannelIds.length} saved`
+                    : option.key === "live"
+                    ? `${providerDiagnostics?.contentTotals.live ?? 0} channels`
+                    : option.key === "movies"
+                    ? `${providerDiagnostics?.contentTotals.movies ?? 0} movies`
+                    : `${providerDiagnostics?.contentTotals.series ?? 0} series`}
+                </span>
               </button>
             );
           })}

@@ -5,7 +5,7 @@ import type { Channel, MatchAssignmentRequest, MatchAssignmentResult, PublishedL
 import { useRealtimeSync } from "@gito/shared";
 
 import { LiveMatchApprovalScreen } from "./features/approvals/LiveMatchApprovalScreen";
-import { BroadcastConsoleScreen } from "./features/broadcast/BroadcastConsoleScreen";
+import { BroadcastConsoleScreen, type ContentTypeOption } from "./features/broadcast/BroadcastConsoleScreen";
 import { DashboardShell } from "./features/dashboard/DashboardShell";
 import { MatchSchedulerScreen } from "./features/matches/MatchSchedulerScreen";
 import { IptvManagementScreen } from "./features/iptv/IptvManagementScreen";
@@ -69,6 +69,7 @@ function renderScreen(
     channelCategory: string;
     channelProviderFilter: string;
     channelContentType: "all" | "live" | "movies" | "series";
+    matchAssignmentCatalogueContext: { providerId: string; contentType: ContentTypeOption; favoriteChannelIds: string[] };
   },
   actions: {
     approveStream: (streamId: string) => Promise<void>;
@@ -83,6 +84,7 @@ function renderScreen(
     selectChannel: (channel: Channel) => void;
     clearAssignment: () => void;
     setLiveMode: (enabled: boolean) => void;
+    setMatchAssignmentCatalogueContext: (context: { providerId: string; contentType: ContentTypeOption; favoriteChannelIds: string[] }) => void;
     reassignStream: (streamId: string, channelId: string) => Promise<void>;
     deleteStream: (streamId: string) => Promise<void>;
     syncXtream: Parameters<typeof IptvManagementScreen>[0]["onSyncXtream"];
@@ -143,9 +145,16 @@ function renderScreen(
             onSetLiveMode={actions.setLiveMode}
             onOpenMatch={actions.openMatch}
             showLegacyChannelBrowser={false}
+            onCatalogueContextChange={actions.setMatchAssignmentCatalogueContext}
           />
           {state.preferredProviderId || state.providers.find((provider) => provider.status === "active")?.id ? (
-            <IptvCatalogueScreen providerId={state.preferredProviderId ?? state.providers.find((provider) => provider.status === "active")!.id} onSelectChannel={actions.selectChannel} />
+            <IptvCatalogueScreen
+              providerId={state.matchAssignmentCatalogueContext.providerId || state.preferredProviderId || state.providers.find((provider) => provider.status === "active")!.id}
+              contentType={state.matchAssignmentCatalogueContext.contentType}
+              favoriteChannelIds={state.matchAssignmentCatalogueContext.favoriteChannelIds}
+              showContentTypeCounts={false}
+              onSelectChannel={actions.selectChannel}
+            />
           ) : (
             <section className="console-panel">
               <h3>IPTV Content Browser</h3>
@@ -258,6 +267,11 @@ export function App() {
   const [previewedChannelId, setPreviewedChannelId] = useState<string>();
   const [selectedChannel, setSelectedChannel] = useState<Channel>();
   const [preferredProviderId, setPreferredProviderId] = useState<string | undefined>(undefined);
+  const [matchAssignmentCatalogueContext, setMatchAssignmentCatalogueContext] = useState<{
+    providerId: string;
+    contentType: ContentTypeOption;
+    favoriteChannelIds: string[];
+  }>({ providerId: "", contentType: "live", favoriteChannelIds: [] });
   const [selectedMatchId, setSelectedMatchId] = useState<string | undefined>(undefined);
   const [liveMode, setLiveMode] = useState(false);
   const [channelSearch, setChannelSearch] = useState("");
@@ -729,6 +743,7 @@ export function App() {
         deleteStream,
         reportStreamHealth,
         setLiveMode,
+        setMatchAssignmentCatalogueContext,
         selectChannel,
         setChannelSearch,
         setChannelCategory,
@@ -759,6 +774,7 @@ export function App() {
         deleteStream,
         reportStreamHealth,
         setLiveMode,
+        setMatchAssignmentCatalogueContext,
         selectChannel,
         setChannelSearch,
         setChannelCategory,
@@ -789,7 +805,8 @@ export function App() {
       channelSearch,
       channelCategory,
       channelProviderFilter,
-      channelContentType
+      channelContentType,
+      matchAssignmentCatalogueContext
     }),
     [
       accessToken,
@@ -806,7 +823,8 @@ export function App() {
       channelSearch,
       channelCategory,
       channelProviderFilter,
-      channelContentType
+      channelContentType,
+      matchAssignmentCatalogueContext
     ]
   );
 
