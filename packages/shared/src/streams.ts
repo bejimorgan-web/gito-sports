@@ -30,6 +30,9 @@ export interface IPTVProvider {
   availabilityStatus: ProviderAvailabilityStatus;
   failedChannelLoads: number;
   healthScore: number;
+  username?: string | null;
+  password?: string | null;
+  expiresAt?: string | null;
   lastSuccessfulStreamLoadAt?: string;
   createdAt: string;
   updatedAt: string;

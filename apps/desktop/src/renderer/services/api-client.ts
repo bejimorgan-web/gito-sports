@@ -69,10 +69,20 @@ export { API_BASE_URL };
 
 const REQUEST_TIMEOUT_MS = 35_000;
 
+let currentAccessToken: string | null = null;
+
+export function setAccessToken(nextToken: string | null) {
+  currentAccessToken = nextToken && nextToken.trim() ? nextToken.trim() : null;
+}
+
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
     ...((init?.headers as Record<string, string>) ?? {})
   };
+
+  if (currentAccessToken && !headers.authorization) {
+    headers.authorization = `Bearer ${currentAccessToken}`;
+  }
 
   if (!(init?.body instanceof FormData)) {
     headers["content-type"] = "application/json";
@@ -82,7 +92,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
   const abortFromCaller = () => controller.abort();
   init?.signal?.addEventListener("abort", abortFromCaller, { once: true });
-  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = globalThis.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
@@ -97,7 +107,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const message = fetchError instanceof Error ? fetchError.message : String(fetchError);
     throw new Error(`Network request to ${API_BASE_URL}${path} failed: ${message}`);
   } finally {
-    window.clearTimeout(timeout);
+    globalThis.clearTimeout(timeout);
     init?.signal?.removeEventListener("abort", abortFromCaller);
   }
 

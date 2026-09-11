@@ -39,6 +39,9 @@ interface ProviderRow {
   type: "manual" | "m3u" | "xtream";
   auth_type: "none" | "basic" | "token";
   sync_mode: "partial" | "full";
+  credential_username: string | null;
+  credential_password: string | null;
+  expires_at?: string | null;
   status: "active" | "pending" | "failed" | "invalid" | "inactive";
   availability_status: "online" | "offline" | "degraded" | "unknown";
   failed_channel_loads: number;
@@ -76,6 +79,9 @@ function mapProvider(row: ProviderRow): IPTVProvider & { syncMode?: ProviderSync
     availabilityStatus: row.availability_status,
     failedChannelLoads: row.failed_channel_loads,
     healthScore: row.health_score,
+    username: row.credential_username ?? null,
+    password: row.credential_password ?? null,
+    expiresAt: row.expires_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     ...(row.last_successful_stream_load_at ? { lastSuccessfulStreamLoadAt: row.last_successful_stream_load_at } : {})
@@ -113,8 +119,9 @@ function mapChannel(row: ChannelRow): Channel {
 export function listProviders(): IPTVProvider[] {
   const rows = getDatabase()
     .prepare(
-      `SELECT id, name, base_url, type, auth_type, sync_mode, status, availability_status,
-        failed_channel_loads, health_score, last_successful_stream_load_at, created_at, updated_at
+      `SELECT id, name, base_url, type, auth_type, sync_mode, credential_username, credential_password, expires_at,
+        status, availability_status, failed_channel_loads, health_score,
+        last_successful_stream_load_at, created_at, updated_at
       FROM providers WHERE deleted = 0 ORDER BY name`
     )
     .all() as ProviderRow[];
@@ -192,8 +199,9 @@ export function createProvider(input: CreateProviderRequest): IPTVProvider {
 export function getProviderById(providerId: string): IPTVProvider | undefined {
   const row = getDatabase()
     .prepare(
-      `SELECT id, name, base_url, type, auth_type, sync_mode, status, availability_status,
-        failed_channel_loads, health_score, last_successful_stream_load_at, created_at, updated_at
+      `SELECT id, name, base_url, type, auth_type, sync_mode, credential_username, credential_password, expires_at,
+        status, availability_status, failed_channel_loads, health_score,
+        last_successful_stream_load_at, created_at, updated_at
       FROM providers WHERE id = ? AND deleted = 0`
     )
     .get(providerId) as ProviderRow | undefined;
@@ -270,7 +278,7 @@ export function softDeleteProvider(providerId: string): boolean {
 export function getProviderCredentials(providerId: string) {
   return getDatabase()
     .prepare(
-      `SELECT id, name, base_url, type, auth_type, sync_mode, credential_username, credential_password,
+      `SELECT id, name, base_url, type, auth_type, sync_mode, credential_username, credential_password, expires_at,
         status, availability_status, failed_channel_loads, health_score, last_successful_stream_load_at,
         created_at, updated_at
       FROM providers WHERE id = ? AND deleted = 0`
@@ -598,8 +606,8 @@ function buildChannelFilterClauses(opts?: { providerId?: string; q?: string; cat
   }
 
   if (opts?.category) {
-    clauses.push("c.group_name = ?");
-    params.push(opts.category);
+    clauses.push("(c.group_name = ? OR c.category_id = ?)");
+    params.push(opts.category, opts.category);
   }
 
   if (opts?.q) {

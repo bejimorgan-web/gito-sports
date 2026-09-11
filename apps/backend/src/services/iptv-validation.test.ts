@@ -76,6 +76,32 @@ test("does not wait indefinitely for a provider response body", async () => {
   assert.ok(Date.now() - startedAt < 1000);
 });
 
+test("listChannelsPage accepts category filters when the category is stored as a provider category id or group name", async () => {
+  const provider = createProvider({
+    name: "Category Filter Provider",
+    baseUrl: "https://example.com/category-filter",
+    type: "xtream",
+    username: "filter-user",
+    password: "filter-pass"
+  });
+
+  syncProviderChannels(provider.id, [{
+    name: "Sports One",
+    externalRef: "sports-one",
+    categoryId: "category-42",
+    groupName: "Sports",
+    url: "https://example.com/live/sports-one.m3u8",
+    contentType: "live"
+  }]);
+  setProviderStatus(provider.id, "active");
+
+  const byGroupName = listChannelsPage({ providerId: provider.id, category: "Sports" }, 1, 50, "active");
+  assert.equal(byGroupName.total, 1);
+
+  const byCategoryId = listChannelsPage({ providerId: provider.id, category: "category-42" }, 1, 50, "active");
+  assert.equal(byCategoryId.total, 1);
+});
+
 test("Xtream catalogue HTTP responses become normalized persisted channels", async () => {
   const originalFetch = globalThis.fetch;
   const requests: URL[] = [];

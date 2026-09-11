@@ -157,8 +157,8 @@ export function IptvManagementScreen({
       setProviderName(provider.name);
       setBaseUrl(provider.baseUrl);
       setType(provider.type as CreateProviderRequest["type"]);
-      setUsername("");
-      setPassword("");
+      setUsername(provider.username ?? "");
+      setPassword(provider.password ?? "");
       setStatusMessage("Ready");
       setImportStatus("Ready");
     } else {

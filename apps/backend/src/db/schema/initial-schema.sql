@@ -136,6 +136,7 @@ CREATE TABLE IF NOT EXISTS providers (
   auth_type TEXT NOT NULL DEFAULT 'none',
   credential_username TEXT,
   credential_password TEXT,
+  expires_at TEXT,
   sync_mode TEXT NOT NULL DEFAULT 'partial' CHECK (
     sync_mode IN ('partial', 'full')
   ),
@@ -146,7 +147,7 @@ CREATE TABLE IF NOT EXISTS providers (
   failed_channel_loads INTEGER NOT NULL DEFAULT 0,
   health_score INTEGER NOT NULL DEFAULT 100,
   status TEXT NOT NULL DEFAULT 'pending' CHECK (
-    status IN ('active', 'pending', 'failed', 'invalid')
+    status IN ('active', 'pending', 'failed', 'invalid', 'inactive')
   ),
   deleted INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
@@ -160,6 +161,7 @@ CREATE TABLE IF NOT EXISTS channels (
   external_ref TEXT,
   category_id TEXT,
   group_name TEXT,
+  logo_url TEXT,
   url TEXT NOT NULL,
   content_type TEXT NOT NULL DEFAULT 'live' CHECK (content_type IN ('live', 'movie', 'series')),
   status TEXT NOT NULL DEFAULT 'active',

@@ -1042,7 +1042,94 @@ function seedShadowCatalogLayer(database: DatabaseSync) {
   }
 }
 
+function repairBrokenChannelsProviderReference(database: DatabaseSync) {
+  if (!hasTable(database, "channels") || !hasTable(database, "providers")) {
+    return;
+  }
+
+  const foreignKeys = database.prepare("PRAGMA foreign_key_list(channels)").all() as Array<{ from: string; table: string; to: string }>; 
+  const providerReference = foreignKeys.find((fk) => fk.from === "provider_id");
+
+  if (providerReference && providerReference.table === "providers") {
+    return;
+  }
+
+  console.warn("[startup] repairing channels.provider_id foreign key to point at providers(id)");
+
+  const legacyRows = database.prepare("SELECT COUNT(*) AS count FROM channels").get() as { count: number };
+  const validProviderIds = database.prepare("SELECT id FROM providers").all() as Array<{ id: string }>;
+  const validProviderSet = new Set(validProviderIds.map((row) => row.id));
+  const invalidCount = database.prepare("SELECT COUNT(*) AS count FROM channels WHERE provider_id NOT IN (SELECT id FROM providers)").get() as { count: number };
+
+  if (legacyRows.count > 0 && invalidCount.count > 0) {
+    console.warn(`[startup] removing ${invalidCount.count} channel rows that reference missing provider ids during repair`);
+  }
+
+  database.exec("PRAGMA foreign_keys = OFF;");
+
+  try {
+    database.exec("ALTER TABLE channels RENAME TO channels_legacy_broken;");
+    database.exec(`
+      CREATE TABLE channels (
+        id TEXT PRIMARY KEY,
+        provider_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        external_ref TEXT,
+        category_id TEXT,
+        group_name TEXT,
+        logo_url TEXT,
+        url TEXT NOT NULL,
+        content_type TEXT NOT NULL DEFAULT 'live' CHECK (content_type IN ('live', 'movie', 'series')),
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
+      )
+    `);
+
+    const preservedChannelRows = database.prepare(`
+      SELECT id, provider_id, name, external_ref, category_id, group_name, logo_url, url, content_type, status, created_at, updated_at
+      FROM channels_legacy_broken
+      WHERE provider_id IN (SELECT id FROM providers)
+    `).all() as Array<Record<string, unknown>>;
+
+    if (preservedChannelRows.length > 0) {
+      const insertColumns = [
+        "id",
+        "provider_id",
+        "name",
+        "external_ref",
+        "category_id",
+        "group_name",
+        "logo_url",
+        "url",
+        "content_type",
+        "status",
+        "created_at",
+        "updated_at"
+      ];
+
+      const placeholders = insertColumns.map(() => "?").join(", ");
+      const insertStmt = database.prepare(`INSERT INTO channels (${insertColumns.join(", ")}) VALUES (${placeholders})`);
+
+      for (const row of preservedChannelRows) {
+        insertStmt.run(...insertColumns.map((column) => row[column] ?? null));
+      }
+    }
+
+    database.exec("DROP TABLE channels_legacy_broken;");
+  } finally {
+    database.exec("PRAGMA foreign_keys = ON;");
+  }
+}
+
 function migrateExistingOperationalState(database: DatabaseSync) {
+  repairBrokenChannelsProviderReference(database);
+
+  if (!hasColumn(database, "providers", "expires_at")) {
+    database.exec("ALTER TABLE providers ADD COLUMN expires_at TEXT;");
+  }
+
   if (!hasColumn(database, "streams", "status")) {
     database.exec("ALTER TABLE streams ADD COLUMN status TEXT NOT NULL DEFAULT 'idle';");
   }

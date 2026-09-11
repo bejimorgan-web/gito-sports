@@ -25,7 +25,7 @@ import { SquadManagementScreen } from "./features/teams/SquadManagementScreen";
 import { FormationManagementScreen } from "./features/sports/FormationManagementScreen";
 import { AuthenticatedLayout } from "./layouts/AuthenticatedLayout";
 import { LoginScreen } from "./screens/LoginScreen";
-import { apiClient, API_BASE_URL } from "./services/api-client";
+import { apiClient, API_BASE_URL, setAccessToken as setClientAccessToken } from "./services/api-client";
 import type { NavigationKey } from "./types/navigation";
 
 type ProviderList = Awaited<ReturnType<typeof apiClient.listProviders>>;
@@ -279,6 +279,7 @@ export function App() {
   const handleLogin = useCallback((email: string, accessToken: string) => {
     setCurrentEmail(email);
     setAccessToken(accessToken);
+    setClientAccessToken(accessToken);
     setIsAuthenticated(true);
   }, []);
 
@@ -287,6 +288,7 @@ export function App() {
     setIsAuthenticated(false);
     setCurrentEmail(null);
     setAccessToken("");
+    setClientAccessToken(null);
     setActiveScreen("dashboard");
     setAssignment(undefined);
     setChannels([]);
@@ -393,6 +395,10 @@ export function App() {
       setBackendStatus("offline");
     }
   }, [clearPreviewState]);
+
+  useEffect(() => {
+    setClientAccessToken(accessToken || null);
+  }, [accessToken]);
 
   useEffect(() => {
     if (accessToken) {

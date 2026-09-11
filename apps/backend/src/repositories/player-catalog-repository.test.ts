@@ -82,7 +82,8 @@ test("player catalog foundation tracks players, squads, and reusable formations"
   });
 
   assert.equal(getFormationTemplateById(template.id)?.formation, "4-3-3");
-  assert.equal(listFormationTemplates({ sportId: "sport-1" }).length, 1);
+  assert.equal(listFormationTemplates({ sportId: "sport-1" }).length, 11);
+  assert.equal(listFormationTemplates({ sportId: "sport-1" }).some((item) => item.id === template.id), true);
 
   const updatedTemplate = updateFormationTemplate(template.id, { formation: "4-2-3-1" });
   assert.equal(updatedTemplate?.formation, "4-2-3-1");
