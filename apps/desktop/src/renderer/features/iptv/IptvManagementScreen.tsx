@@ -328,7 +328,10 @@ export function IptvManagementScreen({
         handleSelectProvider("");
       }
     } catch (error) {
-      setStatusMessage(getFriendlyErrorMessage(error) || "Delete failed.");
+      const message = error instanceof Error ? error.message : String(error);
+      setStatusMessage(/failed to fetch|network|502|503|504/i.test(message)
+        ? "The backend is temporarily unavailable. The account was not deleted; try again when the backend is online."
+        : message || "Delete failed.");
     } finally {
       setDeletingProviderId(null);
     }

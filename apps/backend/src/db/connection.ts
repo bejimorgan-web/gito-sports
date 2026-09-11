@@ -1569,6 +1569,7 @@ function deleteProviderOwnedRows(database: DatabaseSync, providerId: string) {
     ["iptv_channels", "provider_id = ?"] as const,
     ["iptv_provider_health", "provider_id = ?"] as const,
     ["iptv_logs", "provider_id = ?"] as const,
+    ["match_streams", "provider_id = ?"] as const,
     ["channels", "provider_id = ?"] as const,
     ["iptv_providers", "id = ?"] as const
   ];

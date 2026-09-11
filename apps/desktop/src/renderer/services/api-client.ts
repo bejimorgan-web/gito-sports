@@ -89,7 +89,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   const method = init?.method?.toUpperCase() ?? "GET";
-  const canRetry = method === "GET";
+  const canRetry = method === "GET" || (method === "DELETE" && path.startsWith("/iptv/providers/"));
   const requestTimeoutMs = path.startsWith("/iptv/providers") && ["POST", "PUT"].includes(method)
     ? 120_000
     : REQUEST_TIMEOUT_MS;
