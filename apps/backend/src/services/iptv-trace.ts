@@ -19,6 +19,8 @@ export interface ChannelSyncTracePayload {
 }
 
 export function logChannelSyncTrace(trace: ChannelSyncTracePayload) {
+  if (process.env.IPTV_TRACE_LOGGING !== "true") return;
+
   const timestamp = trace.timestamp ?? new Date().toISOString();
   console.log(JSON.stringify({
     event: "channel_sync_trace",
