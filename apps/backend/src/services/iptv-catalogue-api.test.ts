@@ -13,6 +13,7 @@ import {
   syncXtreamSeriesDetailed,
   syncXtreamSeasonsDetailed,
   syncXtreamEpisodesDetailed,
+  upsertIptvCategory,
   upsertIptvEpgChannel,
   upsertIptvEpgProgramme
 } from "../repositories/iptv-catalogue-repository.js";
@@ -95,6 +96,43 @@ test("catalogue API returns normalized provider-scoped hierarchy and canonical p
     assert.equal(invalidPage.status, 400);
     const invalidTime = await request(baseUrl, `/iptv/providers/${provider.id}/epg/programmes?from=not-a-time`);
     assert.equal(invalidTime.status, 400);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("Xtream live category identity yields one browser group for four channels", async () => {
+  const provider = createProvider({ name: `Xtream Group Identity ${Date.now()}`, baseUrl: `https://xtream-group.example/${Date.now()}`, type: "xtream", authType: "basic", username: "user", password: "pass" });
+  syncXtreamCategories(provider.id, "live", [{ providerCategoryId: "42", name: "Sports", metadata: { source: "xtream" } }]);
+  syncProviderChannels(provider.id, [1, 2, 3, 4].map((number) => ({
+    name: `Live ${number}`,
+    url: `https://example.com/live/${number}.m3u8`,
+    externalRef: String(number),
+    categoryId: "42",
+    groupName: "Sports"
+  })));
+  upsertIptvCategory(provider.id, { providerCategoryId: "Sports", contentType: "live", name: "Sports" });
+  syncXtreamCategories(provider.id, "live", [{ providerCategoryId: "42", name: "Sports", metadata: { source: "xtream" } }]);
+
+  const { server, baseUrl } = await startTestServer();
+  try {
+    const categoriesResponse = await request(baseUrl, `/iptv/providers/${provider.id}/categories?contentType=live&pageSize=20`);
+    const categoriesBody = await categoriesResponse.json() as any;
+    assert.equal(categoriesResponse.status, 200);
+    assert.equal(categoriesBody.data.total, 1);
+    assert.equal(categoriesBody.data.items.length, 1);
+    assert.equal(categoriesBody.data.items[0].providerCategoryId, "42");
+
+    const channelsResponse = await request(baseUrl, `/iptv/providers/${provider.id}/channels?categoryId=${encodeURIComponent(categoriesBody.data.items[0].id)}&pageSize=20`);
+    const channelsBody = await channelsResponse.json() as any;
+    assert.equal(channelsResponse.status, 200);
+    assert.equal(channelsBody.data.total, 4, JSON.stringify(channelsBody.data));
+    assert.equal(channelsBody.data.items.length, 4, JSON.stringify(channelsBody.data));
+    assert.equal(new Set(channelsBody.data.items.map((item: any) => item.id)).size, 4);
+    assert.equal(new Set(channelsBody.data.items.map((item: any) => item.category.id)).size, 1);
+
+    const storedCategories = getDatabase().prepare("SELECT COUNT(*) AS count FROM iptv_categories WHERE provider_id = ? AND content_type = 'live' AND status = 'active'").get(provider.id) as { count: number };
+    assert.equal(storedCategories.count, 1);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }

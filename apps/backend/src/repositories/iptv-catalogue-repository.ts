@@ -121,6 +121,18 @@ function ensureProviderCatalogueCategories(providerId: string, contentType?: Ipt
     WHERE c.provider_id = ?
       AND c.status != 'archived'
       AND c.status != 'stale'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM iptv_categories authoritative
+        WHERE authoritative.provider_id = c.provider_id
+          AND authoritative.content_type = c.content_type
+          AND authoritative.status != 'archived'
+          AND (
+            authoritative.id = c.category_id
+            OR authoritative.provider_category_id = c.category_id
+            OR authoritative.provider_category_id = c.group_name
+          )
+      )
       ${contentType ? "AND c.content_type = ?" : ""}
     ORDER BY c.content_type, category_name
   `).all(providerId, ...(contentType ? [contentType] : [])) as Array<{ content_type: IptvCategoryContentType; provider_category_id: string | null; category_name: string | null }>;
@@ -181,7 +193,8 @@ export function listIptvCategoriesPage(providerId: string, contentType?: IptvCat
   const clauses = ["provider_id = ?"];
   const params: unknown[] = [providerId];
   if (contentType) { clauses.push("content_type = ?"); params.push(contentType); }
-  if (options.status) { clauses.push("status = ?"); params.push(options.status); }
+  clauses.push("status = ?");
+  params.push(options.status ?? "active");
   const where = clauses.join(" AND ");
   const total = Number((db.prepare(`SELECT COUNT(*) AS count FROM iptv_categories WHERE ${where}`).get(...params) as { count: number }).count ?? 0);
   const rows = db.prepare(`SELECT * FROM iptv_categories WHERE ${where} ORDER BY ordering IS NULL, ordering, name LIMIT ? OFFSET ?`).all(...params, pageSize, offset) as any[];
@@ -196,12 +209,18 @@ export function listIptvChannelsPage(providerId: string, options: CatalogueListO
   const clauses = ["c.provider_id = ?"];
   const params: unknown[] = [providerId];
   if (options.status) { clauses.push("c.status = ?"); params.push(options.status); }
-  if (options.categoryId) { clauses.push("(c.category_id = ? OR cat.id = ? OR cat.provider_category_id = ?)"); params.push(options.categoryId, options.categoryId, options.categoryId); }
+  if (options.categoryId) {
+    clauses.push("(c.category_id = ? OR EXISTS (SELECT 1 FROM iptv_categories requested_category WHERE requested_category.provider_id = c.provider_id AND requested_category.content_type = 'live' AND requested_category.provider_category_id = ? AND (requested_category.id = c.category_id OR requested_category.provider_category_id = c.category_id OR requested_category.provider_category_id = c.group_name)))");
+    params.push(options.categoryId, options.categoryId);
+  }
   if (options.search) { clauses.push("LOWER(c.name) LIKE ?"); params.push(`%${options.search.toLowerCase()}%`); }
   const where = clauses.join(" AND ");
-  const from = `FROM channels c LEFT JOIN iptv_categories cat ON cat.provider_id = c.provider_id AND cat.content_type = 'live' AND (cat.id = c.category_id OR cat.provider_category_id = c.category_id OR cat.provider_category_id = c.group_name)`;
+  const from = "FROM channels c";
+  const categoryId = `(SELECT category_match.id FROM iptv_categories category_match WHERE category_match.provider_id = c.provider_id AND category_match.content_type = 'live' AND (category_match.id = c.category_id OR category_match.provider_category_id = c.category_id OR category_match.provider_category_id = c.group_name) ORDER BY category_match.id = c.category_id DESC, category_match.provider_category_id = c.category_id DESC LIMIT 1)`;
+  const categoryName = `(SELECT category_match.name FROM iptv_categories category_match WHERE category_match.id = ${categoryId} LIMIT 1)`;
+  const categorySlug = `(SELECT category_match.slug FROM iptv_categories category_match WHERE category_match.id = ${categoryId} LIMIT 1)`;
   const total = Number((db.prepare(`SELECT COUNT(*) AS count ${from} WHERE ${where}`).get(...params) as { count: number }).count ?? 0);
-  const rows = db.prepare(`SELECT c.*, cat.id AS category_canonical_id, cat.name AS category_name, cat.slug AS category_slug FROM channels c LEFT JOIN iptv_categories cat ON cat.provider_id = c.provider_id AND cat.content_type = 'live' AND (cat.id = c.category_id OR cat.provider_category_id = c.category_id OR cat.provider_category_id = c.group_name) WHERE ${where} ORDER BY c.name, c.id LIMIT ? OFFSET ?`).all(...params, pageSize, offset) as any[];
+  const rows = db.prepare(`SELECT c.*, ${categoryId} AS category_canonical_id, ${categoryName} AS category_name, ${categorySlug} AS category_slug ${from} WHERE ${where} ORDER BY c.name, c.id LIMIT ? OFFSET ?`).all(...params, pageSize, offset) as any[];
   return cataloguePage(rows.map((row) => ({
     id: row.id, providerId: row.provider_id, externalRef: row.external_ref, name: row.name,
     categoryId: row.category_canonical_id ?? row.category_id ?? row.group_name,
@@ -318,7 +337,7 @@ function syncRowsInBatches<T>(records: T[], save: (record: T) => "inserted" | "u
 }
 
 export function syncXtreamCategories(providerId: string, contentType: "live" | "movie" | "series", records: Array<{ providerCategoryId: string; name: string; parentCategoryId?: string; metadata?: unknown }>) {
-  return syncRowsInBatches(records, (record) => {
+  const stats = syncRowsInBatches(records, (record) => {
     const db = getDatabase();
     const existing = db.prepare("SELECT name, slug, parent_category_id, metadata_json, status FROM iptv_categories WHERE provider_id = ? AND content_type = ? AND provider_category_id = ?").get(providerId, contentType, record.providerCategoryId) as any;
     const slug = record.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "category";
@@ -327,6 +346,10 @@ export function syncXtreamCategories(providerId: string, contentType: "live" | "
     upsertIptvCategory(providerId, { ...record, contentType, slug, status: "active" });
     return existing ? changed ? "updated" : "unchanged" : "inserted";
   });
+  if (records.length > 0) {
+    archiveMissingXtreamCategories(providerId, contentType, records.map((record) => record.providerCategoryId));
+  }
+  return stats;
 }
 
 export function archiveMissingXtreamCategories(providerId: string, contentType: "live" | "movie" | "series", providerCategoryIds: string[]) {
