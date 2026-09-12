@@ -110,6 +110,38 @@ function mapCategory(row: any) {
   };
 }
 
+function ensureProviderCatalogueCategories(providerId: string, contentType?: IptvCategoryContentType) {
+  const db = getDatabase();
+  const rows = db.prepare(`
+    SELECT DISTINCT
+      c.content_type,
+      COALESCE(c.group_name, c.category_id) AS provider_category_id,
+      COALESCE(c.group_name, c.category_id, 'Unnamed group') AS category_name
+    FROM channels c
+    WHERE c.provider_id = ?
+      AND c.status != 'archived'
+      AND c.status != 'stale'
+      ${contentType ? "AND c.content_type = ?" : ""}
+    ORDER BY c.content_type, category_name
+  `).all(providerId, ...(contentType ? [contentType] : [])) as Array<{ content_type: IptvCategoryContentType; provider_category_id: string | null; category_name: string | null }>;
+
+  for (const row of rows) {
+    const providerCategoryId = String(row.provider_category_id ?? "").trim();
+    if (!providerCategoryId) continue;
+
+    upsertIptvCategory(providerId, {
+      providerCategoryId,
+      contentType: row.content_type,
+      name: String(row.category_name ?? "Unnamed group"),
+      metadata: {
+        source: "channel-scan",
+        providerCategoryId,
+        categoryName: row.category_name ?? null
+      }
+    });
+  }
+}
+
 function mapEpgChannel(row: any) {
   return {
     id: row.id,
@@ -142,6 +174,8 @@ function mapEpgProgramme(row: any) {
 }
 
 export function listIptvCategoriesPage(providerId: string, contentType?: IptvCategoryContentType, options: CatalogueListOptions = {}) {
+  ensureProviderCatalogueCategories(providerId, contentType);
+
   const db = getDatabase();
   const { page, pageSize, offset } = pageValues(options);
   const clauses = ["provider_id = ?"];
@@ -155,6 +189,8 @@ export function listIptvCategoriesPage(providerId: string, contentType?: IptvCat
 }
 
 export function listIptvChannelsPage(providerId: string, options: CatalogueListOptions = {}) {
+  ensureProviderCatalogueCategories(providerId);
+
   const db = getDatabase();
   const { page, pageSize, offset } = pageValues(options);
   const clauses = ["c.provider_id = ?"];
@@ -163,12 +199,14 @@ export function listIptvChannelsPage(providerId: string, options: CatalogueListO
   if (options.categoryId) { clauses.push("(c.category_id = ? OR cat.id = ? OR cat.provider_category_id = ?)"); params.push(options.categoryId, options.categoryId, options.categoryId); }
   if (options.search) { clauses.push("LOWER(c.name) LIKE ?"); params.push(`%${options.search.toLowerCase()}%`); }
   const where = clauses.join(" AND ");
-  const from = `FROM channels c LEFT JOIN iptv_categories cat ON cat.provider_id = c.provider_id AND cat.content_type = 'live' AND (cat.id = c.category_id OR cat.provider_category_id = c.category_id)`;
+  const from = `FROM channels c LEFT JOIN iptv_categories cat ON cat.provider_id = c.provider_id AND cat.content_type = 'live' AND (cat.id = c.category_id OR cat.provider_category_id = c.category_id OR cat.provider_category_id = c.group_name)`;
   const total = Number((db.prepare(`SELECT COUNT(*) AS count ${from} WHERE ${where}`).get(...params) as { count: number }).count ?? 0);
-  const rows = db.prepare(`SELECT c.*, cat.id AS category_canonical_id, cat.name AS category_name, cat.slug AS category_slug FROM channels c LEFT JOIN iptv_categories cat ON cat.provider_id = c.provider_id AND cat.content_type = 'live' AND (cat.id = c.category_id OR cat.provider_category_id = c.category_id) WHERE ${where} ORDER BY c.name, c.id LIMIT ? OFFSET ?`).all(...params, pageSize, offset) as any[];
+  const rows = db.prepare(`SELECT c.*, cat.id AS category_canonical_id, cat.name AS category_name, cat.slug AS category_slug FROM channels c LEFT JOIN iptv_categories cat ON cat.provider_id = c.provider_id AND cat.content_type = 'live' AND (cat.id = c.category_id OR cat.provider_category_id = c.category_id OR cat.provider_category_id = c.group_name) WHERE ${where} ORDER BY c.name, c.id LIMIT ? OFFSET ?`).all(...params, pageSize, offset) as any[];
   return cataloguePage(rows.map((row) => ({
     id: row.id, providerId: row.provider_id, externalRef: row.external_ref, name: row.name,
-    categoryId: row.category_canonical_id ?? row.category_id, category: row.category_name ? { id: row.category_canonical_id, name: row.category_name, slug: row.category_slug } : null,
+    categoryId: row.category_canonical_id ?? row.category_id ?? row.group_name,
+    category: row.category_name ? { id: row.category_canonical_id, name: row.category_name, slug: row.category_slug } : null,
+    groupName: row.group_name,
     playbackReference: row.url, logoUrl: row.logo_url, epgChannelId: row.epg_channel_id,
     metadata: parseMetadata(row.metadata_json), status: row.status
   })), total, page, pageSize);

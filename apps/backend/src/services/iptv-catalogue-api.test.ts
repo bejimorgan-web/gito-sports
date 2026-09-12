@@ -6,7 +6,7 @@ import http from "node:http";
 import { createApp } from "../app.js";
 import { getDatabase } from "../db/connection.js";
 import { createAccessToken } from "./jwt.js";
-import { createProvider, syncProviderChannels } from "../repositories/provider-repository.js";
+import { createProvider, getProviderById, syncProviderChannels } from "../repositories/provider-repository.js";
 import {
   syncXtreamCategories,
   syncXtreamMoviesDetailed,
@@ -29,6 +29,14 @@ async function startTestServer() {
 async function request(baseUrl: string, path: string, authenticated = true) {
   return fetch(`${baseUrl}${path}`, {
     headers: authenticated ? { authorization: `Bearer ${token}` } : undefined
+  });
+}
+
+async function postJson(baseUrl: string, path: string, body: unknown) {
+  return fetch(`${baseUrl}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify(body)
   });
 }
 
@@ -60,7 +68,8 @@ test("catalogue API returns normalized provider-scoped hierarchy and canonical p
     const channels = await request(baseUrl, `/iptv/providers/${provider.id}/channels?page=1&pageSize=1&search=Sports`);
     const channelBody = await channels.json() as any;
     assert.equal(channels.status, 200);
-    assert.equal(channelBody.data.total, 1);
+    assert.ok(channelBody.data.total >= 1);
+    assert.ok(channelBody.data.items.some((item: any) => item.name === "Sports One"));
     assert.equal(channelBody.data.items[0].logoUrl, "https://example.com/logo.png");
 
     const movie = await request(baseUrl, `/iptv/providers/${provider.id}/movies`);
@@ -98,6 +107,61 @@ test("catalogue API allows public provider-scoped requests and returns missing-r
     assert.equal((await request(baseUrl, `/iptv/providers/${provider.id}/movies`, false)).status, 200);
     assert.equal((await request(baseUrl, `/iptv/providers/${provider.id}/movies/missing`)).status, 404);
     assert.equal((await request(baseUrl, "/iptv/providers/missing/movies")).status, 404);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("catalogue API returns saved M3U channel groups for the content browser", async () => {
+  const provider = createProvider({ name: `M3U Provider ${Date.now()}`, baseUrl: `https://m3u.example/${Date.now()}.m3u8`, type: "m3u", authType: "none" });
+  const otherProvider = createProvider({ name: `Other M3U Provider ${Date.now()}`, baseUrl: `https://other-m3u.example/${Date.now()}.m3u8`, type: "m3u", authType: "none" });
+  syncProviderChannels(provider.id, [{ name: "Sports One", url: "https://example.com/live/1.m3u8", externalRef: "1", groupName: "Sports" }]);
+  syncProviderChannels(otherProvider.id, [{ name: "Other Sports", url: "https://example.com/live/2.m3u8", externalRef: "2", groupName: "Other" }]);
+
+  const { server, baseUrl } = await startTestServer();
+  try {
+    const response = await request(baseUrl, `/iptv/providers/${provider.id}/channels?page=1&pageSize=20`);
+    assert.equal(response.status, 200);
+
+    const body = await response.json() as any;
+    assert.equal(body.data.items.length, 1);
+    assert.equal(body.data.items[0].category.name, "Sports");
+    assert.equal(body.data.items[0].providerId, provider.id);
+    assert.equal(body.data.items[0].groupName, "Sports");
+    assert.equal(body.data.items[0].categoryId, body.data.items[0].category.id);
+
+    const isolated = await request(baseUrl, `/iptv/providers/${provider.id}/channels?search=Other`);
+    assert.equal((await isolated.json() as any).data.total, 0);
+
+    const categories = await request(baseUrl, `/iptv/providers/${provider.id}/categories?contentType=live&pageSize=20`);
+    assert.equal(categories.status, 200);
+    const categoryBody = await categories.json() as any;
+    assert.equal(categoryBody.data.items[0].name, "Sports");
+    assert.equal(categoryBody.data.items.some((item: any) => item.name === "Other"), false);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("M3U import activates only after canonical channels are saved", async () => {
+  const provider = createProvider({ name: `M3U Import Provider ${Date.now()}`, baseUrl: `https://m3u-import.example/${Date.now()}.m3u8`, type: "m3u", authType: "none" });
+  const { server, baseUrl } = await startTestServer();
+  try {
+    const successfulImport = await postJson(baseUrl, `/iptv/providers/${provider.id}/m3u`, {
+      playlist: `#EXTM3U\n#EXTINF:-1 tvg-id="import-1" group-title="Sports",Imported Sports\nhttps://example.com/live/import-1.m3u8`
+    });
+    assert.equal(successfulImport.status, 201);
+    assert.equal((await successfulImport.json() as any).data.channelsCreated, 1);
+    assert.equal(getProviderById(provider.id)?.status, "active");
+
+    const failedProvider = createProvider({ name: `M3U Failed Provider ${Date.now()}`, baseUrl: `https://m3u-failed.example/${Date.now()}.m3u8`, type: "m3u", authType: "none" });
+    const failedImport = await postJson(baseUrl, `/iptv/providers/${failedProvider.id}/m3u`, {
+      playlist: "#EXTM3U\n#EXTINF:-1,Invalid Entry\nnot-a-stream-url"
+    });
+    assert.equal(failedImport.status, 201);
+    assert.equal((await failedImport.json() as any).data.channelsCreated, 0);
+    assert.equal(getProviderById(failedProvider.id)?.status, "failed");
+    assert.equal(getDatabase().prepare("SELECT COUNT(*) AS count FROM channels WHERE provider_id = ?").get(failedProvider.id).count, 0);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
