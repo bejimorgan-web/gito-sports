@@ -1,6 +1,7 @@
 import { createApp } from "./app.js";
 import { env, runtimeConfig } from "./config/env.js";
 import { getDatabase } from "./db/connection.js";
+import { IptvOperationManager } from "./services/iptv-operation-manager.js";
 import validateUploadsAtStartup from "./startup/validateUploads.js";
 import { ScoreService } from "./services/score-service.js";
 import { MobileFeatureService } from "./services/mobile-feature-service.js";
@@ -65,6 +66,10 @@ async function initializeFootballService() {
 function markInitialReadiness() {
   try {
     getDatabase();
+    const interruptedOperations = IptvOperationManager.recoverInterrupted();
+    if (interruptedOperations > 0) {
+      console.warn(`[startup] marked ${interruptedOperations} IPTV operation(s) as interrupted`);
+    }
     setReady("databaseReady");
     MobileFeatureService.repairMobileFeatureFlags();
     setReady("featureFlagsReady");

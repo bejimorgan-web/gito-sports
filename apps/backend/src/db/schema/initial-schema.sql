@@ -484,6 +484,34 @@ CREATE TABLE IF NOT EXISTS operational_logs (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS iptv_operations (
+  operation_id TEXT PRIMARY KEY,
+  provider_id TEXT,
+  operation_type TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed', 'timeout', 'cancelled', 'interrupted')),
+  phase TEXT NOT NULL,
+  current_message TEXT NOT NULL,
+  total_count INTEGER,
+  processed_count INTEGER NOT NULL DEFAULT 0,
+  saved_count INTEGER NOT NULL DEFAULT 0,
+  updated_count INTEGER NOT NULL DEFAULT 0,
+  skipped_count INTEGER NOT NULL DEFAULT 0,
+  failed_count INTEGER NOT NULL DEFAULT 0,
+  checkpoint TEXT,
+  cancellation_requested INTEGER NOT NULL DEFAULT 0 CHECK (cancellation_requested IN (0, 1)),
+  error_summary TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  updated_at TEXT NOT NULL,
+  completed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_iptv_operations_status_updated
+  ON iptv_operations(status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_iptv_operations_provider_created
+  ON iptv_operations(provider_id, created_at);
+
 CREATE TABLE IF NOT EXISTS entity_deletion_log (
   id TEXT PRIMARY KEY,
   entity_type TEXT NOT NULL,

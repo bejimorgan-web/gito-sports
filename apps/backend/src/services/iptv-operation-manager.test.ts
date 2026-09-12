@@ -1,6 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { IptvOperationManager } from "./iptv-operation-manager.js";
+import { createIptvOperation, getIptvOperation, recoverRunningIptvOperations, updateIptvOperation } from "../repositories/iptv-operation-repository.js";
+
+async function waitForStatus(id: string, status: string) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const current = IptvOperationManager.get(id);
+    if (current?.status === status) return current;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.fail(`operation did not reach ${status}`);
+}
 
 test("starts operations immediately and publishes progress", async () => {
   const started = IptvOperationManager.start("m3u_validation", async (_operation, report) => {
@@ -24,6 +34,57 @@ test("starts operations immediately and publishes progress", async () => {
   }
 
   assert.fail("operation did not complete");
+});
+
+test("persists creation, progress, and completion", async () => {
+  const started = IptvOperationManager.start("m3u_validation", async (_operation, report) => {
+    report({ total: 4, processed: 2, succeeded: 2, currentStage: "parsing", currentMessage: "Parsing." });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    report({ processed: 4, succeeded: 4, checkpoint: JSON.stringify({ phase: "movies", offset: 4, batchSize: 500 }) });
+  }, undefined, 1_000, "provider-a");
+
+  const created = getIptvOperation(started.id);
+  assert.ok(created?.status === "queued" || created?.status === "running");
+  assert.equal(created?.type, "m3u_validation");
+  assert.equal((await waitForStatus(started.id, "completed")).processed, 4);
+  const completed = getIptvOperation(started.id);
+  assert.equal(completed?.status, "completed");
+  assert.equal(completed?.succeeded, 4);
+  assert.equal(completed?.checkpoint, JSON.stringify({ phase: "movies", offset: 4, batchSize: 500 }));
+});
+
+test("polling reads durable state after the in-memory cache is cleared", async () => {
+  const started = IptvOperationManager.start("m3u_validation", async (_operation, report) => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    report({ processed: 1, succeeded: 1 });
+  }, undefined, 1_000, "provider-b");
+
+  IptvOperationManager.clearCacheForTests();
+  assert.equal(IptvOperationManager.get(started.id)?.id, started.id);
+  assert.equal((await waitForStatus(started.id, "completed")).status, "completed");
+});
+
+test("persists failures and cancellation requests", async () => {
+  const failed = IptvOperationManager.start("m3u_validation", async () => {
+    throw new Error("deterministic_failure");
+  }, undefined, 1_000, "provider-c");
+  assert.equal((await waitForStatus(failed.id, "failed")).error, "deterministic_failure");
+
+  const cancelled = IptvOperationManager.start("xtream_channel_sync", async (_operation, _report, signal) => {
+    await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+  }, undefined, 1_000, "provider-d");
+  assert.equal(IptvOperationManager.cancel(cancelled.id), true);
+  assert.equal((await waitForStatus(cancelled.id, "cancelled")).cancelled, true);
+  assert.equal(getIptvOperation(cancelled.id)?.status, "cancelled");
+});
+
+test("recovers persisted running operations as interrupted without completing them", () => {
+  const running = createIptvOperation({ type: "xtream_channel_sync", providerId: "provider-recovery" });
+  updateIptvOperation(running.id, { status: "running", currentStage: "saving", currentMessage: "Saving." });
+  assert.equal(recoverRunningIptvOperations() >= 1, true);
+  const recovered = getIptvOperation(running.id);
+  assert.equal(recovered?.status, "interrupted");
+  assert.equal(recovered?.error, "operation_interrupted");
 });
 
 test("keeps a large catalogue operation observable while batches yield", async () => {

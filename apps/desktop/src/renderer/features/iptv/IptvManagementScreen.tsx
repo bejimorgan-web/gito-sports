@@ -88,7 +88,7 @@ export function IptvManagementScreen({
 
   useEffect(() => {
     if (!operation) return;
-    const terminal = operation.status === "completed" || operation.status === "failed" || operation.status === "timeout" || operation.status === "cancelled";
+    const terminal = operation.status === "completed" || operation.status === "failed" || operation.status === "timeout" || operation.status === "cancelled" || operation.status === "interrupted";
     if (terminal) {
       const message = operation.status === "completed"
         ? operation.currentMessage

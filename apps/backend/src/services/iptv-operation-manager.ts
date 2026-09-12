@@ -1,8 +1,14 @@
-import crypto from "node:crypto";
 import type { ParsedChannel } from "@gito/shared";
+import {
+  createIptvOperation,
+  getIptvOperation,
+  recoverRunningIptvOperations,
+  requestIptvOperationCancellation,
+  updateIptvOperation
+} from "../repositories/iptv-operation-repository.js";
 
 export type IptvOperationType = "xtream_validation" | "m3u_validation" | "m3u_import" | "xtream_channel_sync";
-export type IptvOperationStatus = "queued" | "running" | "completed" | "failed" | "timeout" | "cancelled";
+export type IptvOperationStatus = "queued" | "running" | "completed" | "failed" | "timeout" | "cancelled" | "interrupted";
 
 export interface IptvOperation {
   id: string;
@@ -18,6 +24,7 @@ export interface IptvOperation {
   failed: number;
   currentStage: string;
   currentMessage: string;
+  checkpoint?: string | null;
   error?: string;
   cancelled: boolean;
   createdBy?: string;
@@ -32,20 +39,17 @@ export interface IptvOperationProgress {
   failed?: number;
   currentStage?: string;
   currentMessage?: string;
+  checkpoint?: string | null;
 }
 
 type OperationTask = (operation: IptvOperation, report: (progress: IptvOperationProgress) => void, signal: AbortSignal) => Promise<void>;
 
 export const IPTV_VALIDATION_TIMEOUT_MS = 30_000;
 
-const operations = new Map<string, IptvOperation>();
-const cleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const operationCache = new Map<string, IptvOperation>();
 const operationControllers = new Map<string, AbortController>();
+const cleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const RETENTION_MS = 15 * 60 * 1000;
-
-function now() {
-  return new Date().toISOString();
-}
 
 function clone(operation: IptvOperation) {
   return { ...operation };
@@ -55,7 +59,7 @@ function scheduleCleanup(id: string) {
   const previous = cleanupTimers.get(id);
   if (previous) clearTimeout(previous);
   const timer = setTimeout(() => {
-    operations.delete(id);
+    operationCache.delete(id);
     cleanupTimers.delete(id);
     operationControllers.delete(id);
   }, RETENTION_MS);
@@ -63,66 +67,43 @@ function scheduleCleanup(id: string) {
   cleanupTimers.set(id, timer);
 }
 
+function persist(id: string, progress: IptvOperationProgress & { status?: IptvOperationStatus; error?: string | null; cancelled?: boolean; completedAt?: string; startedAt?: string }) {
+  const saved = updateIptvOperation(id, progress);
+  if (saved) operationCache.set(id, saved);
+  return saved;
+}
+
 export const IptvOperationManager = {
-  start(type: IptvOperationType, task: OperationTask, createdBy?: string, timeoutMs = (type.endsWith("validation") || type.endsWith("sync")) ? IPTV_VALIDATION_TIMEOUT_MS : undefined) {
-    const id = `iptv_${crypto.randomUUID()}`;
-    const operation: IptvOperation = {
-      id,
-      type,
-      status: "queued",
-      startedAt: now(),
-      processed: 0,
-      succeeded: 0,
-      updated: 0,
-      skipped: 0,
-      failed: 0,
-      currentStage: "queued",
-      currentMessage: "Operation queued.",
-      cancelled: false,
-      ...(createdBy ? { createdBy } : {})
-    };
-    operations.set(id, operation);
+  start(type: IptvOperationType, task: OperationTask, createdBy?: string, timeoutMs = (type.endsWith("validation") || type.endsWith("sync")) ? IPTV_VALIDATION_TIMEOUT_MS : undefined, providerId?: string) {
+    const operation = createIptvOperation({ type, createdBy, providerId });
+    operationCache.set(operation.id, operation);
     const controller = new AbortController();
-    operationControllers.set(id, controller);
+    operationControllers.set(operation.id, controller);
     const timeout = timeoutMs === undefined ? undefined : setTimeout(() => controller.abort(), timeoutMs);
-    console.info("[iptv-validation] started", { operationId: id, type, timeoutMs: timeoutMs ?? null });
 
     void (async () => {
-      operation.status = "running";
-      operation.currentStage = "starting";
-      operation.currentMessage = "Operation started.";
+      const running = persist(operation.id, { status: "running", currentStage: "starting", currentMessage: "Operation started.", startedAt: new Date().toISOString() }) ?? operation;
       try {
-        await task(operation, (progress) => {
-          Object.assign(operation, progress);
-        }, controller.signal);
-        if (operation.cancelled) {
-          operation.status = "cancelled";
-          operation.currentStage = "cancelled";
-          operation.currentMessage = "Operation cancelled after the current safe batch.";
+        await task(running, (progress) => { persist(operation.id, progress); }, controller.signal);
+        const current = getIptvOperation(operation.id) ?? running;
+        if (current.cancelled) {
+          persist(operation.id, { status: "cancelled", currentStage: "cancelled", currentMessage: "Operation cancelled after the current safe batch.", cancelled: true });
         } else if (controller.signal.aborted) {
-          operation.status = "timeout";
-          operation.currentStage = "timeout";
-          operation.currentMessage = `Operation timed out after ${Math.round((timeoutMs ?? 0) / 1000)} seconds.`;
-          operation.error = operation.currentMessage;
+          const message = `Operation timed out after ${Math.round((timeoutMs ?? 0) / 1000)} seconds.`;
+          persist(operation.id, { status: "timeout", currentStage: "timeout", currentMessage: message, error: message });
         } else {
-          operation.status = "completed";
-          operation.currentStage = "completed";
-          operation.currentMessage = "Operation completed.";
+          persist(operation.id, { status: "completed", currentStage: "completed", currentMessage: "Operation completed." });
         }
-        console.info("[iptv-validation] completed", { operationId: id, type, status: operation.status });
       } catch (error) {
-        operation.status = operation.cancelled ? "cancelled" : controller.signal.aborted ? "timeout" : "failed";
-        operation.error = error instanceof Error ? error.message : String(error);
-        operation.currentStage = operation.status === "timeout" ? "timeout" : operation.status;
-        operation.currentMessage = operation.status === "timeout"
-          ? `Operation timed out after ${Math.round((timeoutMs ?? 0) / 1000)} seconds.`
-          : operation.error;
-        console.warn("[iptv-validation] failed", { operationId: id, type, status: operation.status, message: operation.currentMessage });
+        const current = getIptvOperation(operation.id) ?? running;
+        const status = current.cancelled ? "cancelled" : controller.signal.aborted ? "timeout" : "failed";
+        const safeMessage = error instanceof Error ? error.message : String(error);
+        const message = status === "timeout" ? `Operation timed out after ${Math.round((timeoutMs ?? 0) / 1000)} seconds.` : safeMessage;
+        persist(operation.id, { status, currentStage: status, currentMessage: message, error: message, cancelled: status === "cancelled" });
       } finally {
         if (timeout) clearTimeout(timeout);
-        operationControllers.delete(id);
-        operation.completedAt = now();
-        scheduleCleanup(id);
+        operationControllers.delete(operation.id);
+        scheduleCleanup(operation.id);
       }
     })();
 
@@ -130,26 +111,34 @@ export const IptvOperationManager = {
   },
 
   get(id: string) {
-    const operation = operations.get(id);
-    return operation ? clone(operation) : undefined;
+    const durable = getIptvOperation(id);
+    if (durable) operationCache.set(id, durable);
+    return durable ? clone(durable) : undefined;
   },
 
   cancel(id: string) {
-    const operation = operations.get(id);
-    if (!operation) return false;
-    if (operation.status === "completed" || operation.status === "failed" || operation.status === "timeout" || operation.status === "cancelled") return false;
-    operation.cancelled = true;
+    const operation = getIptvOperation(id);
+    if (!operation || ["completed", "failed", "timeout", "cancelled", "interrupted"].includes(operation.status)) return false;
+    if (!requestIptvOperationCancellation(id)) return false;
     operationControllers.get(id)?.abort();
-    operation.currentMessage = "Cancellation requested; finishing the current safe batch.";
     return true;
   },
 
   isCancelled(operation: IptvOperation) {
-    return operation.cancelled;
+    return operation.cancelled || getIptvOperation(operation.id)?.cancelled === true;
+  },
+
+  recoverInterrupted() {
+    return recoverRunningIptvOperations();
+  },
+
+  clearCacheForTests() {
+    operationCache.clear();
+    operationControllers.clear();
   },
 
   size() {
-    return operations.size;
+    return operationCache.size;
   }
 };
 

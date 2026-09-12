@@ -394,7 +394,7 @@ function startXtreamSyncOperation(providerId: string) {
       IPTVService.updateProviderHealth({ providerId, success: false, impact: "failure" });
       throw error;
     }
-  }, undefined, 10 * 60 * 1000);
+  }, undefined, 10 * 60 * 1000, providerId);
 }
 
 export const iptvRouter = Router();
@@ -721,7 +721,7 @@ iptvRouter.post("/operations", async (request, response) => {
       if (body.providerId) IPTVService.setProviderStatus(body.providerId, "failed");
       throw error;
     }
-  });
+  }, undefined, undefined, body.providerId);
 
   response.status(202).json({ data: operation });
 });
