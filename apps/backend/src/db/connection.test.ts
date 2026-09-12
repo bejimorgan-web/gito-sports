@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { closeDatabase, migrateExistingOperationalState, syncAdminOperatorUserPassword } from "./connection.js";
 import { allowSqliteInstantiation, DatabaseSync } from "./sqlite.js";
+import { readInitialSchema } from "./schema.js";
 
 test("persistent database migration copies a valid legacy database only when the target is absent", async () => {
   const tempRoot = path.join(process.cwd(), "tmp", `persistent-migration-${Date.now()}-${Math.random().toString(16).slice(2)}`);
@@ -95,6 +96,75 @@ test("migrateExistingOperationalState adds missing logo_url to the channels tabl
     } finally {
       db.close();
       fs.rmSync(tempDbPath, { force: true });
+    }
+  });
+});
+
+test("migrateExistingOperationalState adds tvg_name to legacy channels idempotently", () => {
+  const tempDbPath = path.join(process.cwd(), "tmp", `channels-tvg-name-migration-${Date.now()}.sqlite`);
+  fs.mkdirSync(path.dirname(tempDbPath), { recursive: true });
+
+  allowSqliteInstantiation(() => {
+    const db = new DatabaseSync(tempDbPath);
+
+    try {
+      db.exec(`
+        CREATE TABLE providers (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          deleted INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE channels (
+          id TEXT PRIMARY KEY,
+          provider_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          external_ref TEXT,
+          url TEXT NOT NULL,
+          content_type TEXT NOT NULL DEFAULT 'live',
+          status TEXT NOT NULL DEFAULT 'active',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
+        );
+      `);
+
+      const timestamp = new Date().toISOString();
+      db.prepare("INSERT INTO providers (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)").run("provider-1", "Legacy Provider", timestamp, timestamp);
+      db.prepare("INSERT INTO channels (id, provider_id, name, external_ref, url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run("channel-1", "provider-1", "Legacy Channel", "legacy-1", "https://provider.example/live/legacy-1.m3u8", timestamp, timestamp);
+
+      migrateExistingOperationalState(db);
+      migrateExistingOperationalState(db);
+
+      const columns = db.prepare("PRAGMA table_info(channels)").all() as Array<{ name: string; type: string; notnull: number }>;
+      const tvgName = columns.find((column) => column.name === "tvg_name");
+      assert.ok(tvgName);
+      assert.equal(tvgName.type, "TEXT");
+      assert.equal(tvgName.notnull, 0);
+
+      const row = db.prepare("SELECT id, provider_id, url FROM channels WHERE id = ?").get("channel-1") as { id: string; provider_id: string; url: string };
+      assert.deepEqual(row, { id: "channel-1", provider_id: "provider-1", url: "https://provider.example/live/legacy-1.m3u8" });
+    } finally {
+      db.close();
+      fs.rmSync(tempDbPath, { force: true });
+    }
+  });
+});
+
+test("initial schema includes channels.tvg_name", () => {
+  allowSqliteInstantiation(() => {
+    const db = new DatabaseSync(":memory:");
+    try {
+      db.exec(readInitialSchema());
+      const columns = db.prepare("PRAGMA table_info(channels)").all() as Array<{ name: string; type: string; notnull: number }>;
+      const tvgName = columns.find((column) => column.name === "tvg_name");
+      assert.ok(tvgName);
+      assert.equal(tvgName.type, "TEXT");
+      assert.equal(tvgName.notnull, 0);
+    } finally {
+      db.close();
     }
   });
 });

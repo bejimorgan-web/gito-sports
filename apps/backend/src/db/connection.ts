@@ -1199,6 +1199,10 @@ export function migrateExistingOperationalState(database: DatabaseSync) {
   }
 
   if (hasTable(database, "channels")) {
+    if (!hasColumn(database, "channels", "tvg_name")) {
+      database.exec("ALTER TABLE channels ADD COLUMN tvg_name TEXT;");
+    }
+
     if (!hasColumn(database, "channels", "logo_url")) {
       database.exec("ALTER TABLE channels ADD COLUMN logo_url TEXT;");
     }
