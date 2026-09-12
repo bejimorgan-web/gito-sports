@@ -227,6 +227,9 @@ test("classifies an Xtream-style mixed M3U into live, movies, series, and episod
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_movies WHERE provider_id = ? AND status = 'active'").get(provider.id).count, 4);
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_series WHERE provider_id = ? AND status = 'active'").get(provider.id).count, 1);
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_series_episodes WHERE series_id IN (SELECT id FROM iptv_series WHERE provider_id = ?) AND status = 'active'").get(provider.id).count, 4);
+  assert.equal(database.prepare("SELECT url FROM channels WHERE provider_id = ? AND external_ref = 'live-1'").get(provider.id).url, "https://provider.example/live/user/pass/1.m3u8");
+  assert.equal(database.prepare("SELECT stream_url FROM iptv_movies WHERE provider_id = ? AND external_id = 'movie-1'").get(provider.id).stream_url, "https://provider.example/movie/user/pass/1.mp4");
+  assert.equal(database.prepare("SELECT stream_url FROM iptv_series_episodes WHERE external_id = 'episode-0'").get().stream_url, "https://provider.example/series/user/pass/1.mp4");
   assert.equal(parsed.filter((entry) => entry.contentType === "live").length, 4);
   assert.equal(parsed.filter((entry) => entry.contentType === "movie").length, 4);
   assert.equal(parsed.filter((entry) => entry.contentType === "series").length, 4);
