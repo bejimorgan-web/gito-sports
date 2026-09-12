@@ -121,6 +121,18 @@ function ensureProviderCatalogueCategories(providerId: string, contentType?: Ipt
     WHERE c.provider_id = ?
       AND c.status != 'archived'
       AND c.status != 'stale'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM iptv_categories authoritative
+        WHERE authoritative.provider_id = c.provider_id
+          AND authoritative.content_type = c.content_type
+          AND authoritative.status != 'archived'
+          AND (
+            authoritative.id = c.category_id
+            OR authoritative.provider_category_id = c.category_id
+            OR authoritative.provider_category_id = c.group_name
+          )
+      )
       ${contentType ? "AND c.content_type = ?" : ""}
     ORDER BY c.content_type, category_name
   `).all(providerId, ...(contentType ? [contentType] : [])) as Array<{ content_type: IptvCategoryContentType; provider_category_id: string | null; category_name: string | null }>;
@@ -181,7 +193,8 @@ export function listIptvCategoriesPage(providerId: string, contentType?: IptvCat
   const clauses = ["provider_id = ?"];
   const params: unknown[] = [providerId];
   if (contentType) { clauses.push("content_type = ?"); params.push(contentType); }
-  if (options.status) { clauses.push("status = ?"); params.push(options.status); }
+  clauses.push("status = ?");
+  params.push(options.status ?? "active");
   const where = clauses.join(" AND ");
   const total = Number((db.prepare(`SELECT COUNT(*) AS count FROM iptv_categories WHERE ${where}`).get(...params) as { count: number }).count ?? 0);
   const rows = db.prepare(`SELECT * FROM iptv_categories WHERE ${where} ORDER BY ordering IS NULL, ordering, name LIMIT ? OFFSET ?`).all(...params, pageSize, offset) as any[];
@@ -195,15 +208,22 @@ export function listIptvChannelsPage(providerId: string, options: CatalogueListO
   const { page, pageSize, offset } = pageValues(options);
   const clauses = ["c.provider_id = ?"];
   const params: unknown[] = [providerId];
-  if (options.status) { clauses.push("c.status = ?"); params.push(options.status); }
-  if (options.categoryId) { clauses.push("(c.category_id = ? OR cat.id = ? OR cat.provider_category_id = ?)"); params.push(options.categoryId, options.categoryId, options.categoryId); }
+  clauses.push("c.status = ?");
+  params.push(options.status ?? "active");
+  if (options.categoryId) {
+    clauses.push("(c.category_id = ? OR EXISTS (SELECT 1 FROM iptv_categories requested_category WHERE requested_category.provider_id = c.provider_id AND requested_category.content_type = 'live' AND requested_category.provider_category_id = ? AND (requested_category.id = c.category_id OR requested_category.provider_category_id = c.category_id OR requested_category.provider_category_id = c.group_name)))");
+    params.push(options.categoryId, options.categoryId);
+  }
   if (options.search) { clauses.push("LOWER(c.name) LIKE ?"); params.push(`%${options.search.toLowerCase()}%`); }
   const where = clauses.join(" AND ");
-  const from = `FROM channels c LEFT JOIN iptv_categories cat ON cat.provider_id = c.provider_id AND cat.content_type = 'live' AND (cat.id = c.category_id OR cat.provider_category_id = c.category_id OR cat.provider_category_id = c.group_name)`;
+  const from = "FROM channels c";
+  const categoryId = `(SELECT category_match.id FROM iptv_categories category_match WHERE category_match.provider_id = c.provider_id AND category_match.content_type = 'live' AND (category_match.id = c.category_id OR category_match.provider_category_id = c.category_id OR category_match.provider_category_id = c.group_name) ORDER BY category_match.id = c.category_id DESC, category_match.provider_category_id = c.category_id DESC LIMIT 1)`;
+  const categoryName = `(SELECT category_match.name FROM iptv_categories category_match WHERE category_match.id = ${categoryId} LIMIT 1)`;
+  const categorySlug = `(SELECT category_match.slug FROM iptv_categories category_match WHERE category_match.id = ${categoryId} LIMIT 1)`;
   const total = Number((db.prepare(`SELECT COUNT(*) AS count ${from} WHERE ${where}`).get(...params) as { count: number }).count ?? 0);
-  const rows = db.prepare(`SELECT c.*, cat.id AS category_canonical_id, cat.name AS category_name, cat.slug AS category_slug FROM channels c LEFT JOIN iptv_categories cat ON cat.provider_id = c.provider_id AND cat.content_type = 'live' AND (cat.id = c.category_id OR cat.provider_category_id = c.category_id OR cat.provider_category_id = c.group_name) WHERE ${where} ORDER BY c.name, c.id LIMIT ? OFFSET ?`).all(...params, pageSize, offset) as any[];
+  const rows = db.prepare(`SELECT c.*, ${categoryId} AS category_canonical_id, ${categoryName} AS category_name, ${categorySlug} AS category_slug ${from} WHERE ${where} ORDER BY c.name, c.id LIMIT ? OFFSET ?`).all(...params, pageSize, offset) as any[];
   return cataloguePage(rows.map((row) => ({
-    id: row.id, providerId: row.provider_id, externalRef: row.external_ref, name: row.name,
+    id: row.id, providerId: row.provider_id, externalRef: row.external_ref, tvgName: row.tvg_name, name: row.name,
     categoryId: row.category_canonical_id ?? row.category_id ?? row.group_name,
     category: row.category_name ? { id: row.category_canonical_id, name: row.category_name, slug: row.category_slug } : null,
     groupName: row.group_name,
@@ -302,23 +322,45 @@ function resolveCategoryId(providerId: string, contentType: "live" | "movie" | "
   return row?.id ?? providerCategoryId;
 }
 
-function syncRowsInBatches<T>(records: T[], save: (record: T) => "inserted" | "updated" | "unchanged") {
+async function syncRowsInBatches<T>(
+  records: T[],
+  save: (record: T) => "inserted" | "updated" | "unchanged",
+  reportProgress?: (stats: CatalogueSyncStats) => void
+): Promise<CatalogueSyncStats> {
   const stats = emptyStats(records.length);
-  for (let index = 0; index < records.length; index += 500) {
-    for (const record of records.slice(index, index + 500)) {
-      try {
-        stats[save(record)] += 1;
-      } catch {
-        stats.failed += 1;
+  const batchSize = 500;
+  const database = getDatabase();
+
+  for (let index = 0; index < records.length; index += batchSize) {
+    const batch = records.slice(index, index + batchSize);
+
+    database.transaction(() => {
+      for (const record of batch) {
+        try {
+          stats[save(record)] += 1;
+        } catch {
+          stats.failed += 1;
+        }
+        stats.processed += 1;
       }
-      stats.processed += 1;
+    })();
+
+    // Report progress after each batch
+    if (reportProgress) {
+      reportProgress(stats);
+    }
+
+    // Yield to event loop to prevent blocking
+    if (index + batchSize < records.length) {
+      await new Promise(resolve => setImmediate(resolve));
     }
   }
+
   return stats;
 }
 
-export function syncXtreamCategories(providerId: string, contentType: "live" | "movie" | "series", records: Array<{ providerCategoryId: string; name: string; parentCategoryId?: string; metadata?: unknown }>) {
-  return syncRowsInBatches(records, (record) => {
+export async function syncXtreamCategories(providerId: string, contentType: "live" | "movie" | "series", records: Array<{ providerCategoryId: string; name: string; parentCategoryId?: string; metadata?: unknown }>, reportProgress?: (stats: CatalogueSyncStats) => void) {
+  const stats = await syncRowsInBatches(records, (record) => {
     const db = getDatabase();
     const existing = db.prepare("SELECT name, slug, parent_category_id, metadata_json, status FROM iptv_categories WHERE provider_id = ? AND content_type = ? AND provider_category_id = ?").get(providerId, contentType, record.providerCategoryId) as any;
     const slug = record.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "category";
@@ -326,16 +368,43 @@ export function syncXtreamCategories(providerId: string, contentType: "live" | "
     const changed = !existing || existing.name !== record.name || existing.slug !== slug || existing.parent_category_id !== (record.parentCategoryId ?? null) || existing.metadata_json !== metadataJson || existing.status !== "active";
     upsertIptvCategory(providerId, { ...record, contentType, slug, status: "active" });
     return existing ? changed ? "updated" : "unchanged" : "inserted";
-  });
+  }, reportProgress);
+  if (records.length > 0) {
+    archiveMissingXtreamCategories(providerId, contentType, records.map((record) => record.providerCategoryId));
+  }
+  return stats;
 }
 
 export function archiveMissingXtreamCategories(providerId: string, contentType: "live" | "movie" | "series", providerCategoryIds: string[]) {
-  if (providerCategoryIds.length === 0) return 0;
-  const placeholders = providerCategoryIds.map(() => "?").join(",");
-  return getDatabase().prepare(`UPDATE iptv_categories SET status = 'inactive', updated_at = ? WHERE provider_id = ? AND content_type = ? AND status = 'active' AND provider_category_id NOT IN (${placeholders})`).run(now(), providerId, contentType, ...providerCategoryIds).changes;
+  const database = getDatabase();
+  const validIds = new Set(providerCategoryIds);
+  const batchSize = 500;
+
+  if (validIds.size === 0) {
+    return database.prepare("UPDATE iptv_categories SET status = 'inactive', updated_at = ? WHERE provider_id = ? AND content_type = ? AND status = 'active'").run(now(), providerId, contentType).changes;
+  }
+
+  let archived = 0;
+  let lastId = "";
+  for (;;) {
+    const rows = database.prepare("SELECT provider_category_id AS id FROM iptv_categories WHERE provider_id = ? AND content_type = ? AND status = 'active' AND provider_category_id > ? ORDER BY provider_category_id LIMIT ?").all(providerId, contentType, lastId, batchSize) as { id: string }[];
+    if (rows.length === 0) break;
+
+    const missingIds = rows.map((row) => row.id).filter((id) => !validIds.has(id));
+    if (missingIds.length > 0) {
+      const placeholders = missingIds.map(() => "?").join(",");
+      archived += database.prepare(`UPDATE iptv_categories SET status = 'inactive', updated_at = ? WHERE provider_id = ? AND content_type = ? AND status = 'active' AND provider_category_id IN (${placeholders})`).run(now(), providerId, contentType, ...missingIds).changes;
+    }
+
+    const lastRow = rows[rows.length - 1];
+    if (!lastRow) break;
+    lastId = lastRow.id;
+  }
+
+  return archived;
 }
 
-export function syncXtreamMoviesDetailed(providerId: string, records: XtreamMovieRecord[]) {
+export async function syncXtreamMoviesDetailed(providerId: string, records: XtreamMovieRecord[], reportProgress?: (stats: CatalogueSyncStats) => void) {
   const db = getDatabase();
   return syncRowsInBatches(records, (record) => {
     const timestamp = now();
@@ -349,14 +418,14 @@ export function syncXtreamMoviesDetailed(providerId: string, records: XtreamMovi
       ON CONFLICT(provider_id, external_id) DO UPDATE SET category_id=excluded.category_id, name=excluded.name, stream_url=excluded.stream_url, poster_url=excluded.poster_url, backdrop_url=excluded.backdrop_url, description=excluded.description, genre=excluded.genre, year=excluded.year, rating=excluded.rating, duration=excluded.duration, language=excluded.language, country=excluded.country, "cast"=excluded."cast", director=excluded.director, trailer_url=excluded.trailer_url, metadata_json=excluded.metadata_json, status='active', updated_at=excluded.updated_at
     `).run(id("movie", providerId, record.externalId), providerId, record.externalId, ...fields, timestamp, timestamp);
     return existing ? changed ? "updated" : "unchanged" : "inserted";
-  });
+  }, reportProgress);
 }
 
-export function syncXtreamMovies(providerId: string, records: XtreamMovieRecord[]) {
-  return syncXtreamMoviesDetailed(providerId, records).processed;
+export async function syncXtreamMovies(providerId: string, records: XtreamMovieRecord[]) {
+  return (await syncXtreamMoviesDetailed(providerId, records)).processed;
 }
 
-export function syncXtreamSeriesDetailed(providerId: string, records: XtreamSeriesRecord[]) {
+export async function syncXtreamSeriesDetailed(providerId: string, records: XtreamSeriesRecord[], reportProgress?: (stats: CatalogueSyncStats) => void) {
   const db = getDatabase();
   return syncRowsInBatches(records, (record) => {
     const timestamp = now();
@@ -371,14 +440,14 @@ export function syncXtreamSeriesDetailed(providerId: string, records: XtreamSeri
       ON CONFLICT(provider_id, external_id) DO UPDATE SET category_id=excluded.category_id, name=excluded.name, poster_url=excluded.poster_url, backdrop_url=excluded.backdrop_url, description=excluded.description, genre=excluded.genre, year=excluded.year, rating=excluded.rating, language=excluded.language, country=excluded.country, "cast"=excluded."cast", director=excluded.director, trailer_url=excluded.trailer_url, metadata_json=excluded.metadata_json, status='active', updated_at=excluded.updated_at
     `).run(id("series", providerId, record.externalId), providerId, record.externalId, ...fields, timestamp, timestamp);
     return existing ? changed ? "updated" : "unchanged" : "inserted";
-  });
+  }, reportProgress);
 }
 
-export function syncXtreamSeries(providerId: string, records: XtreamSeriesRecord[]) {
-  return syncXtreamSeriesDetailed(providerId, records).processed;
+export async function syncXtreamSeries(providerId: string, records: XtreamSeriesRecord[]) {
+  return (await syncXtreamSeriesDetailed(providerId, records)).processed;
 }
 
-export function syncXtreamSeasonsDetailed(providerId: string, records: Array<{ seriesExternalId: string; providerSeasonId: string; seasonNumber?: number; name?: string; posterUrl?: string; metadata?: unknown }>) {
+export async function syncXtreamSeasonsDetailed(providerId: string, records: Array<{ seriesExternalId: string; providerSeasonId: string; seasonNumber?: number; name?: string; posterUrl?: string; metadata?: unknown }>, reportProgress?: (stats: CatalogueSyncStats) => void) {
   return syncRowsInBatches(records, (record) => {
     const series = getDatabase().prepare("SELECT id FROM iptv_series WHERE provider_id = ? AND external_id = ?").get(providerId, record.seriesExternalId) as { id: string } | undefined;
     if (!series) throw new Error("series_not_found");
@@ -387,10 +456,10 @@ export function syncXtreamSeasonsDetailed(providerId: string, records: Array<{ s
     const changed = !existing || existing.name !== (record.name ?? null) || existing.season_number !== (record.seasonNumber ?? null) || existing.poster_url !== (record.posterUrl ?? null) || existing.metadata_json !== metadataJson || existing.status !== "active";
     upsertIptvSeason(providerId, { seriesId: series.id, providerSeasonId: record.providerSeasonId, seasonNumber: record.seasonNumber, name: record.name, posterUrl: record.posterUrl, metadata: record.metadata, status: "active" });
     return existing ? changed ? "updated" : "unchanged" : "inserted";
-  });
+  }, reportProgress);
 }
 
-export function syncXtreamEpisodesDetailed(providerId: string, seriesExternalId: string, records: XtreamEpisodeRecord[]) {
+export async function syncXtreamEpisodesDetailed(providerId: string, seriesExternalId: string, records: XtreamEpisodeRecord[], reportProgress?: (stats: CatalogueSyncStats) => void) {
   const db = getDatabase();
   const series = db.prepare("SELECT id FROM iptv_series WHERE provider_id = ? AND external_id = ?").get(providerId, seriesExternalId) as { id: string } | undefined;
   if (!series) return { fetched: records.length, processed: 0, inserted: 0, updated: 0, unchanged: 0, failed: records.length, archived: 0 };
@@ -407,11 +476,11 @@ export function syncXtreamEpisodesDetailed(providerId: string, seriesExternalId:
       ON CONFLICT(series_id, external_id) DO UPDATE SET season_number=excluded.season_number, episode_number=excluded.episode_number, name=excluded.name, stream_url=excluded.stream_url, description=excluded.description, duration=excluded.duration, poster_url=excluded.poster_url, metadata_json=excluded.metadata_json, status='active', updated_at=excluded.updated_at
     `).run(id("episode", series.id, record.externalId), series.id, record.externalId, ...fields, timestamp, timestamp);
     return existing ? changed ? "updated" : "unchanged" : "inserted";
-  });
+  }, reportProgress);
 }
 
-export function syncXtreamEpisodes(providerId: string, seriesExternalId: string, records: XtreamEpisodeRecord[]) {
-  return syncXtreamEpisodesDetailed(providerId, seriesExternalId, records).processed;
+export async function syncXtreamEpisodes(providerId: string, seriesExternalId: string, records: XtreamEpisodeRecord[]) {
+  return (await syncXtreamEpisodesDetailed(providerId, seriesExternalId, records)).processed;
 }
 
 export function getXtreamCatalogueTotals(providerId: string) {

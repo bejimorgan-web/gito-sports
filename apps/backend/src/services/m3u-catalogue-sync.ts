@@ -1,7 +1,7 @@
 import type { ParsedChannel } from "@gito/shared";
 import crypto from "node:crypto";
 import { getDatabase } from "../db/connection.js";
-import { syncProviderChannels } from "../repositories/provider-repository.js";
+import { syncProviderChannelsBatched } from "../repositories/provider-repository.js";
 import {
   archiveMissingXtreamCategories,
   syncXtreamCategories,
@@ -47,33 +47,58 @@ function archiveMissingM3uRecords(
   episodeExternalIds: string[]
 ) {
   const database = getDatabase();
-  const updateMissing = (table: string, identityColumn: string, identities: string[], where = "") => {
-    if (identities.length === 0) {
-      database.prepare(`UPDATE ${table} SET status = 'archived', updated_at = ? WHERE provider_id = ? AND status = 'active' ${where}`).run(new Date().toISOString(), providerId);
+  const batchSize = 500;
+  const updateMissingInBatches = (table: string, identityColumn: string, identities: string[], where = "") => {
+    const validIds = new Set(identities);
+    const timestamp = new Date().toISOString();
+
+    if (validIds.size === 0) {
+      database.prepare(`UPDATE ${table} SET status = 'archived', updated_at = ? WHERE provider_id = ? AND status = 'active' ${where}`).run(timestamp, providerId);
       return;
     }
-    const placeholders = identities.map(() => "?").join(",");
-    database.prepare(`UPDATE ${table} SET status = 'archived', updated_at = ? WHERE provider_id = ? AND status = 'active' AND ${identityColumn} NOT IN (${placeholders}) ${where}`).run(new Date().toISOString(), providerId, ...identities);
+
+    let lastValue = "";
+    for (;;) {
+      const rows = database.prepare(`SELECT ${identityColumn} AS value FROM ${table} WHERE provider_id = ? AND status = 'active' AND ${identityColumn} > ? ${where} ORDER BY ${identityColumn} LIMIT ?`).all(providerId, lastValue, batchSize) as { value: string }[];
+      if (rows.length === 0) break;
+
+      const missingIds = rows.map((row) => row.value).filter((value) => !validIds.has(value));
+      if (missingIds.length > 0) {
+        const placeholders = missingIds.map(() => "?").join(",");
+        database.prepare(`UPDATE ${table} SET status = 'archived', updated_at = ? WHERE provider_id = ? AND status = 'active' AND ${identityColumn} IN (${placeholders}) ${where}`).run(timestamp, providerId, ...missingIds);
+      }
+
+      const lastRow = rows[rows.length - 1];
+      if (!lastRow) break;
+      lastValue = lastRow.value;
+    }
   };
 
-  updateMissing("channels", "id", liveChannelIds, "AND content_type = 'live'");
-  updateMissing("iptv_movies", "external_id", movieExternalIds);
-  updateMissing("iptv_series", "external_id", seriesExternalIds);
+  updateMissingInBatches("channels", "id", liveChannelIds, "AND content_type = 'live'");
+  updateMissingInBatches("iptv_movies", "external_id", movieExternalIds);
+  updateMissingInBatches("iptv_series", "external_id", seriesExternalIds);
+  updateMissingInBatches("iptv_seasons", "provider_season_id", seasonKeys);
 
-  if (seasonKeys.length === 0) {
-    database.prepare("UPDATE iptv_seasons SET status = 'archived', updated_at = ? WHERE provider_id = ? AND status = 'active'").run(new Date().toISOString(), providerId);
-  } else {
-    const seasonPlaceholders = seasonKeys.map(() => "?").join(",");
-    database.prepare(`UPDATE iptv_seasons SET status = 'archived', updated_at = ? WHERE provider_id = ? AND status = 'active' AND provider_season_id NOT IN (${seasonPlaceholders})`).run(new Date().toISOString(), providerId, ...seasonKeys);
+  const episodeSet = new Set(episodeExternalIds);
+  const timestamp = new Date().toISOString();
+  let lastEpisodeId = "";
+  for (;;) {
+    const rows = database.prepare(`SELECT e.external_id AS value FROM iptv_series_episodes e INNER JOIN iptv_series s ON s.id = e.series_id WHERE e.status = 'active' AND s.provider_id = ? AND e.external_id > ? ORDER BY e.external_id LIMIT ?`).all(providerId, lastEpisodeId, batchSize) as { value: string }[];
+    if (rows.length === 0) break;
+
+    const missingEpisodeIds = rows.map((row) => row.value).filter((value) => !episodeSet.has(value));
+    if (missingEpisodeIds.length > 0) {
+      const placeholders = missingEpisodeIds.map(() => "?").join(",");
+      database.prepare(`UPDATE iptv_series_episodes SET status = 'archived', updated_at = ? WHERE status = 'active' AND external_id IN (${placeholders}) AND EXISTS (SELECT 1 FROM iptv_series s WHERE s.id = iptv_series_episodes.series_id AND s.provider_id = ?)`).run(timestamp, ...missingEpisodeIds, providerId);
+    }
+
+    const lastRow = rows[rows.length - 1];
+    if (!lastRow) break;
+    lastEpisodeId = lastRow.value;
   }
-
-  const episodeWhere = episodeExternalIds.length === 0
-    ? ""
-    : `AND e.external_id NOT IN (${episodeExternalIds.map(() => "?").join(",")})`;
-  database.prepare(`UPDATE iptv_series_episodes AS e SET status = 'archived', updated_at = ? WHERE e.status = 'active' AND EXISTS (SELECT 1 FROM iptv_series s WHERE s.id = e.series_id AND s.provider_id = ?) ${episodeWhere}`).run(new Date().toISOString(), providerId, ...episodeExternalIds);
 }
 
-export function syncParsedM3uCatalogue(providerId: string, parsedChannels: ParsedChannel[]): M3uCatalogueSyncResult {
+export async function syncParsedM3uCatalogue(providerId: string, parsedChannels: ParsedChannel[]): Promise<M3uCatalogueSyncResult> {
   if (parsedChannels.length === 0) {
     return { liveChannels: 0, movies: 0, series: 0, episodes: 0 };
   }
@@ -82,18 +107,18 @@ export function syncParsedM3uCatalogue(providerId: string, parsedChannels: Parse
   }
 
   const database = getDatabase();
-  const persistCatalogue = database.transaction(() => {
+  const persistCatalogue = async () => {
     const live = parsedChannels.filter((entry) => (entry.contentType ?? "live") === "live");
     const movies = parsedChannels.filter((entry) => entry.contentType === "movie");
     const seriesEpisodes = parsedChannels.filter((entry) => entry.contentType === "series");
 
-    const savedLive = live.length > 0 ? syncProviderChannels(providerId, live) : [];
+    const savedLive = live.length > 0 ? await syncProviderChannelsBatched(providerId, live) : [];
     const liveCategoryIds = [...new Set(live.map((entry) => entry.categoryId ?? entry.groupName).filter((value): value is string => Boolean(value)))];
 
     const movieCategoryRecords = movies.flatMap((entry) => categoryRecords(entry, "movie"));
     const uniqueMovieCategories = [...new Map(movieCategoryRecords.map((record) => [record.providerCategoryId, record])).values()];
-    const movieCategoryStats = uniqueMovieCategories.length > 0 ? syncXtreamCategories(providerId, "movie", uniqueMovieCategories) : null;
-    const movieStats = syncXtreamMoviesDetailed(providerId, movies.map((entry, index) => ({
+    const movieCategoryStats = uniqueMovieCategories.length > 0 ? await syncXtreamCategories(providerId, "movie", uniqueMovieCategories) : null;
+    const movieStats = await syncXtreamMoviesDetailed(providerId, movies.map((entry, index) => ({
       externalId: streamExternalId(entry, `movie-${index}`),
       categoryId: entry.categoryId ?? entry.groupName,
       name: entry.name,
@@ -124,8 +149,8 @@ export function syncParsedM3uCatalogue(providerId: string, parsedChannels: Parse
       ? [{ providerCategoryId: entry.categoryId, name: entry.categoryId, metadata: { source: "m3u", contentType: "series" } }]
       : []);
     const uniqueSeriesCategories = [...new Map(seriesCategoryRecords.map((record) => [record.providerCategoryId, record])).values()];
-    const seriesCategoryStats = uniqueSeriesCategories.length > 0 ? syncXtreamCategories(providerId, "series", uniqueSeriesCategories) : null;
-    const seriesStats = syncXtreamSeriesDetailed(providerId, seriesRecords);
+    const seriesCategoryStats = uniqueSeriesCategories.length > 0 ? await syncXtreamCategories(providerId, "series", uniqueSeriesCategories) : null;
+    const seriesStats = await syncXtreamSeriesDetailed(providerId, seriesRecords);
 
     let episodes = 0;
     const episodeExternalIds: string[] = [];
@@ -144,8 +169,8 @@ export function syncParsedM3uCatalogue(providerId: string, parsedChannels: Parse
         }];
       })).values()];
       seasonKeys.push(...seasonRecords.map((record) => record.providerSeasonId));
-      seasonFailures += syncXtreamSeasonsDetailed(providerId, seasonRecords).failed;
-      const episodeStats = syncXtreamEpisodesDetailed(providerId, seriesExternalId, entries.map((entry, index) => ({
+      seasonFailures += (await syncXtreamSeasonsDetailed(providerId, seasonRecords)).failed;
+      const episodeStats = await syncXtreamEpisodesDetailed(providerId, seriesExternalId, entries.map((entry, index) => ({
         externalId: episodeExternalId(seriesExternalId, entry, index),
         seasonNumber: entry.seasonNumber ?? 1,
         episodeNumber: entry.episodeNumber ?? index + 1,
@@ -181,7 +206,7 @@ export function syncParsedM3uCatalogue(providerId: string, parsedChannels: Parse
       series: seriesStats.processed,
       episodes
     };
-  });
+  };
 
-  return persistCatalogue();
+  return await persistCatalogue();
 }
