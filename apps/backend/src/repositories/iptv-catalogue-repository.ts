@@ -195,6 +195,7 @@ export function listIptvCategoriesPage(providerId: string, contentType?: IptvCat
   if (contentType) { clauses.push("content_type = ?"); params.push(contentType); }
   clauses.push("status = ?");
   params.push(options.status ?? "active");
+  clauses.push("(content_type != 'live' OR EXISTS (SELECT 1 FROM channels live_channel WHERE live_channel.provider_id = iptv_categories.provider_id AND live_channel.content_type = 'live' AND live_channel.status NOT IN ('archived', 'stale') AND (live_channel.category_id = iptv_categories.id OR live_channel.category_id = iptv_categories.provider_category_id)))");
   const where = clauses.join(" AND ");
   const total = Number((db.prepare(`SELECT COUNT(*) AS count FROM iptv_categories WHERE ${where}`).get(...params) as { count: number }).count ?? 0);
   const rows = db.prepare(`SELECT * FROM iptv_categories WHERE ${where} ORDER BY ordering IS NULL, ordering, name LIMIT ? OFFSET ?`).all(...params, pageSize, offset) as any[];
