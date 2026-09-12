@@ -138,6 +138,26 @@ test("Xtream live category identity yields one browser group for four channels",
   }
 });
 
+test("category selection resolves legacy provider category IDs", async () => {
+  const provider = createProvider({ name: `Legacy Category Selection ${Date.now()}`, baseUrl: `https://legacy-category.example/${Date.now()}`, type: "xtream", authType: "basic", username: "user", password: "pass" });
+  const category = upsertIptvCategory(provider.id, { providerCategoryId: "1", contentType: "live", name: "Sports" });
+  const database = getDatabase();
+  for (const number of [1, 2, 3, 4]) {
+    database.prepare("INSERT INTO channels (id, provider_id, name, external_ref, category_id, group_name, url, content_type, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'live', 'active', ?, ?)").run(`legacy-${number}`, provider.id, `Legacy ${number}`, String(number), "1", "Sports", `https://example.com/live/${number}.m3u8`, new Date().toISOString(), new Date().toISOString());
+  }
+
+  const { server, baseUrl } = await startTestServer();
+  try {
+    const response = await request(baseUrl, `/iptv/providers/${provider.id}/channels?categoryId=${encodeURIComponent(category.id)}&page=1&pageSize=20`);
+    const body = await response.json() as any;
+    assert.equal(response.status, 200);
+    assert.equal(body.data.total, 4);
+    assert.equal(new Set(body.data.items.map((item: any) => item.id)).size, 4);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test("catalogue API allows public provider-scoped requests and returns missing-record errors", async () => {
   const provider = createProvider({ name: `Auth API Provider ${Date.now()}`, baseUrl: `https://auth-api.example/${Date.now()}`, type: "xtream", authType: "basic", username: "user", password: "pass" });
   const { server, baseUrl } = await startTestServer();

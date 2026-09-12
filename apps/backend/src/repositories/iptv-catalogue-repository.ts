@@ -211,8 +211,8 @@ export function listIptvChannelsPage(providerId: string, options: CatalogueListO
   const params: unknown[] = [providerId];
   if (options.status) { clauses.push("c.status = ?"); params.push(options.status); }
   if (options.categoryId) {
-    clauses.push("(c.category_id = ? OR EXISTS (SELECT 1 FROM iptv_categories requested_category WHERE requested_category.provider_id = c.provider_id AND requested_category.content_type = 'live' AND requested_category.provider_category_id = ? AND (requested_category.id = c.category_id OR requested_category.provider_category_id = c.category_id OR requested_category.provider_category_id = c.group_name)))");
-    params.push(options.categoryId, options.categoryId);
+    clauses.push("(c.category_id = ? OR EXISTS (SELECT 1 FROM iptv_categories requested_category WHERE requested_category.provider_id = c.provider_id AND requested_category.content_type = 'live' AND (requested_category.id = ? OR requested_category.provider_category_id = ?) AND (requested_category.id = c.category_id OR requested_category.provider_category_id = c.category_id OR requested_category.provider_category_id = c.group_name)))");
+    params.push(options.categoryId, options.categoryId, options.categoryId);
   }
   if (options.search) { clauses.push("LOWER(c.name) LIKE ?"); params.push(`%${options.search.toLowerCase()}%`); }
   const where = clauses.join(" AND ");
