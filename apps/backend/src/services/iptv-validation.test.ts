@@ -232,13 +232,49 @@ test("classifies an Xtream-style mixed M3U into live, movies, series, and episod
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channels WHERE provider_id = ? AND content_type != 'live'").get(provider.id).count, 0);
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_movies WHERE provider_id = ? AND status = 'active'").get(provider.id).count, 4);
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_series WHERE provider_id = ? AND status = 'active'").get(provider.id).count, 1);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_seasons WHERE provider_id = ? AND status = 'active'").get(provider.id).count, 1);
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_series_episodes WHERE series_id IN (SELECT id FROM iptv_series WHERE provider_id = ?) AND status = 'active'").get(provider.id).count, 4);
   assert.equal(database.prepare("SELECT url FROM channels WHERE provider_id = ? AND external_ref = 'live-1'").get(provider.id).url, "https://provider.example/live/user/pass/1.m3u8");
   assert.equal(database.prepare("SELECT stream_url FROM iptv_movies WHERE provider_id = ? AND external_id = 'movie-1'").get(provider.id).stream_url, "https://provider.example/movie/user/pass/1.mp4");
-  assert.equal(database.prepare("SELECT stream_url FROM iptv_series_episodes WHERE external_id = 'episode-0'").get().stream_url, "https://provider.example/series/user/pass/1.mp4");
+  assert.deepEqual(database.prepare("SELECT episode_number AS episodeNumber, stream_url AS streamUrl FROM iptv_series_episodes WHERE series_id IN (SELECT id FROM iptv_series WHERE provider_id = ?) AND status = 'active' ORDER BY episode_number").all(provider.id), [
+    { episodeNumber: 1, streamUrl: "https://provider.example/series/user/pass/1.mp4" },
+    { episodeNumber: 2, streamUrl: "https://provider.example/series/user/pass/2.mp4" },
+    { episodeNumber: 3, streamUrl: "https://provider.example/series/user/pass/3.mp4" },
+    { episodeNumber: 4, streamUrl: "https://provider.example/series/user/pass/4.mp4" }
+  ]);
   assert.equal(parsed.filter((entry) => entry.contentType === "live").length, 4);
   assert.equal(parsed.filter((entry) => entry.contentType === "movie").length, 4);
   assert.equal(parsed.filter((entry) => entry.contentType === "series").length, 4);
+
+  const repeated = syncParsedM3uCatalogue(provider.id, parsed);
+  assert.deepEqual(repeated, { liveChannels: 4, movies: 4, series: 1, episodes: 4 });
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channels WHERE provider_id = ? AND content_type = 'live' AND status = 'active'").get(provider.id).count, 4);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_movies WHERE provider_id = ? AND status = 'active'").get(provider.id).count, 4);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_series WHERE provider_id = ? AND status = 'active'").get(provider.id).count, 1);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_seasons WHERE provider_id = ? AND status = 'active'").get(provider.id).count, 1);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_series_episodes WHERE series_id IN (SELECT id FROM iptv_series WHERE provider_id = ?) AND status = 'active'").get(provider.id).count, 4);
+
+  const otherProvider = createProvider({ name: `Other M3U ${Date.now()}`, baseUrl: `https://other-m3u.example/${Date.now()}`, type: "m3u", authType: "none" });
+  syncParsedM3uCatalogue(otherProvider.id, [parsed[0]]);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channels WHERE provider_id = ? AND status = 'active'").get(otherProvider.id).count, 1);
+
+  const changed = parsed.filter((entry) => entry.externalRef === "live-1" || entry.externalRef === "movie-1" || entry.episodeNumber === 1);
+  const changedResult = syncParsedM3uCatalogue(provider.id, changed);
+  assert.deepEqual(changedResult, { liveChannels: 1, movies: 1, series: 1, episodes: 1 });
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channels WHERE provider_id = ? AND content_type = 'live' AND status = 'active'").get(provider.id).count, 1);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_movies WHERE provider_id = ? AND status = 'active'").get(provider.id).count, 1);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_series WHERE provider_id = ? AND status = 'active'").get(provider.id).count, 1);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_seasons WHERE provider_id = ? AND status = 'active'").get(provider.id).count, 1);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_series_episodes WHERE series_id IN (SELECT id FROM iptv_series WHERE provider_id = ?) AND status = 'active'").get(provider.id).count, 1);
+
+  assert.throws(() => syncParsedM3uCatalogue(provider.id, changed.map((entry) => ({ ...entry, url: "" }))), /m3u_catalogue_sync_(failed|invalid_entry)|constraint/i);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channels WHERE provider_id = ? AND status = 'active'").get(provider.id).count, 1);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_movies WHERE provider_id = ? AND status = 'active'").get(provider.id).count, 1);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_series_episodes WHERE series_id IN (SELECT id FROM iptv_series WHERE provider_id = ?) AND status = 'active'").get(provider.id).count, 1);
+
+  const beforeEmptySync = database.prepare("SELECT COUNT(*) AS count FROM channels WHERE provider_id = ? AND status = 'active'").get(provider.id).count;
+  assert.deepEqual(syncParsedM3uCatalogue(provider.id, []), { liveChannels: 0, movies: 0, series: 0, episodes: 0 });
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channels WHERE provider_id = ? AND status = 'active'").get(provider.id).count, beforeEmptySync);
 });
 
 test("classifies mixed M3U entries from group metadata when paths are provider-specific", () => {
