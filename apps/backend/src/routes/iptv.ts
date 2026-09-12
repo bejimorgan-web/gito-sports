@@ -427,7 +427,7 @@ function startXtreamSyncOperation(providerId: string) {
       IPTVService.updateProviderHealth({ providerId, success: false, impact: "failure" });
       throw error;
     }
-  }, undefined, 10 * 60 * 1000, providerId);
+  }, undefined, undefined, providerId);
 }
 
 export const iptvRouter = Router();
