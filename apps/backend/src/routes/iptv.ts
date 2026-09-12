@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { CreateProviderRequest } from "@gito/shared";
 import { IPTVService } from "../services/iptv-service.js";
 import { parseM3uPlaylist, M3uParseError } from "../services/m3u-parser.js";
+import { syncParsedM3uCatalogue } from "../services/m3u-catalogue-sync.js";
 import { fetchXtreamCatalogue, fetchXtreamLiveCatalogue, fetchXtreamChannels, fetchXtreamShortEpg, fetchTextWithTimeout, fetchWithTimeout, testXtreamConnection, XtreamParseError, normalizeXtreamUrl } from "../services/xtream-codes.js";
 import { validateHttpStreamUrl } from "../services/url-validation.js";
 import { logChannelSyncTrace } from "../services/iptv-trace.js";
@@ -250,7 +251,11 @@ async function persistValidatedProvider(
   }
 
   if (input.type && input.type !== "manual" && Array.isArray(validation.channels) && validation.channels.length > 0) {
-    IPTVService.syncProviderChannels(providerId, validation.channels as any[]);
+    if (input.type === "m3u") {
+      syncParsedM3uCatalogue(providerId, validation.channels as any[]);
+    } else {
+      IPTVService.syncProviderChannels(providerId, validation.channels as any[]);
+    }
   }
 
   if (options?.activate) {
@@ -614,8 +619,8 @@ iptvRouter.post("/operations", async (request, response) => {
       const valid = parsed.filter((channel) => !validateHttpStreamUrl(channel.url));
       report({ total: parsed.length, processed: parsed.length, succeeded: valid.length, failed: invalidEntries.length + parsed.length - valid.length, currentStage: type === "m3u_import" ? "saving_channels" : "finalizing", currentMessage: `${parsed.length} playlist entries parsed.` });
       if (type === "m3u_import" && valid.length > 0 && !state.cancelled) {
-        IPTVService.syncProviderChannels(body.providerId!, valid);
-        report({ processed: valid.length, succeeded: valid.length, currentMessage: `${valid.length} valid channels saved.` });
+        const synced = syncParsedM3uCatalogue(body.providerId!, valid);
+        report({ processed: valid.length, succeeded: synced.liveChannels + synced.movies + synced.series + synced.episodes, currentMessage: `${synced.liveChannels} live channels, ${synced.movies} movies, ${synced.series} series, and ${synced.episodes} episodes saved.` });
       }
       return;
     }
@@ -793,14 +798,19 @@ iptvRouter.post("/providers/:providerId/m3u", (request, response) => {
     }
   }
 
-  const channels = validChannels.length > 0 ? IPTVService.syncProviderChannels(providerId, validChannels) : [];
+  const synced = validChannels.length > 0 ? syncParsedM3uCatalogue(providerId, validChannels) : { liveChannels: 0, movies: 0, series: 0, episodes: 0 };
+  const totalSynced = synced.liveChannels + synced.movies + synced.series + synced.episodes;
+  IPTVService.setProviderStatus(providerId, totalSynced > 0 ? "active" : "failed");
 
   response.status(201).json({
     data: {
-      channelsCreated: channels.length,
+      channelsCreated: synced.liveChannels,
+      moviesCreated: synced.movies,
+      seriesCreated: synced.series,
+      episodesCreated: synced.episodes,
       channelsParsed: parsedChannels.length,
       channelsRejected: invalidChannels.length,
-      categories: Array.from(new Set(channels.map((channel) => (channel as any).category).filter(Boolean))),
+      categories: Array.from(new Set(validChannels.map((channel) => channel.groupName).filter(Boolean))),
       rejectedChannels: invalidChannels.slice(0, 10)
     }
   });

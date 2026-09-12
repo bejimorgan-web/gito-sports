@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { validateHttpStreamUrl } from "./url-validation.js";
 import { parseM3uPlaylist } from "./m3u-parser.js";
+import { syncParsedM3uCatalogue } from "./m3u-catalogue-sync.js";
 import { buildXtreamEndpointCandidates, fetchXtreamChannels, normalizeXtreamUrl, readResponseTextWithTimeout, testXtreamConnection } from "./xtream-codes.js";
 import { detectProviderType } from "./provider-type-detector.js";
 import { createProvider, getProviderById, getProviderChannelDiagnostics, listChannelsPage, listProviders, softDeleteProvider, syncProviderChannels, setProviderStatus, updateProviderHealth } from "../repositories/provider-repository.js";
@@ -206,6 +207,29 @@ https://example.com/sports.ts`);
   assert.equal(channels[0]?.name, "Sports One");
   assert.equal(channels[0]?.groupName, "Sports");
   assert.equal(channels[0]?.url, "https://example.com/sports.ts");
+});
+
+test("classifies an Xtream-style mixed M3U into live, movies, series, and episodes", () => {
+  const provider = createProvider({ name: `Mixed M3U ${Date.now()}`, baseUrl: `https://mixed-m3u.example/${Date.now()}`, type: "m3u", authType: "none" });
+  const playlist = [
+    "#EXTM3U",
+    ...[1, 2, 3, 4].map((id) => `#EXTINF:-1 tvg-id=\"live-${id}\" group-title=\"Live TV\",Live ${id}\nhttps://provider.example/live/user/pass/${id}.m3u8`),
+    ...[1, 2, 3, 4].map((id) => `#EXTINF:-1 tvg-id=\"movie-${id}\" group-title=\"Movies\",Movie ${id}\nhttps://provider.example/movie/user/pass/${id}.mp4`),
+    ...[1, 2, 3, 4].map((id) => `#EXTINF:-1 series-id=\"series-1\" season-number=\"1\" episode-number=\"${id}\" group-title=\"Series One\",Episode ${id}\nhttps://provider.example/series/user/pass/${id}.mp4`)
+  ].join("\n");
+  const parsed = parseM3uPlaylist(playlist);
+  const result = syncParsedM3uCatalogue(provider.id, parsed);
+  const database = getDatabase();
+
+  assert.deepEqual(result, { liveChannels: 4, movies: 4, series: 1, episodes: 4 });
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channels WHERE provider_id = ? AND content_type = 'live'").get(provider.id).count, 4);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channels WHERE provider_id = ? AND content_type != 'live'").get(provider.id).count, 0);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_movies WHERE provider_id = ? AND status = 'active'").get(provider.id).count, 4);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_series WHERE provider_id = ? AND status = 'active'").get(provider.id).count, 1);
+  assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_series_episodes WHERE series_id IN (SELECT id FROM iptv_series WHERE provider_id = ?) AND status = 'active'").get(provider.id).count, 4);
+  assert.equal(parsed.filter((entry) => entry.contentType === "live").length, 4);
+  assert.equal(parsed.filter((entry) => entry.contentType === "movie").length, 4);
+  assert.equal(parsed.filter((entry) => entry.contentType === "series").length, 4);
 });
 
 test("rejects disabled Xtream accounts even when the API returns HTTP 200", async () => {

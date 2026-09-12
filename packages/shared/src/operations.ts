@@ -47,10 +47,15 @@ export interface ParsedChannel {
   name: string;
   url: string;
   externalRef?: string;
+  tvgName?: string;
   groupName?: string;
   categoryId?: string;
   logoUrl?: string;
   contentType?: "live" | "movie" | "series";
+  seriesExternalRef?: string;
+  seriesName?: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
 }
 
 export interface ProviderIngestionResult {
