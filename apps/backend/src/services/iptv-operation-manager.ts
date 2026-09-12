@@ -74,12 +74,12 @@ function persist(id: string, progress: IptvOperationProgress & { status?: IptvOp
 }
 
 export const IptvOperationManager = {
-  start(type: IptvOperationType, task: OperationTask, createdBy?: string, timeoutMs = (type.endsWith("validation") || type.endsWith("sync")) ? IPTV_VALIDATION_TIMEOUT_MS : undefined, providerId?: string) {
+  start(type: IptvOperationType, task: OperationTask, createdBy?: string, timeoutMs: number | null | undefined = (type.endsWith("validation") || type.endsWith("sync")) ? IPTV_VALIDATION_TIMEOUT_MS : undefined, providerId?: string) {
     const operation = createIptvOperation({ type, createdBy, providerId });
     operationCache.set(operation.id, operation);
     const controller = new AbortController();
     operationControllers.set(operation.id, controller);
-    const timeout = timeoutMs === undefined ? undefined : setTimeout(() => controller.abort(), timeoutMs);
+    const timeout = timeoutMs === undefined || timeoutMs === null ? undefined : setTimeout(() => controller.abort(), timeoutMs);
 
     void (async () => {
       const running = persist(operation.id, { status: "running", currentStage: "starting", currentMessage: "Operation started.", startedAt: new Date().toISOString() }) ?? operation;
