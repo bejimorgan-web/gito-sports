@@ -41,6 +41,33 @@ function readInlineUrl(line: string): string | undefined {
   return inlineUrlMatch?.[0];
 }
 
+function inferContentType(url: string, groupName?: string): ParsedChannel["contentType"] {
+  try {
+    const path = new URL(url).pathname.toLowerCase();
+    if (/(^|\/)movie(\/|$)/.test(path)) return "movie";
+    if (/(^|\/)series(\/|$)/.test(path)) return "series";
+    if (/(^|\/)live(\/|$)/.test(path)) return "live";
+  } catch {
+    // Fall through to playlist metadata for non-URL entries.
+  }
+
+  const normalizedGroup = groupName?.toLowerCase() ?? "";
+  if (/\b(movie|movies|vod|video on demand)\b/.test(normalizedGroup)) return "movie";
+  if (/\b(series|serials|shows|tv series)\b/.test(normalizedGroup)) return "series";
+  if (/\b(live|live tv|channels?)\b/.test(normalizedGroup)) return "live";
+  return "live";
+}
+
+function readNumberAttribute(line: string, ...names: string[]): number | undefined {
+  for (const name of names) {
+    const raw = readAttribute(line, name);
+    if (raw === undefined) continue;
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
 export function parseM3uPlaylist(content: string, onInvalidEntry?: (entry: M3uParseError) => void): ParsedChannel[] {
   const lines = content
     .replace(/^\uFEFF/, "")
@@ -81,21 +108,34 @@ export function parseM3uPlaylist(content: string, onInvalidEntry?: (entry: M3uPa
       continue;
     }
 
-    const parsedChannel: ParsedChannel = {
-      name: readDisplayName(line),
-      url
-    };
     const externalRef = readAttribute(line, "tvg-id");
+    const tvgName = readAttribute(line, "tvg-name");
     const groupName = readAttribute(line, "group-title");
+    const logoUrl = readAttribute(line, "tvg-logo");
     const categoryId = readAttribute(line, "group-id") ?? readAttribute(line, "category-id");
     const declaredContentType = readAttribute(line, "content-type") ?? readAttribute(line, "type");
+    const seriesExternalRef = readAttribute(line, "series-id") ?? readAttribute(line, "series_id");
+    const seriesName = readAttribute(line, "series-name") ?? readAttribute(line, "series_name");
+    const parsedChannel: ParsedChannel = {
+      name: readDisplayName(line),
+      url,
+      contentType: inferContentType(url, groupName)
+    };
 
     if (externalRef) {
       parsedChannel.externalRef = externalRef;
     }
 
+    if (tvgName) {
+      parsedChannel.tvgName = tvgName;
+    }
+
     if (groupName) {
       parsedChannel.groupName = groupName;
+    }
+
+    if (logoUrl) {
+      parsedChannel.logoUrl = logoUrl;
     }
 
     if (categoryId) {
@@ -104,6 +144,14 @@ export function parseM3uPlaylist(content: string, onInvalidEntry?: (entry: M3uPa
     if (declaredContentType === "live" || declaredContentType === "movie" || declaredContentType === "series") {
       parsedChannel.contentType = declaredContentType;
     }
+
+    const resolvedSeriesExternalRef = seriesExternalRef ?? (parsedChannel.contentType === "series" ? groupName : undefined);
+    if (resolvedSeriesExternalRef) parsedChannel.seriesExternalRef = resolvedSeriesExternalRef;
+    if (seriesName) parsedChannel.seriesName = seriesName;
+    const seasonNumber = readNumberAttribute(line, "season-number", "season", "season_num");
+    const episodeNumber = readNumberAttribute(line, "episode-number", "episode", "episode-num", "episode_num");
+    if (seasonNumber !== undefined) parsedChannel.seasonNumber = seasonNumber;
+    if (episodeNumber !== undefined) parsedChannel.episodeNumber = episodeNumber;
 
     channels.push(parsedChannel);
   }
