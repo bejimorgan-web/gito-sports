@@ -1,3 +1,5 @@
+import "./iptv-test-environment.js";
+
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -186,12 +188,16 @@ test("Xtream sync removes player_api.php from the normalized playback base", asy
 
 test("parses m3u entries that include the stream URL inline", () => {
   const channels = parseM3uPlaylist(`#EXTM3U
-#EXTINF:-1 tvg-id="chan1" group-title="News",Channel One,https://example.com/stream.m3u8
+#EXTINF:-1 tvg-id="chan1" tvg-name="Guide One" tvg-logo="https://example.com/logo.png" group-title="News",Channel One,https://example.com/stream.m3u8
 #EXTINF:-1 tvg-id="chan2" group-title="Sports",Channel Two
 https://example.com/stream2.m3u8`);
 
   assert.equal(channels[0]?.name, "Channel One");
   assert.equal(channels[0]?.url, "https://example.com/stream.m3u8");
+  assert.equal(channels[0]?.externalRef, "chan1");
+  assert.equal(channels[0]?.tvgName, "Guide One");
+  assert.equal(channels[0]?.logoUrl, "https://example.com/logo.png");
+  assert.equal(channels[0]?.groupName, "News");
   assert.equal(channels[1]?.name, "Channel Two");
   assert.equal(channels[1]?.url, "https://example.com/stream2.m3u8");
 });
@@ -235,6 +241,22 @@ test("classifies an Xtream-style mixed M3U into live, movies, series, and episod
   assert.equal(parsed.filter((entry) => entry.contentType === "series").length, 4);
 });
 
+test("classifies mixed M3U entries from group metadata when paths are provider-specific", () => {
+  const channels = parseM3uPlaylist(`#EXTM3U
+#EXTINF:-1 tvg-id="live-1" group-title="GiTO Demo • Live TV",Live One
+https://provider.example/demo_live_01.mp4
+#EXTINF:-1 tvg-id="movie-1" group-title="GiTO Demo • Movies",Movie One
+https://provider.example/demo_movie_01.mp4
+#EXTINF:-1 tvg-id="series-1" season="1" episode-num="1" group-title="GiTO Demo • Series",Series Episode One
+https://provider.example/demo_series_s01e01.mp4`);
+
+  assert.deepEqual(channels.map((channel) => channel.contentType), ["live", "movie", "series"]);
+  assert.equal(channels[0]?.url, "https://provider.example/demo_live_01.mp4");
+  assert.equal(channels[1]?.url, "https://provider.example/demo_movie_01.mp4");
+  assert.equal(channels[2]?.url, "https://provider.example/demo_series_s01e01.mp4");
+  assert.equal(channels[2]?.seasonNumber, 1);
+  assert.equal(channels[2]?.episodeNumber, 1);
+});
 test("rejects disabled Xtream accounts even when the API returns HTTP 200", async () => {
   const originalFetch = globalThis.fetch;
   try {
@@ -285,6 +307,41 @@ test("detects Xtream credentials from get.php M3U playlist URLs", async () => {
     password: "pass"
   });
   assert.equal(detectedXtream, "xtream");
+});
+
+test("existing Xtream A plus a new M3U B with different credentials create distinct provider rows", () => {
+  const xtreamInput = {
+    name: `Xtream Provider ${Date.now()}`,
+    baseUrl: `https://example.com/xtream/${Date.now()}`,
+    type: "xtream" as const,
+    authType: "basic" as const,
+    username: "xtream-user",
+    password: "xtream-pass"
+  };
+  const m3uInput = {
+    name: `M3U Provider ${Date.now()}`,
+    baseUrl: `https://example.com/m3u/${Date.now()}.m3u8`,
+    type: "m3u" as const,
+    authType: "none" as const
+  };
+
+  const xtreamProvider = createProvider(xtreamInput);
+  const m3uProvider = createProvider(m3uInput);
+
+  assert.ok(xtreamProvider);
+  assert.ok(m3uProvider);
+  assert.notEqual(xtreamProvider.id, m3uProvider.id);
+
+  const providerRows = getDatabase()
+    .prepare(
+      `SELECT id, name, base_url, type, credential_username, credential_password FROM providers WHERE deleted = 0 ORDER BY created_at`
+    )
+    .all() as Array<{ id: string; type: string; base_url: string; credential_username: string | null; credential_password: string | null }>;
+
+  assert.ok(providerRows.some((provider) => provider.id === xtreamProvider.id && provider.type === "xtream"));
+  assert.ok(providerRows.some((provider) => provider.id === m3uProvider.id && provider.type === "m3u"));
+  assert.equal(providerRows.filter((provider) => provider.base_url === xtreamInput.baseUrl).length, 1);
+  assert.equal(providerRows.filter((provider) => provider.base_url === m3uInput.baseUrl).length, 1);
 });
 
 test("retries of the same validated provider payload do not create duplicate provider rows", () => {

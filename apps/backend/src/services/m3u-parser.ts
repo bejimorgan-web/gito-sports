@@ -41,15 +41,20 @@ function readInlineUrl(line: string): string | undefined {
   return inlineUrlMatch?.[0];
 }
 
-function inferContentType(url: string): ParsedChannel["contentType"] {
+function inferContentType(url: string, groupName?: string): ParsedChannel["contentType"] {
   try {
     const path = new URL(url).pathname.toLowerCase();
     if (/(^|\/)movie(\/|$)/.test(path)) return "movie";
     if (/(^|\/)series(\/|$)/.test(path)) return "series";
     if (/(^|\/)live(\/|$)/.test(path)) return "live";
   } catch {
-    // Preserve the legacy live default for non-URL playlist entries.
+    // Fall through to playlist metadata for non-URL entries.
   }
+
+  const normalizedGroup = groupName?.toLowerCase() ?? "";
+  if (/\b(movie|movies|vod|video on demand)\b/.test(normalizedGroup)) return "movie";
+  if (/\b(series|serials|shows|tv series)\b/.test(normalizedGroup)) return "series";
+  if (/\b(live|live tv|channels?)\b/.test(normalizedGroup)) return "live";
   return "live";
 }
 
@@ -103,18 +108,19 @@ export function parseM3uPlaylist(content: string, onInvalidEntry?: (entry: M3uPa
       continue;
     }
 
-    const parsedChannel: ParsedChannel = {
-      name: readDisplayName(line),
-      url,
-      contentType: inferContentType(url)
-    };
     const externalRef = readAttribute(line, "tvg-id");
     const tvgName = readAttribute(line, "tvg-name");
     const groupName = readAttribute(line, "group-title");
+    const logoUrl = readAttribute(line, "tvg-logo");
     const categoryId = readAttribute(line, "group-id") ?? readAttribute(line, "category-id");
     const declaredContentType = readAttribute(line, "content-type") ?? readAttribute(line, "type");
     const seriesExternalRef = readAttribute(line, "series-id") ?? readAttribute(line, "series_id");
     const seriesName = readAttribute(line, "series-name") ?? readAttribute(line, "series_name");
+    const parsedChannel: ParsedChannel = {
+      name: readDisplayName(line),
+      url,
+      contentType: inferContentType(url, groupName)
+    };
 
     if (externalRef) {
       parsedChannel.externalRef = externalRef;
@@ -126,6 +132,10 @@ export function parseM3uPlaylist(content: string, onInvalidEntry?: (entry: M3uPa
 
     if (groupName) {
       parsedChannel.groupName = groupName;
+    }
+
+    if (logoUrl) {
+      parsedChannel.logoUrl = logoUrl;
     }
 
     if (categoryId) {
