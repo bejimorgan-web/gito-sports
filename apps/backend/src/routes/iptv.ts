@@ -2,10 +2,12 @@ import { Router } from "express";
 import type { CreateProviderRequest } from "@gito/shared";
 import { IPTVService } from "../services/iptv-service.js";
 import { parseM3uPlaylist, M3uParseError } from "../services/m3u-parser.js";
+import { syncParsedM3uCatalogue } from "../services/m3u-catalogue-sync.js";
 import { fetchXtreamCatalogue, fetchXtreamLiveCatalogue, fetchXtreamChannels, fetchXtreamShortEpg, fetchTextWithTimeout, fetchWithTimeout, testXtreamConnection, XtreamParseError, normalizeXtreamUrl } from "../services/xtream-codes.js";
 import { validateHttpStreamUrl } from "../services/url-validation.js";
 import { logChannelSyncTrace } from "../services/iptv-trace.js";
-import { detectProviderType } from "../services/provider-type-detector.js";
+import { deriveXtreamCredentialHint, detectProviderType } from "../services/provider-type-detector.js";
+import { syncProviderChannelsBatched } from "../repositories/provider-repository.js";
 import { IptvOperationManager, type IptvOperationType } from "../services/iptv-operation-manager.js";
 import {
   getIptvMovie,
@@ -149,6 +151,7 @@ async function validateProviderConnection(input: {
     const bodyText = testResult.text;
     const detectedType = await detectProviderType({ baseUrl: playlistUrl, username, password, payload: bodyText });
     const inferredType = resolvedType === "manual" ? detectedType : resolvedType;
+    const xtreamCredentialHint = inferredType === "m3u" ? deriveXtreamCredentialHint(playlistUrl, username, password) : undefined;
 
     if (inferredType === "xtream") {
       if (!username || !password) {
@@ -213,6 +216,10 @@ async function validateProviderConnection(input: {
       statusCode: testResponse.status,
       message: validChannels.length > 0 ? "Provider connection is valid." : "No valid channels could be parsed from the playlist.",
       detectedType: inferredType,
+      authenticationMethod: inferredType,
+      xtreamCredentialsDetected: Boolean(xtreamCredentialHint),
+      xtreamEnrichment: "unavailable",
+      catalogueSource: "m3u",
       channels: validChannels,
       channelsParsed: parsed.length,
       channelsRejected: invalidChannels.length,
@@ -250,7 +257,19 @@ async function persistValidatedProvider(
   }
 
   if (input.type && input.type !== "manual" && Array.isArray(validation.channels) && validation.channels.length > 0) {
-    IPTVService.syncProviderChannels(providerId, validation.channels as any[]);
+    const synced = input.type === "m3u"
+      ? await syncParsedM3uCatalogue(providerId, validation.channels as any[])
+      : { liveChannels: IPTVService.syncProviderChannels(providerId, validation.channels as any[]).length, movies: 0, series: 0, episodes: 0 };
+    if (input.type === "m3u") {
+      await tryXtreamEnrichment(providerId, validation.channels as any[], new AbortController().signal);
+    }
+    if (synced.liveChannels + synced.movies + synced.series + synced.episodes === 0) {
+      IPTVService.setProviderStatus(providerId, "failed");
+      throw new Error("M3U synchronization saved zero channels.");
+    }
+  } else if (input.type === "m3u") {
+    IPTVService.setProviderStatus(providerId, "failed");
+    throw new Error("M3U validation produced zero usable channels.");
   }
 
   if (options?.activate) {
@@ -258,6 +277,44 @@ async function persistValidatedProvider(
   }
 
   return true;
+}
+
+async function tryXtreamEnrichment(providerId: string, m3uChannels: any[], signal: AbortSignal) {
+  const provider = IPTVService.getProviderCredentials(providerId);
+  if (!provider?.base_url || !provider.credential_username || !provider.credential_password) {
+    return "unavailable" as const;
+  }
+
+  const hint = deriveXtreamCredentialHint(provider.base_url, provider.credential_username, provider.credential_password);
+  if (!hint) return "unavailable" as const;
+
+  try {
+    const connection = await testXtreamConnection(hint.serverUrl, hint.username, hint.password, signal);
+    if (!connection.ok || signal.aborted) return "unavailable" as const;
+
+    const m3uByExternalRef = new Map(m3uChannels.filter((entry) => entry.externalRef).map((entry) => [entry.externalRef, entry]));
+    const live = await fetchXtreamLiveCatalogue(hint.serverUrl, hint.username, hint.password, signal);
+    const enrichedLive = live.channels.map((entry) => {
+      const metadata = m3uByExternalRef.get(entry.externalRef);
+      return metadata ? { ...entry, groupName: metadata.groupName ?? entry.groupName, categoryId: metadata.categoryId ?? entry.categoryId, logoUrl: metadata.logoUrl ?? entry.logoUrl } : entry;
+    });
+    if (enrichedLive.length > 0) await syncProviderChannelsBatched(providerId, enrichedLive);
+
+    const catalogue = await fetchXtreamCatalogue(hint.serverUrl, hint.username, hint.password, signal);
+    if (signal.aborted) return "unavailable" as const;
+    await syncXtreamCategories(providerId, "movie", catalogue.movieCategories);
+    await syncXtreamCategories(providerId, "series", catalogue.seriesCategories);
+    await syncXtreamMoviesDetailed(providerId, catalogue.movies);
+    await syncXtreamSeriesDetailed(providerId, catalogue.series);
+    await syncXtreamSeasonsDetailed(providerId, catalogue.seasons);
+    for (const seriesEpisodes of catalogue.episodes) {
+      if (signal.aborted) return "unavailable" as const;
+      await syncXtreamEpisodesDetailed(providerId, seriesEpisodes.seriesExternalId, seriesEpisodes.records);
+    }
+    return "available" as const;
+  } catch {
+    return "unavailable" as const;
+  }
 }
 
 function startXtreamSyncOperation(providerId: string) {
@@ -279,7 +336,7 @@ function startXtreamSyncOperation(providerId: string) {
       report({ currentStage: "discovering_channels", currentMessage: "Loading live groups and channels." });
       const invalidEntries: XtreamParseError[] = [];
       const live = await fetchXtreamLiveCatalogue(serverUrl, username, password, signal);
-      syncXtreamCategories(providerId, "live", live.categories);
+      await syncXtreamCategories(providerId, "live", live.categories);
       const valid = live.channels.filter((channel) => !validateHttpStreamUrl(channel.url));
       report({
         total: live.channels.length,
@@ -296,22 +353,22 @@ function startXtreamSyncOperation(providerId: string) {
         throw new Error("Xtream sync completed with zero usable channels.");
       }
 
-      const saved = IPTVService.syncProviderChannels(providerId, valid);
+      const saved = await syncProviderChannelsBatched(providerId, valid, (processed, succeeded) => report({ processed, succeeded, failed: processed - succeeded, currentStage: "saving_channels", currentMessage: `${processed} of ${valid.length} live channels saved.` }));
       report({ currentStage: "syncing_catalogue", currentMessage: "Loading movies, series, seasons, and episodes." });
       const catalogue = await fetchXtreamCatalogue(serverUrl, username, password, signal);
       if (signal.aborted || state.cancelled) return;
-      syncXtreamCategories(providerId, "movie", catalogue.movieCategories);
-      syncXtreamCategories(providerId, "series", catalogue.seriesCategories);
+      await syncXtreamCategories(providerId, "movie", catalogue.movieCategories);
+      await syncXtreamCategories(providerId, "series", catalogue.seriesCategories);
       report({ currentStage: "saving_movies", total: catalogue.movies.length, processed: 0, currentMessage: `${catalogue.movies.length} movies discovered.` });
-      const movieStats = syncXtreamMoviesDetailed(providerId, catalogue.movies);
+      const movieStats = await syncXtreamMoviesDetailed(providerId, catalogue.movies, (stats) => report({ processed: stats.processed, succeeded: stats.inserted + stats.unchanged, updated: stats.updated, failed: stats.failed, currentStage: "saving_movies", currentMessage: `${stats.processed} of ${stats.fetched} movies saved.` }));
       report({ currentStage: "saving_series", total: catalogue.series.length, processed: 0, currentMessage: `${catalogue.series.length} series discovered.` });
-      const seriesStats = syncXtreamSeriesDetailed(providerId, catalogue.series);
+      const seriesStats = await syncXtreamSeriesDetailed(providerId, catalogue.series, (stats) => report({ processed: stats.processed, succeeded: stats.inserted + stats.unchanged, updated: stats.updated, failed: stats.failed, currentStage: "saving_series", currentMessage: `${stats.processed} of ${stats.fetched} series saved.` }));
       report({ currentStage: "saving_seasons", total: catalogue.seasons.length, processed: 0, currentMessage: `${catalogue.seasons.length} seasons discovered.` });
-      const seasonStats = syncXtreamSeasonsDetailed(providerId, catalogue.seasons);
+      const seasonStats = await syncXtreamSeasonsDetailed(providerId, catalogue.seasons, (stats) => report({ processed: stats.processed, succeeded: stats.inserted + stats.unchanged, updated: stats.updated, failed: stats.failed, currentStage: "saving_seasons", currentMessage: `${stats.processed} of ${stats.fetched} seasons saved.` }));
       let episodeStats = { fetched: 0, processed: 0, inserted: 0, updated: 0, unchanged: 0, failed: 0, archived: 0 };
       for (const seriesEpisodes of catalogue.episodes) {
         if (signal.aborted || state.cancelled) return;
-        const result = syncXtreamEpisodesDetailed(providerId, seriesEpisodes.seriesExternalId, seriesEpisodes.records);
+        const result = await syncXtreamEpisodesDetailed(providerId, seriesEpisodes.seriesExternalId, seriesEpisodes.records, (stats) => report({ processed: stats.processed, succeeded: stats.inserted + stats.unchanged, updated: stats.updated, failed: stats.failed, currentStage: "saving_episodes", currentMessage: `${stats.processed} of ${stats.fetched} episodes saved for the current series.` }));
         episodeStats = {
           fetched: episodeStats.fetched + result.fetched,
           processed: episodeStats.processed + result.processed,
@@ -337,7 +394,7 @@ function startXtreamSyncOperation(providerId: string) {
       IPTVService.updateProviderHealth({ providerId, success: false, impact: "failure" });
       throw error;
     }
-  }, undefined, 10 * 60 * 1000);
+  }, undefined, undefined);
 }
 
 export const iptvRouter = Router();
@@ -599,23 +656,34 @@ iptvRouter.post("/operations", async (request, response) => {
 
   const operation = IptvOperationManager.start(type, async (state, report, signal) => {
     if (type === "m3u_validation" || type === "m3u_import") {
-      report({ currentStage: "parsing", currentMessage: "Parsing playlist." });
-      let playlist = body.playlist ?? "";
-      if (!playlist && body.providerId) {
-        const provider = IPTVService.getProvider(body.providerId);
-        if (!provider?.baseUrl) throw new Error("provider_not_found");
-        const playlistResult = await fetchTextWithTimeout(normalizePlaylistUrl(provider.baseUrl), { signal }, 60_000);
-        const playlistResponse = playlistResult.response;
-        if (!playlistResponse.ok) throw new Error(`Provider returned HTTP ${playlistResponse.status}.`);
-        playlist = playlistResult.text;
-      }
-      const invalidEntries: M3uParseError[] = [];
-      const parsed = parseM3uPlaylist(playlist, (entry) => invalidEntries.push(entry));
-      const valid = parsed.filter((channel) => !validateHttpStreamUrl(channel.url));
-      report({ total: parsed.length, processed: parsed.length, succeeded: valid.length, failed: invalidEntries.length + parsed.length - valid.length, currentStage: type === "m3u_import" ? "saving_channels" : "finalizing", currentMessage: `${parsed.length} playlist entries parsed.` });
-      if (type === "m3u_import" && valid.length > 0 && !state.cancelled) {
-        IPTVService.syncProviderChannels(body.providerId!, valid);
-        report({ processed: valid.length, succeeded: valid.length, currentMessage: `${valid.length} valid channels saved.` });
+      try {
+        report({ currentStage: "parsing", currentMessage: "Parsing playlist." });
+        let playlist = body.playlist ?? "";
+        if (!playlist && body.providerId) {
+          const provider = IPTVService.getProvider(body.providerId);
+          if (!provider?.baseUrl) throw new Error("provider_not_found");
+          const playlistResult = await fetchTextWithTimeout(normalizePlaylistUrl(provider.baseUrl), { signal }, 60_000);
+          const playlistResponse = playlistResult.response;
+          if (!playlistResponse.ok) throw new Error(`Provider returned HTTP ${playlistResponse.status}.`);
+          playlist = playlistResult.text;
+        }
+        const invalidEntries: M3uParseError[] = [];
+        const parsed = parseM3uPlaylist(playlist, (entry) => invalidEntries.push(entry));
+        const valid = parsed.filter((channel) => !validateHttpStreamUrl(channel.url));
+        report({ total: parsed.length, processed: parsed.length, succeeded: valid.length, failed: invalidEntries.length + parsed.length - valid.length, currentStage: type === "m3u_import" ? "saving_channels" : "finalizing", currentMessage: `${parsed.length} playlist entries parsed.` });
+        if (type === "m3u_import") {
+          if (valid.length === 0) throw new Error("M3U import produced zero usable channels.");
+          if (state.cancelled) return;
+          const synced = await syncParsedM3uCatalogue(body.providerId!, valid);
+          if (synced.liveChannels + synced.movies + synced.series + synced.episodes === 0) throw new Error("M3U synchronization saved zero catalogue items.");
+          report({ currentStage: "enriching_catalogue", currentMessage: "Checking for optional Xtream catalogue enrichment." });
+          const enrichment = await tryXtreamEnrichment(body.providerId!, valid, signal);
+          IPTVService.setProviderStatus(body.providerId!, "active");
+          report({ processed: valid.length, succeeded: synced.liveChannels + synced.movies + synced.series + synced.episodes, currentMessage: `${synced.liveChannels} live channels, ${synced.movies} movies, ${synced.series} series, and ${synced.episodes} episodes saved${enrichment === "available" ? " with Xtream enrichment" : ""}.` });
+        }
+      } catch (error) {
+        if (body.providerId) IPTVService.setProviderStatus(body.providerId, "failed");
+        throw error;
       }
       return;
     }
@@ -633,7 +701,7 @@ iptvRouter.post("/operations", async (request, response) => {
       const connection = await testXtreamConnection(serverUrl, username, password, signal);
       if (!connection.ok) throw new Error(connection.message);
       if (type === "xtream_validation") {
-        report({ currentStage: "completed", currentMessage: "Server reachable and credentials accepted. Channel sync is starting." });
+        report({ currentStage: "completed", currentMessage: "Server reachable and credentials accepted. No catalogue sync was started." });
         return;
       }
       report({ currentStage: "discovering_channels", currentMessage: "Loading channel inventory." });
@@ -753,7 +821,7 @@ iptvRouter.post("/providers/:providerId/test", async (request, response) => {
   });
 });
 
-iptvRouter.post("/providers/:providerId/m3u", (request, response) => {
+iptvRouter.post("/providers/:providerId/m3u", async (request, response) => {
   const { playlist } = request.body as { playlist?: string };
   const providerId = request.params.providerId;
 
@@ -793,14 +861,23 @@ iptvRouter.post("/providers/:providerId/m3u", (request, response) => {
     }
   }
 
-  const channels = validChannels.length > 0 ? IPTVService.syncProviderChannels(providerId, validChannels) : [];
+  const synced = validChannels.length > 0 ? await syncParsedM3uCatalogue(providerId, validChannels) : { liveChannels: 0, movies: 0, series: 0, episodes: 0 };
+  const totalSynced = synced.liveChannels + synced.movies + synced.series + synced.episodes;
+  if (totalSynced > 0) {
+    IPTVService.setProviderStatus(providerId, "active");
+  } else {
+    IPTVService.setProviderStatus(providerId, "failed");
+  }
 
   response.status(201).json({
     data: {
-      channelsCreated: channels.length,
+      channelsCreated: synced.liveChannels,
+      moviesCreated: synced.movies,
+      seriesCreated: synced.series,
+      episodesCreated: synced.episodes,
       channelsParsed: parsedChannels.length,
       channelsRejected: invalidChannels.length,
-      categories: Array.from(new Set(channels.map((channel) => (channel as any).category).filter(Boolean))),
+      categories: Array.from(new Set(validChannels.map((channel) => channel.groupName).filter(Boolean))),
       rejectedChannels: invalidChannels.slice(0, 10)
     }
   });
