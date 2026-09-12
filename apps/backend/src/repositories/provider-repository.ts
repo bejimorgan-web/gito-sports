@@ -71,6 +71,31 @@ function now() {
   return new Date().toISOString();
 }
 
+function updateMissingProviderChannelsInChunks(database: ReturnType<typeof getDatabase>, providerId: string, processedIds: string[], timestamp: string, status: "active" | "inactive" | "stale") {
+  if (processedIds.length === 0) {
+    database.prepare(`UPDATE channels SET status = ?, updated_at = ? WHERE provider_id = ? AND status = 'active' AND content_type = 'live'`).run(status, timestamp, providerId);
+    return;
+  }
+
+  const processedSet = new Set(processedIds);
+  const batchSize = 500;
+
+  let lastId = "";
+  for (;;) {
+    const rows = database.prepare("SELECT id FROM channels WHERE provider_id = ? AND status = 'active' AND content_type = 'live' AND id > ? ORDER BY id LIMIT ?").all(providerId, lastId, batchSize) as { id: string }[];
+    if (rows.length === 0) break;
+
+    const missingIds = rows.map((row) => row.id).filter((id) => !processedSet.has(id));
+    if (missingIds.length > 0) {
+      const placeholders = missingIds.map(() => "?").join(",");
+      database.prepare(`UPDATE channels SET status = ?, updated_at = ? WHERE provider_id = ? AND status = 'active' AND content_type = 'live' AND id IN (${placeholders})`).run(status, timestamp, providerId, ...missingIds);
+    }
+
+    const lastRow = rows[rows.length - 1];
+    if (!lastRow) break;
+    lastId = lastRow.id;
+  }
+}
 function ensureChannelCategory(providerId: string, channel: ParsedChannel, channelId: string, database: ReturnType<typeof getDatabase>) {
   const contentType = channel.contentType ?? "live";
   const providerCategoryId = (channel.categoryId ?? channel.groupName ?? "").trim();
@@ -718,12 +743,7 @@ export async function syncProviderChannelsBatched(
     const provider = database.prepare("SELECT sync_mode FROM providers WHERE id = ? AND deleted = 0").get(providerId) as { sync_mode?: ProviderSyncMode } | undefined;
     const processedIds = saved.map((channel) => channel.id);
     const timestamp = now();
-    if (processedIds.length === 0) {
-      database.prepare(`UPDATE channels SET status = ?, updated_at = ? WHERE provider_id = ? AND status = 'active' AND content_type = 'live'`).run(provider?.sync_mode === "full" ? "inactive" : "stale", timestamp, providerId);
-    } else {
-      const placeholders = processedIds.map(() => "?").join(",");
-      database.prepare(`UPDATE channels SET status = ?, updated_at = ? WHERE provider_id = ? AND status = 'active' AND content_type = 'live' AND id NOT IN (${placeholders})`).run(provider?.sync_mode === "full" ? "inactive" : "stale", timestamp, providerId, ...processedIds);
-    }
+    updateMissingProviderChannelsInChunks(database, providerId, processedIds, timestamp, provider?.sync_mode === "full" ? "inactive" : "stale");
   }
   return saved;
 }

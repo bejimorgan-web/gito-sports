@@ -47,30 +47,55 @@ function archiveMissingM3uRecords(
   episodeExternalIds: string[]
 ) {
   const database = getDatabase();
-  const updateMissing = (table: string, identityColumn: string, identities: string[], where = "") => {
-    if (identities.length === 0) {
-      database.prepare(`UPDATE ${table} SET status = 'archived', updated_at = ? WHERE provider_id = ? AND status = 'active' ${where}`).run(new Date().toISOString(), providerId);
+  const batchSize = 500;
+  const updateMissingInBatches = (table: string, identityColumn: string, identities: string[], where = "") => {
+    const validIds = new Set(identities);
+    const timestamp = new Date().toISOString();
+
+    if (validIds.size === 0) {
+      database.prepare(`UPDATE ${table} SET status = 'archived', updated_at = ? WHERE provider_id = ? AND status = 'active' ${where}`).run(timestamp, providerId);
       return;
     }
-    const placeholders = identities.map(() => "?").join(",");
-    database.prepare(`UPDATE ${table} SET status = 'archived', updated_at = ? WHERE provider_id = ? AND status = 'active' AND ${identityColumn} NOT IN (${placeholders}) ${where}`).run(new Date().toISOString(), providerId, ...identities);
+
+    let lastValue = "";
+    for (;;) {
+      const rows = database.prepare(`SELECT ${identityColumn} AS value FROM ${table} WHERE provider_id = ? AND status = 'active' AND ${identityColumn} > ? ${where} ORDER BY ${identityColumn} LIMIT ?`).all(providerId, lastValue, batchSize) as { value: string }[];
+      if (rows.length === 0) break;
+
+      const missingIds = rows.map((row) => row.value).filter((value) => !validIds.has(value));
+      if (missingIds.length > 0) {
+        const placeholders = missingIds.map(() => "?").join(",");
+        database.prepare(`UPDATE ${table} SET status = 'archived', updated_at = ? WHERE provider_id = ? AND status = 'active' AND ${identityColumn} IN (${placeholders}) ${where}`).run(timestamp, providerId, ...missingIds);
+      }
+
+      const lastRow = rows[rows.length - 1];
+      if (!lastRow) break;
+      lastValue = lastRow.value;
+    }
   };
 
-  updateMissing("channels", "id", liveChannelIds, "AND content_type = 'live'");
-  updateMissing("iptv_movies", "external_id", movieExternalIds);
-  updateMissing("iptv_series", "external_id", seriesExternalIds);
+  updateMissingInBatches("channels", "id", liveChannelIds, "AND content_type = 'live'");
+  updateMissingInBatches("iptv_movies", "external_id", movieExternalIds);
+  updateMissingInBatches("iptv_series", "external_id", seriesExternalIds);
+  updateMissingInBatches("iptv_seasons", "provider_season_id", seasonKeys);
 
-  if (seasonKeys.length === 0) {
-    database.prepare("UPDATE iptv_seasons SET status = 'archived', updated_at = ? WHERE provider_id = ? AND status = 'active'").run(new Date().toISOString(), providerId);
-  } else {
-    const seasonPlaceholders = seasonKeys.map(() => "?").join(",");
-    database.prepare(`UPDATE iptv_seasons SET status = 'archived', updated_at = ? WHERE provider_id = ? AND status = 'active' AND provider_season_id NOT IN (${seasonPlaceholders})`).run(new Date().toISOString(), providerId, ...seasonKeys);
+  const episodeSet = new Set(episodeExternalIds);
+  const timestamp = new Date().toISOString();
+  let lastEpisodeId = "";
+  for (;;) {
+    const rows = database.prepare(`SELECT e.external_id AS value FROM iptv_series_episodes e INNER JOIN iptv_series s ON s.id = e.series_id WHERE e.status = 'active' AND s.provider_id = ? AND e.external_id > ? ORDER BY e.external_id LIMIT ?`).all(providerId, lastEpisodeId, batchSize) as { value: string }[];
+    if (rows.length === 0) break;
+
+    const missingEpisodeIds = rows.map((row) => row.value).filter((value) => !episodeSet.has(value));
+    if (missingEpisodeIds.length > 0) {
+      const placeholders = missingEpisodeIds.map(() => "?").join(",");
+      database.prepare(`UPDATE iptv_series_episodes SET status = 'archived', updated_at = ? WHERE status = 'active' AND external_id IN (${placeholders}) AND EXISTS (SELECT 1 FROM iptv_series s WHERE s.id = iptv_series_episodes.series_id AND s.provider_id = ?)`).run(timestamp, ...missingEpisodeIds, providerId);
+    }
+
+    const lastRow = rows[rows.length - 1];
+    if (!lastRow) break;
+    lastEpisodeId = lastRow.value;
   }
-
-  const episodeWhere = episodeExternalIds.length === 0
-    ? ""
-    : `AND e.external_id NOT IN (${episodeExternalIds.map(() => "?").join(",")})`;
-  database.prepare(`UPDATE iptv_series_episodes AS e SET status = 'archived', updated_at = ? WHERE e.status = 'active' AND EXISTS (SELECT 1 FROM iptv_series s WHERE s.id = e.series_id AND s.provider_id = ?) ${episodeWhere}`).run(new Date().toISOString(), providerId, ...episodeExternalIds);
 }
 
 export async function syncParsedM3uCatalogue(providerId: string, parsedChannels: ParsedChannel[]): Promise<M3uCatalogueSyncResult> {

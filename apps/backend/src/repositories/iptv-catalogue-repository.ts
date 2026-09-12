@@ -376,9 +376,32 @@ export async function syncXtreamCategories(providerId: string, contentType: "liv
 }
 
 export function archiveMissingXtreamCategories(providerId: string, contentType: "live" | "movie" | "series", providerCategoryIds: string[]) {
-  if (providerCategoryIds.length === 0) return 0;
-  const placeholders = providerCategoryIds.map(() => "?").join(",");
-  return getDatabase().prepare(`UPDATE iptv_categories SET status = 'inactive', updated_at = ? WHERE provider_id = ? AND content_type = ? AND status = 'active' AND provider_category_id NOT IN (${placeholders})`).run(now(), providerId, contentType, ...providerCategoryIds).changes;
+  const database = getDatabase();
+  const validIds = new Set(providerCategoryIds);
+  const batchSize = 500;
+
+  if (validIds.size === 0) {
+    return database.prepare("UPDATE iptv_categories SET status = 'inactive', updated_at = ? WHERE provider_id = ? AND content_type = ? AND status = 'active'").run(now(), providerId, contentType).changes;
+  }
+
+  let archived = 0;
+  let lastId = "";
+  for (;;) {
+    const rows = database.prepare("SELECT provider_category_id AS id FROM iptv_categories WHERE provider_id = ? AND content_type = ? AND status = 'active' AND provider_category_id > ? ORDER BY provider_category_id LIMIT ?").all(providerId, contentType, lastId, batchSize) as { id: string }[];
+    if (rows.length === 0) break;
+
+    const missingIds = rows.map((row) => row.id).filter((id) => !validIds.has(id));
+    if (missingIds.length > 0) {
+      const placeholders = missingIds.map(() => "?").join(",");
+      archived += database.prepare(`UPDATE iptv_categories SET status = 'inactive', updated_at = ? WHERE provider_id = ? AND content_type = ? AND status = 'active' AND provider_category_id IN (${placeholders})`).run(now(), providerId, contentType, ...missingIds).changes;
+    }
+
+    const lastRow = rows[rows.length - 1];
+    if (!lastRow) break;
+    lastId = lastRow.id;
+  }
+
+  return archived;
 }
 
 export async function syncXtreamMoviesDetailed(providerId: string, records: XtreamMovieRecord[], reportProgress?: (stats: CatalogueSyncStats) => void) {
