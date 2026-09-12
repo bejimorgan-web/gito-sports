@@ -730,22 +730,22 @@ export async function syncProviderChannelsBatched(
   channels: ParsedChannel[],
   reportProgress?: (processed: number, saved: number) => void
 ) {
-  const saved: Channel[] = [];
+  const savedIds: string[] = [];
   const batchSize = 500;
   for (let index = 0; index < channels.length; index += batchSize) {
     const batch = channels.slice(index, index + batchSize);
-    saved.push(...syncProviderChannels(providerId, batch, false));
-    reportProgress?.(Math.min(index + batch.length, channels.length), saved.length);
+    const saved = syncProviderChannels(providerId, batch, false);
+    savedIds.push(...saved.map((channel) => channel.id));
+    reportProgress?.(Math.min(index + batch.length, channels.length), savedIds.length);
     if (index + batchSize < channels.length) await new Promise((resolve) => setImmediate(resolve));
   }
   if (channels.length > 0) {
     const database = getDatabase();
     const provider = database.prepare("SELECT sync_mode FROM providers WHERE id = ? AND deleted = 0").get(providerId) as { sync_mode?: ProviderSyncMode } | undefined;
-    const processedIds = saved.map((channel) => channel.id);
     const timestamp = now();
-    updateMissingProviderChannelsInChunks(database, providerId, processedIds, timestamp, provider?.sync_mode === "full" ? "inactive" : "stale");
+    updateMissingProviderChannelsInChunks(database, providerId, savedIds, timestamp, provider?.sync_mode === "full" ? "inactive" : "stale");
   }
-  return saved;
+  return savedIds;
 }
 
 

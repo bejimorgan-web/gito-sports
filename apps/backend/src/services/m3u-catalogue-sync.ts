@@ -193,7 +193,7 @@ export async function syncParsedM3uCatalogue(providerId: string, parsedChannels:
     archiveMissingXtreamCategories(providerId, "live", liveCategoryIds);
     archiveMissingM3uRecords(
       providerId,
-      savedLive.map((channel) => channel.id),
+      savedLive,
       movies.map((entry, index) => streamExternalId(entry, `movie-${index}`)),
       seriesRecords.map((record) => record.externalId),
       seasonKeys,
