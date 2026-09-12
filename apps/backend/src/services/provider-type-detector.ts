@@ -1,5 +1,28 @@
 export type DetectedProviderType = "m3u" | "xtream" | "manual";
 
+export type XtreamCredentialHint = {
+  serverUrl: string;
+  username: string;
+  password: string;
+};
+export function deriveXtreamCredentialHint(baseUrl: string, username?: string, password?: string): XtreamCredentialHint | undefined {
+  try {
+    const url = new URL(baseUrl.trim());
+    const queryUsername = url.searchParams.get("username") ?? url.searchParams.get("user");
+    const queryPassword = url.searchParams.get("password") ?? url.searchParams.get("pass");
+    const resolvedUsername = username?.trim() || queryUsername?.trim();
+    const resolvedPassword = password || queryPassword || undefined;
+    if (!resolvedUsername || !resolvedPassword) return undefined;
+    const serverPath = url.pathname.replace(/\/(?:get|player_api|api)\.php$/i, "").replace(/\/+$/, "");
+    return {
+      serverUrl: `${url.origin}${serverPath}`,
+      username: resolvedUsername,
+      password: resolvedPassword
+    };
+  } catch {
+    return undefined;
+  }
+}
 function looksLikeXtreamBaseUrl(baseUrl: string) {
   const normalized = baseUrl.trim().toLowerCase();
   return /(^|\/)(player_api\.php|get\.php|api\.php|xmltv\.php|xtream)([/?#]|$)/.test(normalized);
@@ -24,7 +47,7 @@ export async function detectProviderType(input: {
   const baseUrl = input.baseUrl?.trim() ?? "";
   const payload = input.payload?.trim() ?? "";
 
-  if (looksLikeXtreamBaseUrl(baseUrl) || (input.username && input.password && /xtream|player_api|get\.php|api\.php|type=m3u_plus|type=m3u/i.test(baseUrl))) {
+  if (looksLikeXtreamBaseUrl(baseUrl) || (input.username && input.password && /xtream|player_api|api\.php/i.test(baseUrl))) {
     return "xtream";
   }
 

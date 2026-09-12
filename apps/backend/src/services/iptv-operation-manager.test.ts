@@ -26,6 +26,32 @@ test("starts operations immediately and publishes progress", async () => {
   assert.fail("operation did not complete");
 });
 
+test("keeps a large catalogue operation observable while batches yield", async () => {
+  const total = 20_000;
+  const started = IptvOperationManager.start("xtream_channel_sync", async (_operation, report, signal) => {
+    for (let processed = 500; processed <= total; processed += 500) {
+      if (signal.aborted) return;
+      report({ total, processed, succeeded: processed, currentStage: "saving_movies", currentMessage: `${processed} records saved.` });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+  });
+
+  let observedProgress = false;
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const current = IptvOperationManager.get(started.id);
+    if ((current?.processed ?? 0) > 0 && (current?.processed ?? 0) < total) observedProgress = true;
+    if (current?.status === "completed") {
+      assert.equal(current.processed, total);
+      assert.equal(current.succeeded, total);
+      assert.equal(observedProgress, true);
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+
+  assert.fail("large catalogue operation did not complete with observable progress");
+});
+
 test("cancellation is cooperative and marks the operation cancelled", async () => {
   const started = IptvOperationManager.start("xtream_channel_sync", async (operation, report) => {
     report({ currentStage: "saving_channels", currentMessage: "Saving batch." });

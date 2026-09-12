@@ -1,7 +1,7 @@
 import type { ParsedChannel } from "@gito/shared";
 import crypto from "node:crypto";
 import { getDatabase } from "../db/connection.js";
-import { syncProviderChannels } from "../repositories/provider-repository.js";
+import { syncProviderChannelsBatched } from "../repositories/provider-repository.js";
 import {
   archiveMissingXtreamCategories,
   syncXtreamCategories,
@@ -73,7 +73,7 @@ function archiveMissingM3uRecords(
   database.prepare(`UPDATE iptv_series_episodes AS e SET status = 'archived', updated_at = ? WHERE e.status = 'active' AND EXISTS (SELECT 1 FROM iptv_series s WHERE s.id = e.series_id AND s.provider_id = ?) ${episodeWhere}`).run(new Date().toISOString(), providerId, ...episodeExternalIds);
 }
 
-export function syncParsedM3uCatalogue(providerId: string, parsedChannels: ParsedChannel[]): M3uCatalogueSyncResult {
+export async function syncParsedM3uCatalogue(providerId: string, parsedChannels: ParsedChannel[]): Promise<M3uCatalogueSyncResult> {
   if (parsedChannels.length === 0) {
     return { liveChannels: 0, movies: 0, series: 0, episodes: 0 };
   }
@@ -82,18 +82,18 @@ export function syncParsedM3uCatalogue(providerId: string, parsedChannels: Parse
   }
 
   const database = getDatabase();
-  const persistCatalogue = database.transaction(() => {
+  const persistCatalogue = async () => {
     const live = parsedChannels.filter((entry) => (entry.contentType ?? "live") === "live");
     const movies = parsedChannels.filter((entry) => entry.contentType === "movie");
     const seriesEpisodes = parsedChannels.filter((entry) => entry.contentType === "series");
 
-    const savedLive = live.length > 0 ? syncProviderChannels(providerId, live) : [];
+    const savedLive = live.length > 0 ? await syncProviderChannelsBatched(providerId, live) : [];
     const liveCategoryIds = [...new Set(live.map((entry) => entry.categoryId ?? entry.groupName).filter((value): value is string => Boolean(value)))];
 
     const movieCategoryRecords = movies.flatMap((entry) => categoryRecords(entry, "movie"));
     const uniqueMovieCategories = [...new Map(movieCategoryRecords.map((record) => [record.providerCategoryId, record])).values()];
-    const movieCategoryStats = uniqueMovieCategories.length > 0 ? syncXtreamCategories(providerId, "movie", uniqueMovieCategories) : null;
-    const movieStats = syncXtreamMoviesDetailed(providerId, movies.map((entry, index) => ({
+    const movieCategoryStats = uniqueMovieCategories.length > 0 ? await syncXtreamCategories(providerId, "movie", uniqueMovieCategories) : null;
+    const movieStats = await syncXtreamMoviesDetailed(providerId, movies.map((entry, index) => ({
       externalId: streamExternalId(entry, `movie-${index}`),
       categoryId: entry.categoryId ?? entry.groupName,
       name: entry.name,
@@ -124,8 +124,8 @@ export function syncParsedM3uCatalogue(providerId: string, parsedChannels: Parse
       ? [{ providerCategoryId: entry.categoryId, name: entry.categoryId, metadata: { source: "m3u", contentType: "series" } }]
       : []);
     const uniqueSeriesCategories = [...new Map(seriesCategoryRecords.map((record) => [record.providerCategoryId, record])).values()];
-    const seriesCategoryStats = uniqueSeriesCategories.length > 0 ? syncXtreamCategories(providerId, "series", uniqueSeriesCategories) : null;
-    const seriesStats = syncXtreamSeriesDetailed(providerId, seriesRecords);
+    const seriesCategoryStats = uniqueSeriesCategories.length > 0 ? await syncXtreamCategories(providerId, "series", uniqueSeriesCategories) : null;
+    const seriesStats = await syncXtreamSeriesDetailed(providerId, seriesRecords);
 
     let episodes = 0;
     const episodeExternalIds: string[] = [];
@@ -144,8 +144,8 @@ export function syncParsedM3uCatalogue(providerId: string, parsedChannels: Parse
         }];
       })).values()];
       seasonKeys.push(...seasonRecords.map((record) => record.providerSeasonId));
-      seasonFailures += syncXtreamSeasonsDetailed(providerId, seasonRecords).failed;
-      const episodeStats = syncXtreamEpisodesDetailed(providerId, seriesExternalId, entries.map((entry, index) => ({
+      seasonFailures += (await syncXtreamSeasonsDetailed(providerId, seasonRecords)).failed;
+      const episodeStats = await syncXtreamEpisodesDetailed(providerId, seriesExternalId, entries.map((entry, index) => ({
         externalId: episodeExternalId(seriesExternalId, entry, index),
         seasonNumber: entry.seasonNumber ?? 1,
         episodeNumber: entry.episodeNumber ?? index + 1,
@@ -181,7 +181,7 @@ export function syncParsedM3uCatalogue(providerId: string, parsedChannels: Parse
       series: seriesStats.processed,
       episodes
     };
-  });
+  };
 
-  return persistCatalogue();
+  return await persistCatalogue();
 }

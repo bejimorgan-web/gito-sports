@@ -159,6 +159,7 @@ CREATE TABLE IF NOT EXISTS channels (
   provider_id TEXT NOT NULL,
   name TEXT NOT NULL,
   external_ref TEXT,
+  tvg_name TEXT,
   category_id TEXT,
   group_name TEXT,
   logo_url TEXT,

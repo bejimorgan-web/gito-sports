@@ -25,6 +25,7 @@ export interface IptvCatalogueChannel {
   id: string;
   providerId: string;
   externalRef?: string | null;
+  tvgName?: string | null;
   name: string;
   categoryId?: string | null;
   category?: Pick<IptvCategory, "id" | "name" | "slug"> | null;

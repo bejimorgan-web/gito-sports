@@ -6,6 +6,7 @@ import type { Channel, CreateProviderRequest, IPTVProvider, ParsedChannel } from
 type ProviderSyncMode = "partial" | "full";
 
 import { getDatabase } from "../db/connection.js";
+import { upsertIptvCategory } from "./iptv-catalogue-repository.js";
 import { logChannelSyncTrace } from "../services/iptv-trace.js";
 
 // In-memory ingestion report storage (last report per provider)
@@ -56,7 +57,9 @@ interface ChannelRow {
   provider_id: string;
   name: string;
   external_ref: string | null;
+  tvg_name: string | null;
   group_name: string | null;
+  logo_url: string | null;
   url: string;
   content_type: "live" | "movie" | "series";
   status: "active" | "inactive" | "archived" | "stale";
@@ -66,6 +69,33 @@ interface ChannelRow {
 
 function now() {
   return new Date().toISOString();
+}
+
+function ensureChannelCategory(providerId: string, channel: ParsedChannel, channelId: string, database: ReturnType<typeof getDatabase>) {
+  const contentType = channel.contentType ?? "live";
+  const providerCategoryId = (channel.categoryId ?? channel.groupName ?? "").trim();
+
+  if (!providerCategoryId) {
+    return null;
+  }
+
+  const categoryName = channel.groupName ?? channel.categoryId ?? "Unnamed group";
+  const category = upsertIptvCategory(providerId, {
+    providerCategoryId,
+    contentType,
+    name: categoryName,
+    metadata: {
+      source: "channel-sync",
+      groupName: channel.groupName ?? null,
+      ...(channel.categoryId ? { categoryId: channel.categoryId } : {})
+    }
+  });
+
+  const categoryLink = category.id;
+
+  database.prepare("UPDATE channels SET category_id = ? WHERE provider_id = ? AND id = ?").run(categoryLink, providerId, channelId);
+
+  return categoryLink;
 }
 
 function mapProvider(row: ProviderRow): IPTVProvider & { syncMode?: ProviderSyncMode } {
@@ -107,6 +137,14 @@ function mapChannel(row: ChannelRow): Channel {
 
   if (row.external_ref) {
     channel.externalRef = row.external_ref;
+  }
+
+  if (row.tvg_name) {
+    channel.tvgName = row.tvg_name;
+  }
+
+  if (row.logo_url) {
+    channel.logoUrl = row.logo_url;
   }
 
   if (row.group_name) {
@@ -269,7 +307,7 @@ export function softDeleteProvider(providerId: string): boolean {
   database.exec("BEGIN TRANSACTION;");
   try {
     deleteProviderOwnedRows(database, providerId);
-    database.prepare("DELETE FROM providers WHERE id = ?").run(providerId);
+    database.prepare("UPDATE providers SET deleted = 1, updated_at = ? WHERE id = ?").run(now(), providerId);
     database.exec("COMMIT;");
     EventBus.emit("iptv:provider:updated", { providerId, deleted: true });
     return true;
@@ -280,6 +318,7 @@ export function softDeleteProvider(providerId: string): boolean {
 }
 
 function deleteProviderOwnedRows(database: ReturnType<typeof getDatabase>, providerId: string) {
+  const hasChannelsTable = Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'channels'").get());
   const statements = [
     ["iptv_series_episodes", "series_id IN (SELECT id FROM iptv_series WHERE provider_id = ?)"] as const,
     ["iptv_seasons", "provider_id = ?"] as const,
@@ -292,14 +331,17 @@ function deleteProviderOwnedRows(database: ReturnType<typeof getDatabase>, provi
     ["iptv_channels", "provider_id = ?"] as const,
     ["iptv_provider_health", "provider_id = ?"] as const,
     ["iptv_logs", "provider_id = ?"] as const,
+    ["streams", "channel_id IN (SELECT id FROM channels WHERE provider_id = ?)"] as const,
     ["match_streams", "provider_id = ?"] as const,
     ["channels", "provider_id = ?"] as const,
     ["iptv_providers", "id = ?"] as const
   ];
 
   for (const [table, predicate] of statements) {
-    if (database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)) {
-      database.prepare(`DELETE FROM ${table} WHERE ${predicate}`).run(providerId);
+    if (table !== "streams" || hasChannelsTable) {
+      if (database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)) {
+        database.prepare(`DELETE FROM ${table} WHERE ${predicate}`).run(providerId);
+      }
     }
   }
 }
@@ -394,7 +436,7 @@ export function updateProviderHealth(input: {
     );
 }
 
-export function syncProviderChannels(providerId: string, channels: ParsedChannel[]): Channel[] {
+export function syncProviderChannels(providerId: string, channels: ParsedChannel[], finalizeMissing = true): Channel[] {
   const database = getDatabase();
   const timestamp = now();
 
@@ -487,12 +529,12 @@ export function syncProviderChannels(providerId: string, channels: ParsedChannel
   const duplicateDetections: Array<{ channel: ParsedChannel; reason: "duplicate_externalRef" | "duplicate_url" | "duplicate_in_payload" }> = [];
 
   const insertStmt = database.prepare(
-    `INSERT INTO channels (id, provider_id, name, external_ref, category_id, group_name, logo_url, url, content_type, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`
+    `INSERT INTO channels (id, provider_id, name, external_ref, tvg_name, category_id, group_name, logo_url, url, content_type, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`
   );
 
   const updateStmt = database.prepare(
-    `UPDATE channels SET name = ?, external_ref = ?, category_id = ?, group_name = ?, logo_url = ?, url = ?, content_type = ?, status = 'active', updated_at = ? WHERE id = ?`
+    `UPDATE channels SET name = ?, external_ref = ?, tvg_name = ?, category_id = ?, group_name = ?, logo_url = ?, url = ?, content_type = ?, status = 'active', updated_at = ? WHERE id = ?`
   );
 
   // De-duplicate incoming channels by normalized externalRef or normalized URL within the incoming payload only
@@ -537,16 +579,23 @@ export function syncProviderChannels(providerId: string, channels: ParsedChannel
 
     if (existingByExt) {
       channelId = existingByExt.id;
-      updateStmt.run(ch.name, ch.externalRef ?? null, ch.categoryId ?? null, ch.groupName ?? null, ch.logoUrl ?? null, ch.url, ch.contentType ?? "live", timestamp, channelId);
+      updateStmt.run(ch.name, ch.externalRef ?? null, ch.tvgName ?? null, ch.categoryId ?? null, ch.groupName ?? null, ch.logoUrl ?? null, ch.url, ch.contentType ?? "live", timestamp, channelId);
       traceChannelSync(ch, "update", "matched_existing_channel_by_external_ref", "persist");
       channelUpdates += 1;
       EventBus.emit("iptv:channel:updated", { providerId, channelId, externalRef: ch.externalRef ?? null });
     } else {
       channelId = crypto.randomUUID();
-      insertStmt.run(channelId, providerId, ch.name, ch.externalRef ?? null, ch.categoryId ?? null, ch.groupName ?? null, ch.logoUrl ?? null, ch.url, ch.contentType ?? "live", timestamp, timestamp);
+      insertStmt.run(channelId, providerId, ch.name, ch.externalRef ?? null, ch.tvgName ?? null, ch.categoryId ?? null, ch.groupName ?? null, ch.logoUrl ?? null, ch.url, ch.contentType ?? "live", timestamp, timestamp);
       traceChannelSync(ch, "insert", "created_new_channel_record", "persist");
       channelInserts += 1;
       EventBus.emit("iptv:channel:inserted", { providerId, channelId, externalRef: ch.externalRef ?? null });
+    }
+
+    const categoryId = ensureChannelCategory(providerId, ch, channelId, database);
+    if (categoryId) {
+      if (ch.categoryId !== categoryId) {
+        database.prepare("UPDATE channels SET category_id = ? WHERE id = ?").run(categoryId, channelId);
+      }
     }
 
     processedIds.add(channelId);
@@ -560,12 +609,15 @@ export function syncProviderChannels(providerId: string, channels: ParsedChannel
       createdAt: timestamp,
       updatedAt: timestamp,
       ...(ch.externalRef ? { externalRef: ch.externalRef } : {}),
+      ...(ch.tvgName ? { tvgName: ch.tvgName } : {}),
+      ...(ch.logoUrl ? { logoUrl: ch.logoUrl } : {}),
       ...(ch.groupName ? { groupName: ch.groupName } : {})
     });
   }
 
-  // Any existing channel for this provider not in the incoming set should be adjusted according to provider sync mode
-  for (const r of existingRows) {
+  // Any existing channel for this provider not in the incoming set should be adjusted according to provider sync mode.
+  // Batched callers defer this pass until all batches have been persisted.
+  if (finalizeMissing) for (const r of existingRows) {
     if (!processedIds.has(r.id)) {
       if (providerMode === "full") {
         database.prepare("UPDATE channels SET status = 'inactive', updated_at = ? WHERE id = ?").run(timestamp, r.id);
@@ -648,6 +700,34 @@ export function syncProviderChannels(providerId: string, channels: ParsedChannel
   return persistChannels();
 }
 
+export async function syncProviderChannelsBatched(
+  providerId: string,
+  channels: ParsedChannel[],
+  reportProgress?: (processed: number, saved: number) => void
+) {
+  const saved: Channel[] = [];
+  const batchSize = 500;
+  for (let index = 0; index < channels.length; index += batchSize) {
+    const batch = channels.slice(index, index + batchSize);
+    saved.push(...syncProviderChannels(providerId, batch, false));
+    reportProgress?.(Math.min(index + batch.length, channels.length), saved.length);
+    if (index + batchSize < channels.length) await new Promise((resolve) => setImmediate(resolve));
+  }
+  if (channels.length > 0) {
+    const database = getDatabase();
+    const provider = database.prepare("SELECT sync_mode FROM providers WHERE id = ? AND deleted = 0").get(providerId) as { sync_mode?: ProviderSyncMode } | undefined;
+    const processedIds = saved.map((channel) => channel.id);
+    const timestamp = now();
+    if (processedIds.length === 0) {
+      database.prepare(`UPDATE channels SET status = ?, updated_at = ? WHERE provider_id = ? AND status = 'active' AND content_type = 'live'`).run(provider?.sync_mode === "full" ? "inactive" : "stale", timestamp, providerId);
+    } else {
+      const placeholders = processedIds.map(() => "?").join(",");
+      database.prepare(`UPDATE channels SET status = ?, updated_at = ? WHERE provider_id = ? AND status = 'active' AND content_type = 'live' AND id NOT IN (${placeholders})`).run(provider?.sync_mode === "full" ? "inactive" : "stale", timestamp, providerId, ...processedIds);
+    }
+  }
+  return saved;
+}
+
 
 function buildChannelFilterClauses(opts?: { providerId?: string; q?: string; category?: string }) {
   const clauses: string[] = [];
@@ -659,8 +739,8 @@ function buildChannelFilterClauses(opts?: { providerId?: string; q?: string; cat
   }
 
   if (opts?.category) {
-    clauses.push("(c.group_name = ? OR c.category_id = ?)");
-    params.push(opts.category, opts.category);
+    clauses.push("(c.group_name = ? OR c.category_id = ? OR EXISTS (SELECT 1 FROM iptv_categories cat WHERE cat.provider_id = c.provider_id AND cat.content_type = 'live' AND (cat.id = c.category_id OR cat.provider_category_id = ?)))");
+    params.push(opts.category, opts.category, opts.category);
   }
 
   if (opts?.q) {
