@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { validateHttpStreamUrl } from "./url-validation.js";
 import { parseM3uPlaylist } from "./m3u-parser.js";
 import { syncParsedM3uCatalogue } from "./m3u-catalogue-sync.js";
-import { buildXtreamEndpointCandidates, fetchXtreamChannels, normalizeXtreamUrl, readResponseTextWithTimeout, testXtreamConnection } from "./xtream-codes.js";
+import { buildXtreamEndpointCandidates, fetchXtreamCatalogueIncrementally, fetchXtreamChannels, normalizeXtreamUrl, readResponseTextWithTimeout, testXtreamConnection } from "./xtream-codes.js";
 import { detectProviderType } from "./provider-type-detector.js";
 import { deriveXtreamCredentialHint } from "./provider-type-detector.js";
 import { createProvider, getProviderById, getProviderChannelDiagnostics, listChannelsPage, listProviders, softDeleteProvider, syncProviderChannels, setProviderStatus, updateProviderHealth } from "../repositories/provider-repository.js";
@@ -182,6 +182,37 @@ test("Xtream sync removes player_api.php from the normalized playback base", asy
 
     const channels = await fetchXtreamChannels("https://xtream.example:8080/player_api.php", "user", "pass");
     assert.equal(channels[0]?.url, "https://xtream.example:8080/live/user/pass/7.m3u8");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("incremental Xtream discovery bounds batches when a provider ignores pagination", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      const action = url.searchParams.get("action");
+      if (action === "get_vod_categories") return new Response(JSON.stringify([{ category_id: "1", category_name: "Movies" }]), { status: 200 });
+      if (action === "get_vod_streams") return new Response(JSON.stringify([
+        { stream_id: "movie-1", name: "Movie 1", category_id: "1" },
+        { stream_id: "movie-2", name: "Movie 2", category_id: "1" },
+        { stream_id: "movie-3", name: "Movie 3", category_id: "1" }
+      ]), { status: 200 });
+      if (action === "get_series_categories") return new Response("[]", { status: 200 });
+      if (action === "get_series") return new Response("[]", { status: 200 });
+      return new Response("[]", { status: 200 });
+    };
+
+    const batches = [];
+    for await (const batch of fetchXtreamCatalogueIncrementally("https://provider.example", "test-user", "test-pass", undefined, 2)) {
+      batches.push(batch);
+    }
+
+    const movieBatches = batches.filter((batch) => batch.phase === "movies");
+    assert.deepEqual(movieBatches.map((batch) => batch.records.length), [2, 1]);
+    assert.equal(movieBatches.every((batch) => batch.paginated === false), true);
+    assert.equal(movieBatches.flatMap((batch) => batch.records).length, 3);
   } finally {
     globalThis.fetch = originalFetch;
   }

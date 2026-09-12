@@ -3,7 +3,7 @@ import type { CreateProviderRequest } from "@gito/shared";
 import { IPTVService } from "../services/iptv-service.js";
 import { parseM3uPlaylist, M3uParseError } from "../services/m3u-parser.js";
 import { syncParsedM3uCatalogue } from "../services/m3u-catalogue-sync.js";
-import { fetchXtreamCatalogue, fetchXtreamLiveCatalogue, fetchXtreamChannels, fetchXtreamShortEpg, fetchTextWithTimeout, fetchWithTimeout, testXtreamConnection, XtreamParseError, normalizeXtreamUrl } from "../services/xtream-codes.js";
+import { fetchXtreamCatalogue, fetchXtreamCatalogueIncrementally, fetchXtreamChannels, fetchXtreamLiveCatalogue, fetchXtreamLiveCatalogueIncrementally, fetchXtreamShortEpg, fetchTextWithTimeout, fetchWithTimeout, testXtreamConnection, XtreamParseError, normalizeXtreamUrl } from "../services/xtream-codes.js";
 import { validateHttpStreamUrl } from "../services/url-validation.js";
 import { logChannelSyncTrace } from "../services/iptv-trace.js";
 import { deriveXtreamCredentialHint, detectProviderType } from "../services/provider-type-detector.js";
@@ -333,62 +333,95 @@ function startXtreamSyncOperation(providerId: string) {
       const connection = await testXtreamConnection(serverUrl, username, password, signal);
       if (!connection.ok) throw new Error(connection.message);
 
-      report({ currentStage: "discovering_channels", currentMessage: "Loading live groups and channels." });
-      const invalidEntries: XtreamParseError[] = [];
-      const live = await fetchXtreamLiveCatalogue(serverUrl, username, password, signal);
-      await syncXtreamCategories(providerId, "live", live.categories);
-      const valid = live.channels.filter((channel) => !validateHttpStreamUrl(channel.url));
-      report({
-        total: live.channels.length,
-        processed: live.channels.length,
-        succeeded: valid.length,
-        failed: invalidEntries.length,
-        currentStage: "saving_channels",
-        currentMessage: `${live.channels.length} live channels discovered.`
-      });
+      const batchSize = 500;
+      let liveChannels = 0;
+      let liveSaved = 0;
+      let movies = 0;
+      let series = 0;
+      let seasons = 0;
+      let episodes = 0;
+      let updated = 0;
+      let failed = 0;
+      let discoveredCatalogueData = false;
+      let lastCheckpoint: Record<string, unknown> | undefined;
 
-      if (state.cancelled) return;
-      if (valid.length === 0) {
+      report({ currentStage: "discovering_channels", currentMessage: "Loading live groups and channels." });
+      for await (const batch of fetchXtreamLiveCatalogueIncrementally(serverUrl, username, password, signal, batchSize)) {
+        if (signal.aborted || state.cancelled) return;
+        if (batch.phase === "liveCategories") {
+          await syncXtreamCategories(providerId, "live", batch.records);
+          continue;
+        }
+        const valid = batch.records.filter((channel) => !validateHttpStreamUrl(channel.url));
+        const saved = await syncProviderChannelsBatched(providerId, valid, (processed, succeeded) => report({
+          processed: liveChannels + processed,
+          succeeded: liveSaved + succeeded,
+          failed: failed + processed - succeeded,
+          currentStage: "saving_channels",
+          currentMessage: `${liveChannels + processed} live channels persisted.`
+        }));
+        liveChannels += batch.records.length;
+        liveSaved += saved.length;
+        failed += batch.records.length - valid.length;
+        lastCheckpoint = { phase: "liveChannels", offset: batch.offset + batch.records.length, batchSize, paginated: batch.paginated };
+        report({ processed: liveChannels, succeeded: liveSaved, failed, currentStage: "saving_channels", currentMessage: `${liveChannels} live channels persisted.`, checkpoint: JSON.stringify(lastCheckpoint) });
+      }
+
+      if (state.cancelled || signal.aborted) return;
+      if (liveSaved === 0) {
         IPTVService.setProviderStatus(providerId, "failed");
         throw new Error("Xtream sync completed with zero usable channels.");
       }
 
-      const saved = await syncProviderChannelsBatched(providerId, valid, (processed, succeeded) => report({ processed, succeeded, failed: processed - succeeded, currentStage: "saving_channels", currentMessage: `${processed} of ${valid.length} live channels saved.` }));
-      report({ currentStage: "syncing_catalogue", currentMessage: "Loading movies, series, seasons, and episodes." });
-      const catalogue = await fetchXtreamCatalogue(serverUrl, username, password, signal);
-      if (signal.aborted || state.cancelled) return;
-      await syncXtreamCategories(providerId, "movie", catalogue.movieCategories);
-      await syncXtreamCategories(providerId, "series", catalogue.seriesCategories);
-      report({ currentStage: "saving_movies", total: catalogue.movies.length, processed: 0, currentMessage: `${catalogue.movies.length} movies discovered.` });
-      const movieStats = await syncXtreamMoviesDetailed(providerId, catalogue.movies, (stats) => report({ processed: stats.processed, succeeded: stats.inserted + stats.unchanged, updated: stats.updated, failed: stats.failed, currentStage: "saving_movies", currentMessage: `${stats.processed} of ${stats.fetched} movies saved.` }));
-      report({ currentStage: "saving_series", total: catalogue.series.length, processed: 0, currentMessage: `${catalogue.series.length} series discovered.` });
-      const seriesStats = await syncXtreamSeriesDetailed(providerId, catalogue.series, (stats) => report({ processed: stats.processed, succeeded: stats.inserted + stats.unchanged, updated: stats.updated, failed: stats.failed, currentStage: "saving_series", currentMessage: `${stats.processed} of ${stats.fetched} series saved.` }));
-      report({ currentStage: "saving_seasons", total: catalogue.seasons.length, processed: 0, currentMessage: `${catalogue.seasons.length} seasons discovered.` });
-      const seasonStats = await syncXtreamSeasonsDetailed(providerId, catalogue.seasons, (stats) => report({ processed: stats.processed, succeeded: stats.inserted + stats.unchanged, updated: stats.updated, failed: stats.failed, currentStage: "saving_seasons", currentMessage: `${stats.processed} of ${stats.fetched} seasons saved.` }));
-      let episodeStats = { fetched: 0, processed: 0, inserted: 0, updated: 0, unchanged: 0, failed: 0, archived: 0 };
-      for (const seriesEpisodes of catalogue.episodes) {
+      report({ currentStage: "syncing_catalogue", currentMessage: "Discovering and persisting movies, series, seasons, and episodes." });
+      for await (const batch of fetchXtreamCatalogueIncrementally(serverUrl, username, password, signal, batchSize)) {
         if (signal.aborted || state.cancelled) return;
-        const result = await syncXtreamEpisodesDetailed(providerId, seriesEpisodes.seriesExternalId, seriesEpisodes.records, (stats) => report({ processed: stats.processed, succeeded: stats.inserted + stats.unchanged, updated: stats.updated, failed: stats.failed, currentStage: "saving_episodes", currentMessage: `${stats.processed} of ${stats.fetched} episodes saved for the current series.` }));
-        episodeStats = {
-          fetched: episodeStats.fetched + result.fetched,
-          processed: episodeStats.processed + result.processed,
-          inserted: episodeStats.inserted + result.inserted,
-          updated: episodeStats.updated + result.updated,
-          unchanged: episodeStats.unchanged + result.unchanged,
-          failed: episodeStats.failed + result.failed,
-          archived: episodeStats.archived + result.archived
-        };
+        discoveredCatalogueData = true;
+        if (batch.phase === "movieCategories") {
+          await syncXtreamCategories(providerId, "movie", batch.records);
+        } else if (batch.phase === "seriesCategories") {
+          await syncXtreamCategories(providerId, "series", batch.records);
+        } else if (batch.phase === "movies") {
+          const stats = await syncXtreamMoviesDetailed(providerId, batch.records, (stats) => report({ processed: liveChannels + stats.processed, succeeded: liveSaved + stats.inserted + stats.unchanged, updated: updated + stats.updated, failed: failed + stats.failed, currentStage: "saving_movies", currentMessage: `${stats.processed} movies persisted.` }));
+          movies += stats.processed;
+          updated += stats.updated;
+          failed += stats.failed;
+          lastCheckpoint = { phase: "movies", offset: batch.offset + batch.records.length, batchSize, paginated: batch.paginated };
+          report({ processed: liveChannels + movies, succeeded: liveSaved + movies - updated - failed, updated, failed, currentStage: "saving_movies", currentMessage: `${movies} movies persisted.`, checkpoint: JSON.stringify(lastCheckpoint) });
+        } else if (batch.phase === "series") {
+          const stats = await syncXtreamSeriesDetailed(providerId, batch.records, (stats) => report({ processed: liveChannels + movies + stats.processed, succeeded: liveSaved + movies + stats.inserted + stats.unchanged, updated: updated + stats.updated, failed: failed + stats.failed, currentStage: "saving_series", currentMessage: `${stats.processed} series persisted.` }));
+          series += stats.processed;
+          updated += stats.updated;
+          failed += stats.failed;
+          lastCheckpoint = { phase: "series", offset: batch.offset + batch.records.length, batchSize, paginated: batch.paginated };
+          report({ processed: liveChannels + movies + series, succeeded: liveSaved + movies + series - updated - failed, updated, failed, currentStage: "saving_series", currentMessage: `${series} series persisted.`, checkpoint: JSON.stringify(lastCheckpoint) });
+        } else if (batch.phase === "seriesDetails") {
+          const seasonStats = await syncXtreamSeasonsDetailed(providerId, batch.seasons);
+          seasons += seasonStats.processed;
+          updated += seasonStats.updated;
+          failed += seasonStats.failed;
+          const episodeStats = await syncXtreamEpisodesDetailed(providerId, batch.seriesExternalId, batch.episodes);
+          episodes += episodeStats.processed;
+          updated += episodeStats.updated;
+          failed += episodeStats.failed;
+          lastCheckpoint = { phase: "seriesDetails", seriesIndex: batch.seriesIndex, seriesExternalId: batch.seriesExternalId, batchSize };
+          report({ processed: liveChannels + movies + series + seasons + episodes, succeeded: liveSaved + movies + series + seasons + episodes - updated - failed, updated, failed, currentStage: "saving_episodes", currentMessage: `${episodes} episodes persisted.`, checkpoint: JSON.stringify(lastCheckpoint) });
+        }
       }
+      if (!discoveredCatalogueData) throw new Error("Xtream provider returned no VOD or series catalogue data. Verify the account has VOD and series access.");
       report({ currentStage: "diagnostics", currentMessage: "Calculating canonical catalogue totals." });
       const totals = getXtreamCatalogueTotals(providerId);
       IPTVService.updateProviderHealth({ providerId, success: true, impact: "success" });
       IPTVService.setProviderStatus(providerId, "active");
       report({
-        processed: live.channels.length + movieStats.processed + seriesStats.processed + seasonStats.processed + episodeStats.processed,
-        succeeded: saved.length,
+        processed: liveChannels + movies + series + seasons + episodes,
+        succeeded: liveSaved + movies + series + seasons + episodes - updated - failed,
+        updated,
+        failed,
         currentMessage: `${totals.movies} movies, ${totals.series} series, and ${totals.episodes} episodes are active.`,
         currentStage: "completed",
-        total: live.channels.length + totals.movies + totals.series + totals.episodes
+        total: liveChannels + totals.movies + totals.series + totals.episodes,
+        checkpoint: JSON.stringify(lastCheckpoint ?? { phase: "finalizing" })
       });
     } catch (error) {
       IPTVService.updateProviderHealth({ providerId, success: false, impact: "failure" });
