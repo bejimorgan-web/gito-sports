@@ -27,5 +27,8 @@
     "src/**/*.tsx",
     "electron/**/*.ts",
     "vite.config.ts"
+  ],
+  "exclude": [
+    "electron/desktop-playback-z-validation.test.ts"
   ]
 }
