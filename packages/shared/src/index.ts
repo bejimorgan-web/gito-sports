@@ -147,3 +147,11 @@ export type {
   MobileFixture,
   MobileClubDetail
 } from "./mobile.js";
+
+export type {
+  PublicationArtifact,
+  PublicationArtifactSubmission,
+  PublicationAvailability,
+  PublicationCapability,
+  PublicationStatus
+} from "./publication.js";
