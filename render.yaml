@@ -10,7 +10,7 @@ services:
     disk:
       name: gito-data
       mountPath: /var/data
-      sizeGB: 5
+      sizeGB: 20
     envVars:
       - key: NODE_ENV
         value: production
