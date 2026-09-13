@@ -1,4 +1,4 @@
-import "./iptv-test-environment.js";
+﻿import "./iptv-test-environment.js";
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -6,8 +6,9 @@ import assert from "node:assert/strict";
 import { validateHttpStreamUrl } from "./url-validation.js";
 import { parseM3uPlaylist } from "./m3u-parser.js";
 import { syncParsedM3uCatalogue } from "./m3u-catalogue-sync.js";
-import { buildXtreamEndpointCandidates, fetchXtreamChannels, normalizeXtreamUrl, readResponseTextWithTimeout, testXtreamConnection } from "./xtream-codes.js";
+import { buildXtreamEndpointCandidates, fetchXtreamCatalogueIncrementally, fetchXtreamChannels, normalizeXtreamUrl, readResponseTextWithTimeout, testXtreamConnection } from "./xtream-codes.js";
 import { detectProviderType } from "./provider-type-detector.js";
+import { deriveXtreamCredentialHint } from "./provider-type-detector.js";
 import { createProvider, getProviderById, getProviderChannelDiagnostics, listChannelsPage, listProviders, softDeleteProvider, syncProviderChannels, setProviderStatus, updateProviderHealth } from "../repositories/provider-repository.js";
 import { getDatabase } from "../db/connection.js";
 
@@ -17,7 +18,6 @@ test("accepts common non-http stream protocols", () => {
   assert.equal(validateHttpStreamUrl("udp://239.1.1.1:1234"), null);
   assert.equal(validateHttpStreamUrl("srt://example.com:8890"), null);
 });
-
 test("builds xtream endpoint candidates from common provider URL shapes", () => {
   const fromRoot = buildXtreamEndpointCandidates("https://example.com");
   assert.ok(fromRoot.some((url) => url.includes("/player_api.php")));
@@ -186,6 +186,37 @@ test("Xtream sync removes player_api.php from the normalized playback base", asy
   }
 });
 
+test("incremental Xtream discovery bounds batches when a provider ignores pagination", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      const action = url.searchParams.get("action");
+      if (action === "get_vod_categories") return new Response(JSON.stringify([{ category_id: "1", category_name: "Movies" }]), { status: 200 });
+      if (action === "get_vod_streams") return new Response(JSON.stringify([
+        { stream_id: "movie-1", name: "Movie 1", category_id: "1" },
+        { stream_id: "movie-2", name: "Movie 2", category_id: "1" },
+        { stream_id: "movie-3", name: "Movie 3", category_id: "1" }
+      ]), { status: 200 });
+      if (action === "get_series_categories") return new Response("[]", { status: 200 });
+      if (action === "get_series") return new Response("[]", { status: 200 });
+      return new Response("[]", { status: 200 });
+    };
+
+    const batches = [];
+    for await (const batch of fetchXtreamCatalogueIncrementally("https://provider.example", "test-user", "test-pass", undefined, 2)) {
+      batches.push(batch);
+    }
+
+    const movieBatches = batches.filter((batch) => batch.phase === "movies");
+    assert.deepEqual(movieBatches.map((batch) => batch.records.length), [2, 1]);
+    assert.equal(movieBatches.every((batch) => batch.paginated === false), true);
+    assert.equal(movieBatches.flatMap((batch) => batch.records).length, 3);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("parses m3u entries that include the stream URL inline", () => {
   const channels = parseM3uPlaylist(`#EXTM3U
 #EXTINF:-1 tvg-id="chan1" tvg-name="Guide One" tvg-logo="https://example.com/logo.png" group-title="News",Channel One,https://example.com/stream.m3u8
@@ -215,7 +246,7 @@ https://example.com/sports.ts`);
   assert.equal(channels[0]?.url, "https://example.com/sports.ts");
 });
 
-test("classifies an Xtream-style mixed M3U into live, movies, series, and episodes", () => {
+test("classifies an Xtream-style mixed M3U into live, movies, series, and episodes", async () => {
   const provider = createProvider({ name: `Mixed M3U ${Date.now()}`, baseUrl: `https://mixed-m3u.example/${Date.now()}`, type: "m3u", authType: "none" });
   const playlist = [
     "#EXTM3U",
@@ -224,7 +255,7 @@ test("classifies an Xtream-style mixed M3U into live, movies, series, and episod
     ...[1, 2, 3, 4].map((id) => `#EXTINF:-1 series-id=\"series-1\" season-number=\"1\" episode-number=\"${id}\" group-title=\"Series One\",Episode ${id}\nhttps://provider.example/series/user/pass/${id}.mp4`)
   ].join("\n");
   const parsed = parseM3uPlaylist(playlist);
-  const result = syncParsedM3uCatalogue(provider.id, parsed);
+  const result = await syncParsedM3uCatalogue(provider.id, parsed);
   const database = getDatabase();
 
   assert.deepEqual(result, { liveChannels: 4, movies: 4, series: 1, episodes: 4 });
@@ -244,7 +275,7 @@ test("classifies an Xtream-style mixed M3U into live, movies, series, and episod
   assert.equal(parsed.filter((entry) => entry.contentType === "movie").length, 4);
   assert.equal(parsed.filter((entry) => entry.contentType === "series").length, 4);
 
-  const repeated = syncParsedM3uCatalogue(provider.id, parsed);
+  const repeated = await syncParsedM3uCatalogue(provider.id, parsed);
   assert.deepEqual(repeated, { liveChannels: 4, movies: 4, series: 1, episodes: 4 });
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channels WHERE provider_id = ? AND content_type = 'live' AND status = 'active'").get(provider.id).count, 4);
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_movies WHERE provider_id = ? AND status = 'active'").get(provider.id).count, 4);
@@ -253,11 +284,11 @@ test("classifies an Xtream-style mixed M3U into live, movies, series, and episod
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_series_episodes WHERE series_id IN (SELECT id FROM iptv_series WHERE provider_id = ?) AND status = 'active'").get(provider.id).count, 4);
 
   const otherProvider = createProvider({ name: `Other M3U ${Date.now()}`, baseUrl: `https://other-m3u.example/${Date.now()}`, type: "m3u", authType: "none" });
-  syncParsedM3uCatalogue(otherProvider.id, [parsed[0]]);
+  await syncParsedM3uCatalogue(otherProvider.id, [parsed[0]]);
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channels WHERE provider_id = ? AND status = 'active'").get(otherProvider.id).count, 1);
 
   const changed = parsed.filter((entry) => entry.externalRef === "live-1" || entry.externalRef === "movie-1" || entry.episodeNumber === 1);
-  const changedResult = syncParsedM3uCatalogue(provider.id, changed);
+  const changedResult = await syncParsedM3uCatalogue(provider.id, changed);
   assert.deepEqual(changedResult, { liveChannels: 1, movies: 1, series: 1, episodes: 1 });
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channels WHERE provider_id = ? AND content_type = 'live' AND status = 'active'").get(provider.id).count, 1);
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_movies WHERE provider_id = ? AND status = 'active'").get(provider.id).count, 1);
@@ -265,13 +296,13 @@ test("classifies an Xtream-style mixed M3U into live, movies, series, and episod
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_seasons WHERE provider_id = ? AND status = 'active'").get(provider.id).count, 1);
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_series_episodes WHERE series_id IN (SELECT id FROM iptv_series WHERE provider_id = ?) AND status = 'active'").get(provider.id).count, 1);
 
-  assert.throws(() => syncParsedM3uCatalogue(provider.id, changed.map((entry) => ({ ...entry, url: "" }))), /m3u_catalogue_sync_(failed|invalid_entry)|constraint/i);
+  await assert.rejects(() => syncParsedM3uCatalogue(provider.id, changed.map((entry) => ({ ...entry, url: "" }))), /m3u_catalogue_sync_(failed|invalid_entry)|constraint/i);
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channels WHERE provider_id = ? AND status = 'active'").get(provider.id).count, 1);
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_movies WHERE provider_id = ? AND status = 'active'").get(provider.id).count, 1);
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM iptv_series_episodes WHERE series_id IN (SELECT id FROM iptv_series WHERE provider_id = ?) AND status = 'active'").get(provider.id).count, 1);
 
   const beforeEmptySync = database.prepare("SELECT COUNT(*) AS count FROM channels WHERE provider_id = ? AND status = 'active'").get(provider.id).count;
-  assert.deepEqual(syncParsedM3uCatalogue(provider.id, []), { liveChannels: 0, movies: 0, series: 0, episodes: 0 });
+  assert.deepEqual(await syncParsedM3uCatalogue(provider.id, []), { liveChannels: 0, movies: 0, series: 0, episodes: 0 });
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM channels WHERE provider_id = ? AND status = 'active'").get(provider.id).count, beforeEmptySync);
 });
 
@@ -342,8 +373,13 @@ test("detects Xtream credentials from get.php M3U playlist URLs", async () => {
     password: "pass"
   });
   assert.equal(detectedXtream, "xtream");
+  const playlistUrl = new URL("https://example.com/get.php");
+  playlistUrl.searchParams.set("username", "demo-user");
+  playlistUrl.searchParams.set("password", "demo-pass");
+  const hint = deriveXtreamCredentialHint(playlistUrl.toString());
+  assert.deepEqual(hint, { serverUrl: "https://example.com", username: "demo-user", password: "demo-pass" });
+  assert.equal(deriveXtreamCredentialHint("https://example.com/playlist.m3u8"), undefined);
 });
-
 test("existing Xtream A plus a new M3U B with different credentials create distinct provider rows", () => {
   const xtreamInput = {
     name: `Xtream Provider ${Date.now()}`,
@@ -501,3 +537,4 @@ test("28,277 synchronized live channels are reported as the provider total", () 
   assert.equal(getProviderChannelDiagnostics(provider.id)!.contentTotals.live, 28_277);
   assert.equal(getProviderChannelDiagnostics(provider.id)!.totalChannels, 28_277);
 });
+

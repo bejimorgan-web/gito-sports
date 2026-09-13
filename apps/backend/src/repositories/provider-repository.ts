@@ -96,7 +96,6 @@ function updateMissingProviderChannelsInChunks(database: ReturnType<typeof getDa
     lastId = lastRow.id;
   }
 }
-
 function ensureChannelCategory(providerId: string, channel: ParsedChannel, channelId: string, database: ReturnType<typeof getDatabase>) {
   const contentType = channel.contentType ?? "live";
   const providerCategoryId = (channel.categoryId ?? channel.groupName ?? "").trim();
@@ -723,7 +722,16 @@ export function syncProviderChannels(providerId: string, channels: ParsedChannel
   return results;
   });
 
-  return persistChannels();
+  try {
+    return persistChannels();
+  } catch (error) {
+    if (!(error instanceof Error) || !/cannot commit - no transaction is active/i.test(error.message)) {
+      throw error;
+    }
+
+    console.warn("[iptv] retrying channel batch after transient SQLite transaction state error");
+    return persistChannels();
+  }
 }
 
 export async function syncProviderChannelsBatched(

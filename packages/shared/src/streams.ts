@@ -45,8 +45,10 @@ export interface Channel {
   providerId: EntityId;
   name: string;
   externalRef?: string;
+  tvgName?: string;
   categoryId?: string;
   groupName?: string;
+  logoUrl?: string;
   url: string;
   contentType?: "live" | "movie" | "series";
   status: EntityStatus;

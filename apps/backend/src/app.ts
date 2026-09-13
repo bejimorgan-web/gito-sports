@@ -46,7 +46,14 @@ export function createApp() {
   const uploadDirectory = runtimeConfig.uploadDir;
 
   app.set("trust proxy", true);
-  app.use(helmet());
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        mediaSrc: ["'self'", "http:", "https:", "blob:", "data:"],
+        connectSrc: ["'self'", "http:", "https:", "ws:", "wss:"]
+      }
+    }
+  }));
   // Configure CORS to allow known frontend origins. The list can be
   // configured via the CORS_ORIGINS env variable as a comma-separated
   // list. Defaults include the Render deployment and localhost for dev.

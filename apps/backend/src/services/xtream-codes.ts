@@ -405,6 +405,15 @@ export type XtreamCatalogue = {
   episodes: Array<{ seriesExternalId: string; records: XtreamEpisodeRecord[] }>;
 };
 
+export type XtreamCatalogueBatch =
+  | { phase: "liveCategories"; records: Array<{ providerCategoryId: string; name: string; metadata: unknown }> }
+  | { phase: "liveChannels"; records: ParsedChannel[]; offset: number; paginated: boolean }
+  | { phase: "movieCategories"; records: XtreamCatalogue["movieCategories"] }
+  | { phase: "movies"; records: XtreamMovieRecord[]; offset: number; paginated: boolean }
+  | { phase: "seriesCategories"; records: XtreamCatalogue["seriesCategories"] }
+  | { phase: "series"; records: XtreamSeriesRecord[]; offset: number; paginated: boolean }
+  | { phase: "seriesDetails"; seriesExternalId: string; seasons: XtreamSeasonRecord[]; episodes: XtreamEpisodeRecord[]; seriesIndex: number };
+
 async function fetchXtreamAction(baseUrl: string, username: string, password: string, action: string, signal?: AbortSignal, extra: Record<string, string> = {}): Promise<unknown> {
   for (const candidate of buildXtreamEndpointCandidates(baseUrl)) {
     try {
@@ -506,6 +515,145 @@ export async function fetchXtreamCatalogue(baseUrl: string, username: string, pa
     }
   }
   return { movieCategories, movies, seriesCategories, series, seasons, episodes };
+}
+
+async function* fetchXtreamPagedRecords<T>(
+  baseUrl: string,
+  username: string,
+  password: string,
+  action: string,
+  key: string,
+  batchSize: number,
+  normalize: (record: any) => T | undefined,
+  identity: (record: any) => string,
+  signal?: AbortSignal
+): AsyncGenerator<{ records: T[]; offset: number; paginated: boolean }> {
+  let offset = 0;
+  let firstIdentity = "";
+
+  while (!signal?.aborted) {
+    const payload = await fetchXtreamAction(baseUrl, username, password, action, signal, {
+      offset: String(offset),
+      limit: String(batchSize)
+    });
+    const rawRecords = asRecords(payload, key);
+    if (rawRecords.length === 0) return;
+
+    const currentIdentity = identity(rawRecords[0]);
+    const repeatedFirstPage = offset > 0 && currentIdentity !== "" && currentIdentity === firstIdentity;
+    if (repeatedFirstPage) return;
+    const providerIgnoredPagination = rawRecords.length > batchSize;
+    const chunks = providerIgnoredPagination
+      ? Array.from({ length: Math.ceil(rawRecords.length / batchSize) }, (_, index) => rawRecords.slice(index * batchSize, (index + 1) * batchSize))
+      : [rawRecords];
+
+    for (const chunk of chunks) {
+      const records = chunk.map(normalize).filter((record): record is T => record !== undefined);
+      if (records.length > 0) yield { records, offset, paginated: !providerIgnoredPagination };
+    }
+
+    if (providerIgnoredPagination || rawRecords.length < batchSize) return;
+    firstIdentity ||= currentIdentity;
+    offset += rawRecords.length;
+  }
+}
+
+export async function* fetchXtreamCatalogueIncrementally(
+  baseUrl: string,
+  username: string,
+  password: string,
+  signal?: AbortSignal,
+  batchSize = 500
+): AsyncGenerator<XtreamCatalogueBatch> {
+  const movieCategoriesPayload = await fetchXtreamAction(baseUrl, username, password, "get_vod_categories", signal);
+  const movieCategories = asRecords(movieCategoriesPayload, "categories").map((category) => ({
+    providerCategoryId: String(category.category_id ?? ""),
+    name: String(category.category_name ?? "Unnamed"),
+    metadata: category
+  })).filter((category) => category.providerCategoryId);
+  if (movieCategories.length > 0) yield { phase: "movieCategories", records: movieCategories };
+
+  for await (const batch of fetchXtreamPagedRecords(baseUrl, username, password, "get_vod_streams", "streams", batchSize, (movie) => {
+    const id = movie.stream_id === undefined ? "" : String(movie.stream_id);
+    const name = String(movie.name ?? movie.stream_name ?? "").trim();
+    return id && name ? { externalId: id, categoryId: movie.category_id === undefined ? undefined : String(movie.category_id), name, streamUrl: xtreamStreamUrl(normalizeXtreamUrl(baseUrl).url, username, password, "movie", id, movie.container_extension), posterUrl: movie.stream_icon ?? movie.cover, metadata: movie } : undefined;
+  }, (movie) => String(movie.stream_id ?? ""), signal)) {
+    yield { phase: "movies", records: batch.records, offset: batch.offset, paginated: batch.paginated };
+  }
+
+  const seriesCategoriesPayload = await fetchXtreamAction(baseUrl, username, password, "get_series_categories", signal);
+  const seriesCategories = asRecords(seriesCategoriesPayload, "categories").map((category) => ({
+    providerCategoryId: String(category.category_id ?? ""),
+    name: String(category.category_name ?? "Unnamed"),
+    metadata: category
+  })).filter((category) => category.providerCategoryId);
+  if (seriesCategories.length > 0) yield { phase: "seriesCategories", records: seriesCategories };
+
+  for await (const batch of fetchXtreamPagedRecords(baseUrl, username, password, "get_series", "series", batchSize, (item) => {
+    const id = item.series_id === undefined ? "" : String(item.series_id);
+    const name = String(item.name ?? item.series_name ?? "").trim();
+    return id && name ? { externalId: id, categoryId: item.category_id === undefined ? undefined : String(item.category_id), name, posterUrl: item.cover ?? item.cover_big, metadata: item } : undefined;
+  }, (item) => String(item.series_id ?? ""), signal)) {
+    yield { phase: "series", records: batch.records, offset: batch.offset, paginated: batch.paginated };
+    for (let index = 0; index < batch.records.length && !signal?.aborted; index += 1) {
+      const item = batch.records[index];
+      if (!item) continue;
+      try {
+        const details = await fetchXtreamAction(baseUrl, username, password, "get_series_info", signal, { series_id: item.externalId });
+        const payload = details as any;
+        const info = payload?.info ?? {};
+        const seasons: XtreamSeasonRecord[] = [];
+        const episodes: XtreamEpisodeRecord[] = [];
+        for (const [seasonKey, seasonEpisodes] of Object.entries(payload?.episodes ?? {})) {
+          const seasonNumber = Number(seasonKey);
+          seasons.push({ seriesExternalId: item.externalId, providerSeasonId: `${item.externalId}:${seasonKey}`, seasonNumber: Number.isFinite(seasonNumber) ? seasonNumber : undefined, name: `Season ${seasonKey}`, metadata: { info } });
+          for (const episode of Array.isArray(seasonEpisodes) ? seasonEpisodes : []) {
+            const episodeId = episode.id ?? episode.episode_id;
+            if (episodeId === undefined) continue;
+            episodes.push({ externalId: String(episodeId), seasonNumber, episodeNumber: Number(episode.episode_num ?? episode.episode_number) || undefined, name: episode.title ?? episode.name, streamUrl: xtreamStreamUrl(normalizeXtreamUrl(baseUrl).url, username, password, "series", String(episodeId), episode.container_extension), metadata: episode });
+          }
+        }
+        yield { phase: "seriesDetails", seriesExternalId: item.externalId, seasons, episodes, seriesIndex: batch.offset + index };
+      } catch {
+        yield { phase: "seriesDetails", seriesExternalId: item.externalId, seasons: [], episodes: [], seriesIndex: batch.offset + index };
+      }
+    }
+  }
+}
+
+export async function* fetchXtreamLiveCatalogueIncrementally(
+  baseUrl: string,
+  username: string,
+  password: string,
+  signal?: AbortSignal,
+  batchSize = 500
+): AsyncGenerator<Extract<XtreamCatalogueBatch, { phase: "liveCategories" | "liveChannels" }>> {
+  const categoriesPayload = await fetchXtreamAction(baseUrl, username, password, "get_live_categories", signal);
+  const categories = asRecords(categoriesPayload, "categories").map((category) => ({
+    providerCategoryId: String(category.category_id ?? ""),
+    name: String(category.category_name ?? "Unnamed"),
+    metadata: category
+  })).filter((category) => category.providerCategoryId);
+  const categoryNames = new Map(categories.map((category) => [category.providerCategoryId, category.name]));
+  if (categories.length > 0) yield { phase: "liveCategories", records: categories };
+
+  for await (const batch of fetchXtreamPagedRecords(baseUrl, username, password, "get_live_streams", "streams", batchSize, (stream) => {
+    const streamId = stream.stream_id === undefined || stream.stream_id === null ? "" : String(stream.stream_id);
+    const streamName = String(stream.name ?? stream.stream_name ?? "").trim();
+    if (!streamId || !streamName) return undefined;
+    const extension = String(stream.container_extension ?? "m3u8").replace(/^\./, "") || "m3u8";
+    const categoryId = stream.category_id === undefined ? undefined : String(stream.category_id);
+    return {
+      name: streamName,
+      externalRef: streamId,
+      categoryId,
+      groupName: categoryId ? categoryNames.get(categoryId) : undefined,
+      url: `${normalizeXtreamUrl(baseUrl).url.replace(/\/$/, "")}/live/${encodeURIComponent(username)}/${encodeURIComponent(password)}/${encodeURIComponent(streamId)}.${extension}`,
+      ...(stream.stream_icon ? { logoUrl: stream.stream_icon } : {})
+    } satisfies ParsedChannel;
+  }, (stream) => String(stream.stream_id ?? ""), signal)) {
+    yield { phase: "liveChannels", records: batch.records, offset: batch.offset, paginated: batch.paginated };
+  }
 }
 
 export async function fetchXtreamChannels(
