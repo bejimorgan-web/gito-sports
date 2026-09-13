@@ -115,14 +115,6 @@ export class MobileFeatureService {
         ('flag_live_scores', 'navigation.liveScores', 1, NULL, datetime('now'), datetime('now')),
         ('flag_sports', 'navigation.sports', 1, NULL, datetime('now'), datetime('now')),
         ('flag_live', 'navigation.live', 0, NULL, datetime('now'), datetime('now'));
-
-      UPDATE mobile_features
-      SET enabled = 0, updated_at = datetime('now')
-      WHERE feature_name = 'navigation.live';
-
-      UPDATE mobile_feature_flags
-      SET enabled = 0, display_message = NULL, updated_at = datetime('now')
-      WHERE feature_key = 'navigation.live';
     `);
   }
 

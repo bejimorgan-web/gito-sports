@@ -1,6 +1,10 @@
+import "./iptv-test-environment.js";
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DEFAULT_NAVIGATION_FEATURES, normalizeNavigation } from "./mobile-feature-service.js";
+import { MobileFeatureService } from "./mobile-feature-service.js";
+import { getDatabase } from "../db/connection.js";
 
 test("normalizes mobile navigation flags into the public response shape", () => {
   const result = normalizeNavigation([
@@ -22,4 +26,19 @@ test("keeps live streaming off by default for the closed-test release candidate"
     sports: { enabled: true, message: null },
     live: { enabled: false, message: null }
   });
+});
+
+test("persists the Live navigation flag across reads in both directions", () => {
+  const database = getDatabase();
+
+  MobileFeatureService.updateNavigationFeature("navigation.live", false, null);
+  assert.equal((database.prepare("SELECT enabled FROM mobile_feature_flags WHERE feature_key = ?").get("navigation.live") as { enabled: number }).enabled, 0);
+
+  MobileFeatureService.updateNavigationFeature("navigation.live", true, null);
+  assert.equal((database.prepare("SELECT enabled FROM mobile_feature_flags WHERE feature_key = ?").get("navigation.live") as { enabled: number }).enabled, 1);
+  assert.equal(MobileFeatureService.getNavigationFeatures().navigation.live.enabled, true);
+
+  MobileFeatureService.updateNavigationFeature("navigation.live", false, null);
+  assert.equal((database.prepare("SELECT enabled FROM mobile_feature_flags WHERE feature_key = ?").get("navigation.live") as { enabled: number }).enabled, 0);
+  assert.equal(MobileFeatureService.getNavigationFeatures().navigation.live.enabled, false);
 });
