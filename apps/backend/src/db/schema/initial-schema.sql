@@ -484,6 +484,27 @@ CREATE TABLE IF NOT EXISTS operational_logs (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS publication_artifacts (
+  publication_id TEXT PRIMARY KEY,
+  match_id TEXT NOT NULL,
+  schema_version INTEGER NOT NULL,
+  source_reference TEXT NOT NULL,
+  capability TEXT NOT NULL CHECK (capability IN ('live')),
+  publication_status TEXT NOT NULL CHECK (publication_status IN ('draft', 'approved', 'published', 'revoked', 'unavailable')),
+  availability TEXT NOT NULL CHECK (availability IN ('ready', 'degraded', 'offline', 'unknown')),
+  expires_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  published_at TEXT,
+  revoked_at TEXT,
+  FOREIGN KEY (match_id) REFERENCES matches(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_publication_artifacts_match
+  ON publication_artifacts(match_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_publication_artifacts_status
+  ON publication_artifacts(publication_status, availability);
+
 CREATE TABLE IF NOT EXISTS iptv_operations (
   operation_id TEXT PRIMARY KEY,
   provider_id TEXT,
