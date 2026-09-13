@@ -384,13 +384,17 @@ export async function enforceBackupRetention(backupDir = getBackupDir()): Promis
   }
 
   const maxBackups = Number.isFinite(runtimeConfig.maxBackups) ? Math.max(1, Math.floor(runtimeConfig.maxBackups)) : 20;
+  const maxAgeDays = Number.isFinite(runtimeConfig.maxAgeDays) ? Math.max(1, runtimeConfig.maxAgeDays) : 7;
+  const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
   if (valid.length === 0) {
     console.warn("[database-backup-service] retention skipped: no valid backup exists");
     lastCleanupResult = { scanned: files.length, valid: 0, invalid: invalid.length, retained: files.length, deleted: [], skipped: true };
     return lastCleanupResult;
   }
 
-  const keep = new Set(valid.slice(0, maxBackups).map((file) => file.filename));
+  const recent = valid.filter((file) => file.createdAt >= cutoff);
+  const keepCandidates = recent.slice(0, maxBackups);
+  const keep = new Set((keepCandidates.length > 0 ? keepCandidates : valid.slice(0, 1)).map((file) => file.filename));
   const deleted: string[] = [];
   for (const file of [...valid, ...invalid]) {
     if (keep.has(file.filename)) continue;

@@ -20,6 +20,10 @@ services:
         value: /var/data/backups
       - key: MAX_BACKUPS
         value: "5"
+      - key: BACKUP_INTERVAL_MS
+        value: "86400000"
+      - key: MAX_AGE_DAYS
+        value: "2"
       - key: UPLOAD_DIR
         value: /var/data/uploads
       - key: AI_CLASSIFICATION_ENABLED
