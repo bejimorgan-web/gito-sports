@@ -487,9 +487,6 @@ export async function fetchXtreamCatalogue(baseUrl: string, username: string, pa
     const name = String(item.name ?? item.series_name ?? "").trim();
     return id && name ? [{ externalId: id, categoryId: item.category_id === undefined ? undefined : String(item.category_id), name, posterUrl: item.cover ?? item.cover_big, metadata: item }] : [];
   });
-    if (!movieCategories.length && !movies.length && !seriesCategories.length && !series.length) {
-      throw new Error("Xtream provider returned no VOD or series catalogue data. Verify the account has VOD and series access.");
-    }
   const seasons: XtreamSeasonRecord[] = [];
   const episodes: Array<{ seriesExternalId: string; records: XtreamEpisodeRecord[] }> = [];
   for (const item of series) {
@@ -540,8 +537,7 @@ async function* fetchXtreamPagedRecords<T>(
     if (rawRecords.length === 0) return;
 
     const currentIdentity = identity(rawRecords[0]);
-    const repeatedFirstPage = offset > 0 && currentIdentity !== "" && currentIdentity === firstIdentity;
-    if (repeatedFirstPage) return;
+    if (offset > 0 && currentIdentity !== "" && currentIdentity === firstIdentity) return;
     const providerIgnoredPagination = rawRecords.length > batchSize;
     const chunks = providerIgnoredPagination
       ? Array.from({ length: Math.ceil(rawRecords.length / batchSize) }, (_, index) => rawRecords.slice(index * batchSize, (index + 1) * batchSize))

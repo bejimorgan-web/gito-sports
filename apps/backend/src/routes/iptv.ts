@@ -1,4 +1,4 @@
-﻿import { Router } from "express";
+import { Router } from "express";
 import type { CreateProviderRequest } from "@gito/shared";
 import { IPTVService } from "../services/iptv-service.js";
 import { parseM3uPlaylist, M3uParseError } from "../services/m3u-parser.js";
@@ -1139,4 +1139,3 @@ iptvRouter.get("/providers/:providerId/epg/programmes", (request, response) => {
 });
 
 export default iptvRouter;
-

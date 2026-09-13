@@ -1,4 +1,4 @@
-﻿import "./iptv-test-environment.js";
+import "./iptv-test-environment.js";
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -18,6 +18,7 @@ test("accepts common non-http stream protocols", () => {
   assert.equal(validateHttpStreamUrl("udp://239.1.1.1:1234"), null);
   assert.equal(validateHttpStreamUrl("srt://example.com:8890"), null);
 });
+
 test("builds xtream endpoint candidates from common provider URL shapes", () => {
   const fromRoot = buildXtreamEndpointCandidates("https://example.com");
   assert.ok(fromRoot.some((url) => url.includes("/player_api.php")));
@@ -373,13 +374,11 @@ test("detects Xtream credentials from get.php M3U playlist URLs", async () => {
     password: "pass"
   });
   assert.equal(detectedXtream, "xtream");
-  const playlistUrl = new URL("https://example.com/get.php");
-  playlistUrl.searchParams.set("username", "demo-user");
-  playlistUrl.searchParams.set("password", "demo-pass");
-  const hint = deriveXtreamCredentialHint(playlistUrl.toString());
-  assert.deepEqual(hint, { serverUrl: "https://example.com", username: "demo-user", password: "demo-pass" });
+  const hint = deriveXtreamCredentialHint("https://example.com/get.php?username=user&password=pass&type=m3u_plus&output=ts");
+  assert.deepEqual(hint, { serverUrl: "https://example.com", username: "user", password: "pass" });
   assert.equal(deriveXtreamCredentialHint("https://example.com/playlist.m3u8"), undefined);
 });
+
 test("existing Xtream A plus a new M3U B with different credentials create distinct provider rows", () => {
   const xtreamInput = {
     name: `Xtream Provider ${Date.now()}`,
@@ -537,4 +536,3 @@ test("28,277 synchronized live channels are reported as the provider total", () 
   assert.equal(getProviderChannelDiagnostics(provider.id)!.contentTotals.live, 28_277);
   assert.equal(getProviderChannelDiagnostics(provider.id)!.totalChannels, 28_277);
 });
-

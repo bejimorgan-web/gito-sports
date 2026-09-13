@@ -100,6 +100,127 @@ test("migrateExistingOperationalState adds missing logo_url to the channels tabl
   });
 });
 
+test("migrateExistingOperationalState repairs child tables that still reference legacy channel/provider names", () => {
+  const tempDbPath = path.join(process.cwd(), "tmp", `legacy-child-schema-migration-${Date.now()}.sqlite`);
+  fs.mkdirSync(path.dirname(tempDbPath), { recursive: true });
+
+  allowSqliteInstantiation(() => {
+    const db = new DatabaseSync(tempDbPath);
+
+    try {
+      db.exec(`
+        CREATE TABLE providers (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE providers_legacy_upgrade (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE matches (
+          id TEXT PRIMARY KEY,
+          status TEXT NOT NULL DEFAULT 'scheduled',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE scheduling_matches (
+          id TEXT PRIMARY KEY,
+          status TEXT NOT NULL DEFAULT 'scheduled',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE channels (
+          id TEXT PRIMARY KEY,
+          provider_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          external_ref TEXT,
+          url TEXT NOT NULL,
+          content_type TEXT NOT NULL DEFAULT 'live',
+          status TEXT NOT NULL DEFAULT 'active',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
+        );
+        CREATE TABLE channels_legacy_broken (
+          id TEXT PRIMARY KEY
+        );
+        CREATE TABLE streams (
+          id TEXT PRIMARY KEY,
+          match_id TEXT NOT NULL,
+          channel_id TEXT NOT NULL,
+          protocol TEXT NOT NULL DEFAULT 'hls',
+          status TEXT NOT NULL DEFAULT 'idle',
+          approval_status TEXT NOT NULL DEFAULT 'idle',
+          approved_by_user_id TEXT,
+          approved_at TEXT,
+          rejection_reason TEXT,
+          published_at TEXT,
+          health_status TEXT NOT NULL DEFAULT 'unknown',
+          health_reason TEXT,
+          failure_count INTEGER NOT NULL DEFAULT 0,
+          last_health_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (match_id) REFERENCES matches(id),
+          FOREIGN KEY (channel_id) REFERENCES "channels_legacy_broken"(id)
+        );
+        CREATE TABLE match_streams (
+          id TEXT PRIMARY KEY,
+          match_id TEXT NOT NULL,
+          provider_id TEXT NOT NULL,
+          channel_id TEXT NOT NULL,
+          stream_url TEXT NOT NULL,
+          priority INTEGER NOT NULL DEFAULT 0,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (channel_id) REFERENCES "channels_legacy_broken"(id),
+          FOREIGN KEY (match_id) REFERENCES scheduling_matches(id),
+          FOREIGN KEY (provider_id) REFERENCES "providers_legacy_upgrade"(id),
+          UNIQUE (match_id, channel_id)
+        );
+      `);
+
+      const timestamp = new Date().toISOString();
+      db.prepare("INSERT INTO providers (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)").run("provider-1", "Test Provider", timestamp, timestamp);
+      db.prepare("INSERT INTO providers_legacy_upgrade (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)").run("legacy-provider-1", "Legacy Provider", timestamp, timestamp);
+      db.prepare("INSERT INTO matches (id, created_at, updated_at) VALUES (?, ?, ?)").run("match-1", timestamp, timestamp);
+      db.prepare("INSERT INTO scheduling_matches (id, created_at, updated_at) VALUES (?, ?, ?)").run("sched-1", timestamp, timestamp);
+      db.prepare("INSERT INTO channels_legacy_broken (id) VALUES (?)").run("channel-1");
+
+      db.prepare(
+        "INSERT INTO channels (id, provider_id, name, url, content_type, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+      ).run("channel-1", "provider-1", "Test Channel", "https://example.com/stream.m3u8", "live", "active", new Date().toISOString(), new Date().toISOString());
+      db.prepare(
+        "INSERT INTO streams (id, match_id, channel_id, protocol, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      ).run("stream-1", "match-1", "channel-1", "hls", "idle", new Date().toISOString(), new Date().toISOString());
+      db.prepare(
+        "INSERT INTO match_streams (id, match_id, provider_id, channel_id, stream_url, priority, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      ).run("match-stream-1", "sched-1", "legacy-provider-1", "channel-1", "https://example.com/stream.m3u8", 0, 1, new Date().toISOString(), new Date().toISOString());
+
+      migrateExistingOperationalState(db);
+
+      const streamFk = db.prepare("PRAGMA foreign_key_list(streams)").all() as Array<{ table: string }>;
+      const matchStreamFk = db.prepare("PRAGMA foreign_key_list(match_streams)").all() as Array<{ from: string; table: string }>;
+      const schemaRows = db.prepare("SELECT name, sql FROM sqlite_master WHERE name IN ('streams', 'match_streams')").all() as Array<{ name: string; sql: string }>;
+
+      assert.deepEqual(streamFk.map((fk) => fk.table), ["channels", "matches"]);
+      assert.deepEqual(matchStreamFk.map((fk) => fk.table), ["channels", "providers", "scheduling_matches"]);
+      assert.ok(schemaRows.every((row) => !row.sql.includes("channels_legacy_broken") && !row.sql.includes("providers_legacy_upgrade")));
+      assert.equal((db.prepare("SELECT COUNT(*) AS count FROM streams").get() as { count: number }).count, 1);
+    } finally {
+      db.close();
+      fs.rmSync(tempDbPath, { force: true });
+    }
+  });
+});
+
 test("migrateExistingOperationalState adds tvg_name to legacy channels idempotently", () => {
   const tempDbPath = path.join(process.cwd(), "tmp", `channels-tvg-name-migration-${Date.now()}.sqlite`);
   fs.mkdirSync(path.dirname(tempDbPath), { recursive: true });

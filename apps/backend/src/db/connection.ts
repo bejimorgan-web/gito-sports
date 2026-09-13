@@ -1091,6 +1091,7 @@ function repairBrokenChannelsProviderReference(database: DatabaseSync) {
         provider_id TEXT NOT NULL,
         name TEXT NOT NULL,
         external_ref TEXT,
+        tvg_name TEXT,
         category_id TEXT,
         group_name TEXT,
         logo_url TEXT,
@@ -1103,8 +1104,9 @@ function repairBrokenChannelsProviderReference(database: DatabaseSync) {
       )
     `);
 
+    const legacyTvgName = hasColumn(database, "channels_legacy_broken", "tvg_name") ? "tvg_name" : "NULL AS tvg_name";
     const preservedChannelRows = database.prepare(`
-      SELECT id, provider_id, name, external_ref, category_id, group_name, logo_url, url, content_type, status, created_at, updated_at
+      SELECT id, provider_id, name, external_ref, ${legacyTvgName}, category_id, group_name, logo_url, url, content_type, status, created_at, updated_at
       FROM channels_legacy_broken
       WHERE provider_id IN (SELECT id FROM providers)
     `).all() as Array<Record<string, unknown>>;
@@ -1115,6 +1117,7 @@ function repairBrokenChannelsProviderReference(database: DatabaseSync) {
         "provider_id",
         "name",
         "external_ref",
+        "tvg_name",
         "category_id",
         "group_name",
         "logo_url",
@@ -1139,7 +1142,159 @@ function repairBrokenChannelsProviderReference(database: DatabaseSync) {
   }
 }
 
+function repairLegacyChildTableReferences(database: DatabaseSync) {
+  const repairs = [
+    {
+      table: "streams",
+      createSql: `
+        CREATE TABLE streams (
+          id TEXT PRIMARY KEY,
+          match_id TEXT NOT NULL,
+          channel_id TEXT NOT NULL,
+          protocol TEXT NOT NULL DEFAULT 'hls',
+          status TEXT NOT NULL DEFAULT 'idle',
+          approval_status TEXT NOT NULL DEFAULT 'idle',
+          approved_by_user_id TEXT,
+          approved_at TEXT,
+          rejection_reason TEXT,
+          published_at TEXT,
+          health_status TEXT NOT NULL DEFAULT 'unknown',
+          health_reason TEXT,
+          failure_count INTEGER NOT NULL DEFAULT 0,
+          last_health_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (match_id) REFERENCES matches(id),
+          FOREIGN KEY (channel_id) REFERENCES channels(id)
+        )
+      `,
+      insertSql: `
+        INSERT INTO streams (
+          id,
+          match_id,
+          channel_id,
+          protocol,
+          status,
+          approval_status,
+          approved_by_user_id,
+          approved_at,
+          rejection_reason,
+          published_at,
+          health_status,
+          health_reason,
+          failure_count,
+          last_health_at,
+          created_at,
+          updated_at
+        )
+        SELECT
+          id,
+          match_id,
+          channel_id,
+          protocol,
+          status,
+          approval_status,
+          approved_by_user_id,
+          approved_at,
+          rejection_reason,
+          published_at,
+          health_status,
+          health_reason,
+          failure_count,
+          last_health_at,
+          created_at,
+          updated_at
+        FROM streams_legacy_schema_repair
+      `,
+      legacyTable: "streams_legacy_schema_repair"
+    },
+    {
+      table: "match_streams",
+      createSql: `
+        CREATE TABLE match_streams (
+          id TEXT PRIMARY KEY,
+          match_id TEXT NOT NULL,
+          provider_id TEXT NOT NULL,
+          channel_id TEXT NOT NULL,
+          stream_url TEXT NOT NULL,
+          priority INTEGER NOT NULL DEFAULT 0,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (match_id) REFERENCES scheduling_matches(id),
+          FOREIGN KEY (provider_id) REFERENCES providers(id),
+          FOREIGN KEY (channel_id) REFERENCES channels(id),
+          UNIQUE (match_id, channel_id)
+        )
+      `,
+      insertSql: `
+        INSERT INTO match_streams (
+          id,
+          match_id,
+          provider_id,
+          channel_id,
+          stream_url,
+          priority,
+          is_active,
+          created_at,
+          updated_at
+        )
+        SELECT
+          id,
+          match_id,
+          provider_id,
+          channel_id,
+          stream_url,
+          priority,
+          is_active,
+          created_at,
+          updated_at
+        FROM match_streams_legacy_schema_repair
+      `,
+      legacyTable: "match_streams_legacy_schema_repair"
+    }
+  ] as const;
+
+  for (const repair of repairs) {
+    if (!hasTable(database, repair.table)) {
+      continue;
+    }
+
+    const schemaRow = database
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(repair.table) as { sql: string } | undefined;
+
+    if (!schemaRow) {
+      continue;
+    }
+
+    if (!schemaRow.sql.includes("channels_legacy_broken") && !schemaRow.sql.includes("providers_legacy_upgrade")) {
+      continue;
+    }
+
+    console.warn(`[startup] repairing stale legacy foreign-key references in ${repair.table}`);
+
+    database.exec("PRAGMA foreign_keys = OFF;");
+
+    try {
+      database.exec("BEGIN TRANSACTION;");
+      database.exec(`ALTER TABLE ${repair.table} RENAME TO ${repair.legacyTable};`);
+      database.exec(repair.createSql);
+      database.exec(repair.insertSql);
+      database.exec(`DROP TABLE ${repair.legacyTable};`);
+      database.exec("COMMIT;");
+    } catch (error) {
+      database.exec("ROLLBACK;");
+      throw error;
+    } finally {
+      database.exec("PRAGMA foreign_keys = ON;");
+    }
+  }
+}
+
 export function migrateExistingOperationalState(database: DatabaseSync) {
+  repairLegacyChildTableReferences(database);
+
   const purgedProviderCount = purgeDeletedProviderData(database);
   if (purgedProviderCount > 0) {
     console.log(`[startup] permanently deleted ${purgedProviderCount} removed IPTV provider record(s) and their owned data`);
@@ -1573,13 +1728,14 @@ function deleteProviderOwnedRows(database: DatabaseSync, providerId: string) {
     ["iptv_channels", "provider_id = ?"] as const,
     ["iptv_provider_health", "provider_id = ?"] as const,
     ["iptv_logs", "provider_id = ?"] as const,
+    ["streams", "channel_id IN (SELECT id FROM channels WHERE provider_id = ?)"] as const,
     ["match_streams", "provider_id = ?"] as const,
     ["channels", "provider_id = ?"] as const,
     ["iptv_providers", "id = ?"] as const
   ];
 
   for (const [table, predicate] of statements) {
-    if (hasTable(database, table)) {
+    if (hasTable(database, table) && (table !== "streams" || hasTable(database, "channels"))) {
       database.prepare(`DELETE FROM ${table} WHERE ${predicate}`).run(providerId);
     }
   }
@@ -1588,7 +1744,9 @@ function deleteProviderOwnedRows(database: DatabaseSync, providerId: string) {
 function purgeDeletedProviderData(database: DatabaseSync): number {
   if (!hasTable(database, "providers")) return 0;
 
-  const providerIds = database.prepare("SELECT id FROM providers WHERE deleted = 1").all() as Array<{ id: string }>;
+  const providerIds = hasColumn(database, "providers", "deleted")
+    ? database.prepare("SELECT id FROM providers WHERE deleted = 1").all() as Array<{ id: string }>
+    : [];
   const orphanIds = hasTable(database, "channels")
     ? database.prepare("SELECT DISTINCT c.provider_id AS id FROM channels c LEFT JOIN providers p ON p.id = c.provider_id WHERE p.id IS NULL").all() as Array<{ id: string }>
     : [];
