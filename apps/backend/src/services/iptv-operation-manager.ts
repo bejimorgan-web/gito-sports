@@ -47,8 +47,8 @@ type OperationTask = (operation: IptvOperation, report: (progress: IptvOperation
 export const IPTV_VALIDATION_TIMEOUT_MS = 30_000;
 
 const operationCache = new Map<string, IptvOperation>();
-const operationControllers = new Map<string, AbortController>();
 const cleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const operationControllers = new Map<string, AbortController>();
 const RETENTION_MS = 15 * 60 * 1000;
 
 function clone(operation: IptvOperation) {
