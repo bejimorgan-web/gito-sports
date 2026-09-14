@@ -5,6 +5,7 @@ import { MatchService } from "../services/match-service.js";
 import { MobileFeatureService, DEFAULT_NAVIGATION_FEATURES, MobileFeatureNavigationRow } from "../services/mobile-feature-service.js";
 import { getDatabase } from "../db/connection.js";
 import { protectedRoute } from "../middleware/protected.js";
+import { listPublishedPublicationFeed } from "../repositories/publication-artifact-repository.js";
 import {
   mobileSports,
   mobileCompetitions,
@@ -80,6 +81,7 @@ function parseListQueryValue(value: unknown): string[] {
 
 mobileRouter.get("/sports", (_request, response) => response.json({ data: mobileSports() }));
 mobileRouter.get("/competitions", (_request, response) => response.json({ data: mobileCompetitions() }));
+mobileRouter.get("/publications", (_request, response) => response.json({ data: listPublishedPublicationFeed() }));
 
 mobileRouter.get("/clubs", (request, response) => {
   try {
