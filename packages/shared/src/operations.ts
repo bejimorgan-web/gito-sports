@@ -13,7 +13,7 @@ export interface ProviderConnectionTest {
   stages?: Array<{ name: string; ok: boolean; message: string }>;
 }
 
-export type IptvOperationType = "xtream_validation" | "m3u_validation" | "m3u_import" | "xtream_channel_sync";
+export type IptvOperationType = "xtream_validation" | "m3u_validation" | "m3u_import" | "xtream_channel_sync" | "xtream_catalogue_sync" | "xtream_epg_sync" | "m3u_catalogue_sync";
 export type IptvOperationStatus = "queued" | "running" | "completed" | "failed" | "timeout" | "cancelled" | "interrupted";
 
 export interface IptvOperation {
@@ -71,18 +71,18 @@ export interface MatchAssignmentRequest {
   homeTeamName: string;
   awayTeamName: string;
   startsAt: string;
-  channelId: EntityId;
+  streamUrl: string;
   venueName?: string;
 }
 
 export interface MatchAssignmentResult {
   match: Match;
   stream: Stream;
-  channel: Channel;
+  streamUrl: string;
 }
 
 export interface MatchStreamAssignmentRequest {
-  channelId: EntityId;
+  streamUrl: string;
   priority?: number;
   isActive?: boolean;
 }
@@ -90,8 +90,6 @@ export interface MatchStreamAssignmentRequest {
 export interface MatchStreamAssignment {
   id: EntityId;
   matchId: EntityId;
-  channelId: EntityId;
-  providerId: EntityId;
   streamUrl: string;
   priority: number;
   isActive: boolean;
@@ -101,15 +99,12 @@ export interface MatchStreamAssignment {
 
 export interface MatchStreamAssignmentResult {
   match: Match;
-  channel: Channel;
   assignment: MatchStreamAssignment;
 }
 
 export interface PublishedLiveMatch {
   match: Match;
   stream: Stream;
-  channel: Channel;
-  provider: Pick<IPTVProvider, "id" | "name" | "type" | "status" | "availabilityStatus" | "healthScore">;
   playbackUrl: string;
   homeTeamName?: string;
   awayTeamName?: string;

@@ -8,8 +8,6 @@ export const IMPORT_ORDER = [
   "countries",
   "hosts",
   "sport_countries",
-  "providers",
-  "channels",
   "competitions",
   "seasons",
   "teams",
@@ -17,8 +15,6 @@ export const IMPORT_ORDER = [
   "matches",
   "scheduling_matches",
   "scheduling_match_links",
-  "match_streams",
-  "streams",
   "operator_users",
   "operator_settings",
   "auth_sessions",
@@ -291,9 +287,8 @@ export function importMigrationFile(database: DatabaseSync, filePath: string): M
 export function isDatabaseCatalogEmpty(database: DatabaseSync): boolean {
   return (
     getCount(database, "sports") === 0 &&
-    getCount(database, "providers") === 0 &&
-    getCount(database, "channels") === 0 &&
     getCount(database, "matches") === 0 &&
-    getCount(database, "streams") === 0
+    getCount(database, "competitions") === 0 &&
+    getCount(database, "teams") === 0
   );
 }

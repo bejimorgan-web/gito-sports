@@ -3,9 +3,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode
 import type {
   Channel,
   Competition,
-  MatchAssignmentRequest,
-  MatchAssignmentResult,
-  PublishedLiveMatch,
+  Host,
   IPTVProvider,
   ProviderChannelDiagnostics,
   Sport,
@@ -13,27 +11,31 @@ import type {
   Team
 } from "@gito/shared";
 
+import type { DesktopPublicationContext } from "../../services/publication-artifact";
+
 import { StreamPreviewPanel } from "../preview/StreamPreviewPanel";
+import { IptvHeroCards } from "./IptvHeroCards";
 import { apiClient } from "../../services/api-client";
 import { resolveAssetUrl } from "../../components/asset-url";
 import { localDateTimeToUtc, utcToOperatorKickoff } from "../clubs/fixture-time";
+import { CanonicalFixtureRequiredError } from "../../services/publication-artifact";
 
 const FALLBACK_LOGO = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="100%" height="100%" fill="%23081018"/></svg>';
 
 interface BroadcastConsoleScreenProps {
-  assignment: MatchAssignmentResult | undefined;
+  assignment: DesktopPublicationContext | undefined;
   channels: Channel[];
   backendStatus: "online" | "offline" | "reconnecting";
-  liveMatches: PublishedLiveMatch[];
+  liveMatches: DesktopPublicationContext[];
   liveMode: boolean;
   previewedChannelId: string | undefined;
   providers: IPTVProvider[];
   selectedChannel: Channel | undefined;
   preferredProviderId?: string | undefined;
-  onApprove: (streamId: string) => Promise<void>;
-  onAssignMatch: (input: MatchAssignmentRequest) => Promise<MatchAssignmentResult>;
+  onApprove: (publicationId: string) => Promise<void>;
+  onAssignMatch: (input: PublicationControlAssignment) => Promise<DesktopPublicationContext>;
   onPreviewReady: (channelId: string) => void;
-  onPublish: (streamId: string) => Promise<void>;
+  onPublish: (publicationId: string) => Promise<void>;
   onReportHealth: (status: Stream["healthStatus"], reason?: string) => void;
   onSelectChannel: (channel: Channel) => void;
   onClearAssignment: () => void;
@@ -45,63 +47,97 @@ interface BroadcastConsoleScreenProps {
   showLegacyChannelBrowser?: boolean;
 }
 
+export type PublicationControlAssignment = {
+  canonicalFixtureId?: string;
+  competitionId: string;
+  homeTeamId: string;
+  awayTeamId: string;
+  sportName: string;
+  competitionName: string;
+  homeTeamName: string;
+  awayTeamName: string;
+  startsAt: string;
+  channelId: string;
+};
+
+export function filterPublicationHosts(hosts: Host[], sportId: string) {
+  return hosts.filter((host) => !sportId || host.sportId === sportId);
+}
+
+export function filterPublicationCompetitions(competitions: Competition[], sportId: string, hostId: string) {
+  return competitions.filter((competition) =>
+    (!sportId || competition.sportId === sportId) && (!hostId || competition.hostId === hostId)
+  );
+}
+
+export function isPublicationFixtureValid(
+  fixture: any,
+  context: { sportId: string; hostId: string; competitionId: string; competitionTeams: Team[] }
+) {
+  return fixture.sport?.id === context.sportId &&
+    (!context.hostId || fixture.homeTeam?.hostId === context.hostId || fixture.awayTeam?.hostId === context.hostId) &&
+    fixture.competitionId === context.competitionId &&
+    context.competitionTeams.some((team) => team.id === fixture.homeTeamId) &&
+    context.competitionTeams.some((team) => team.id === fixture.awayTeamId);
+}
+
 function getNextAction({
   assignment,
   previewConfirmed,
   selectedChannel,
   matchDetailsComplete
 }: {
-  assignment: MatchAssignmentResult | undefined;
+  assignment: DesktopPublicationContext | undefined;
   previewConfirmed: boolean;
   selectedChannel: Channel | undefined;
   matchDetailsComplete: boolean;
 }) {
   if (!selectedChannel) {
     return {
-      label: "Select channel",
+      label: "Select source",
       detail: "Choose an IPTV channel from the source list."
     };
   }
 
   if (!previewConfirmed) {
     return {
-      label: "Preview channel",
-      detail: "Confirm playback before creating a match assignment."
+      label: "Preview source",
+      detail: "Confirm playback before creating a publication draft."
     };
   }
 
   if (!assignment) {
     if (!matchDetailsComplete) {
       return {
-        label: "Complete match details",
-        detail: "Fill sport, competition, and teams before assignment."
+        label: "Complete match context",
+        detail: "Fill sport, competition, and teams before binding the source."
       };
     }
 
     return {
-      label: "Assign match",
-      detail: "Add match metadata and attach the previewed channel."
+      label: "Create publication draft",
+      detail: "Add match metadata and bind the previewed source."
     };
   }
 
-  if (assignment.stream.status === "assigned" || assignment.stream.status === "testing") {
+  if (assignment.publication.publicationStatus === "draft") {
     return {
-      label: "Approve stream",
-      detail: "Operator approval is required before publication."
+      label: "Approve publication",
+      detail: "Operator approval is required before the publication can be published."
     };
   }
 
-  if (assignment.match.status === "approved" && assignment.stream.status === "approved") {
+  if (assignment.publication.publicationStatus === "approved") {
     return {
-      label: "Publish live",
-      detail: "This match is ready for mobile delivery."
+      label: "Publish live feed",
+      detail: "This publication is ready to go live."
     };
   }
 
-  if (assignment.match.status === "published" && assignment.stream.status === "active") {
+  if (assignment.publication.publicationStatus === "published") {
     return {
       label: "Published",
-      detail: "The live feed is available to mobile clients."
+      detail: "The live publication is now available in the feed."
     };
   }
 
@@ -112,7 +148,7 @@ function getNextAction({
 }
 
 function getUnifiedStatus(input: {
-  assignment: MatchAssignmentResult | undefined;
+  assignment: DesktopPublicationContext | undefined;
   backendOffline: boolean;
   providerRisk: boolean;
   selectedChannel: Channel | undefined;
@@ -123,39 +159,39 @@ function getUnifiedStatus(input: {
     return { label: "AT RISK", tone: "risk", detail: "Backend unavailable. Work is read-only." };
   }
 
-  if (assignment?.stream.healthStatus === "failed" || assignment?.stream.status === "failed") {
-    return { label: "FAILED", tone: "failed", detail: "Stream failed. Remove from live operations." };
+  if (assignment?.publication.availability === "offline") {
+    return { label: "FAILED", tone: "failed", detail: "Publication source failed. Remove it from active delivery." };
   }
 
-  if (assignment?.match.status === "published" && assignment.stream.status === "active") {
-    if (assignment.stream.healthStatus === "degraded" || providerRisk) {
-      return { label: "LIVE - Degraded", tone: "risk", detail: "Live signal needs attention." };
+  if (assignment?.publication.publicationStatus === "published") {
+    if (assignment.publication.availability === "degraded" || providerRisk) {
+      return { label: "LIVE - Degraded", tone: "risk", detail: "Published feed needs attention." };
     }
 
-    return { label: "LIVE - Stable", tone: "live", detail: "Live feed is healthy." };
+    return { label: "LIVE - Stable", tone: "live", detail: "Published feed is healthy." };
   }
 
-  if (providerRisk || assignment?.stream.healthStatus === "degraded") {
-    return { label: "AT RISK", tone: "risk", detail: "Check provider or preview stability." };
+  if (providerRisk || assignment?.publication.availability === "degraded") {
+    return { label: "AT RISK", tone: "risk", detail: "Check provider or preview stability before publishing." };
   }
 
-  if (assignment?.match.status === "approved" && assignment.stream.status === "approved") {
+  if (assignment?.publication.publicationStatus === "approved") {
     return { label: "READY", tone: "ready", detail: "Approved and ready to publish." };
   }
 
   if (assignment) {
-    return { label: "READY", tone: "ready", detail: "Assigned stream is waiting for approval." };
+    return { label: "READY", tone: "ready", detail: "Selected source is waiting for publication approval." };
   }
 
   if (selectedChannel) {
-    return { label: "READY", tone: "ready", detail: "Channel selected. Preview before assignment." };
+    return { label: "READY", tone: "ready", detail: "Source selected. Preview before creating a publication draft." };
   }
 
-  return { label: "IDLE", tone: "idle", detail: "Select a channel to begin." };
+  return { label: "IDLE", tone: "idle", detail: "Select a source to begin." };
 }
 
 function getOperatorMessage(input: {
-  assignment: MatchAssignmentResult | undefined;
+  assignment: DesktopPublicationContext | undefined;
   backendOffline: boolean;
   providerRisk: boolean;
   selectedProvider: IPTVProvider | undefined;
@@ -166,14 +202,14 @@ function getOperatorMessage(input: {
   }
 
   if (input.streamFailed) {
-    return "Stream failed. It has been removed from live delivery.";
+    return "Publication source failed. It has been removed from active delivery.";
   }
 
   if (input.providerRisk) {
     return `${input.selectedProvider?.name ?? "Provider"} is unstable. Watch the preview before publishing.`;
   }
 
-  if (input.assignment?.stream.healthStatus === "degraded") {
+  if (input.assignment?.publication.availability === "degraded") {
     return "Signal is unstable. Wait for recovery before publishing.";
   }
 
@@ -313,6 +349,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
   showLegacyChannelBrowser = true
 }: BroadcastConsoleScreenProps) {
   const [selectedSportId, setSelectedSportId] = useState<string>("");
+  const [selectedHostId, setSelectedHostId] = useState<string>("");
   const [selectedCompetitionId, setSelectedCompetitionId] = useState<string>("");
   const [selectedHomeTeamId, setSelectedHomeTeamId] = useState<string>("");
   const [selectedAwayTeamId, setSelectedAwayTeamId] = useState<string>("");
@@ -323,6 +360,8 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
   const [sports, setSports] = useState<Sport[]>([]);
   const [competitions, setCompetitions] = useState<Competition[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
+  const [hosts, setHosts] = useState<Host[]>([]);
+  const [competitionTeams, setCompetitionTeams] = useState<Team[]>([]);
   const [selectedGroup, setSelectedGroup] = useState("");
   const [groupSearchQuery, setGroupSearchQuery] = useState("");
   const [selectedContentType, setSelectedContentType] = useState<ContentTypeOption>("live");
@@ -341,8 +380,6 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
   const [selectedProviderId, setSelectedProviderId] = useState("");
   const [channelSearchQuery, setChannelSearchQuery] = useState("");
   const manualProviderSelectionRef = useRef(false);
-  const [providerDiagnostics, setProviderDiagnostics] = useState<ProviderChannelDiagnostics | null>(null);
-  const [providerDiagnosticsError, setProviderDiagnosticsError] = useState<string | null>(null);
   const [systemStatus, setSystemStatus] = useState<{
     backend: string;
     database: string;
@@ -379,9 +416,10 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
     [teams, selectedAwayTeamId]
   );
   const matchDetailsComplete = Boolean(selectedCompetition && selectedHomeTeam && selectedAwayTeam && selectedSportId);
-  const canAssign = Boolean(selectedChannel && previewConfirmed && !assignment && matchDetailsComplete);
-  const canApprove = Boolean(assignment && (assignment.stream.status === "assigned" || assignment.stream.status === "testing"));
-  const canPublish = Boolean(assignment && assignment.match.status === "approved" && assignment.stream.status === "approved");
+  const sameTeamSelected = Boolean(selectedHomeTeamId && selectedHomeTeamId === selectedAwayTeamId);
+  const canAssign = Boolean(selectedChannel && previewConfirmed && !assignment && matchDetailsComplete && selectedHostId && !sameTeamSelected);
+  const canApprove = Boolean(assignment && assignment.publication.publicationStatus === "draft");
+  const canPublish = Boolean(assignment && assignment.publication.publicationStatus === "approved");
 
   const nextAction = useMemo(
     () => getNextAction({ assignment, previewConfirmed, selectedChannel, matchDetailsComplete }),
@@ -396,50 +434,15 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
       return;
     }
 
-    const selectedProvider = selectedProviderId
-      ? visibleProviders.find((provider) => provider.id === selectedProviderId)
-      : undefined;
-    const selectedProviderIsUsable = Boolean(selectedProvider && selectedProvider.status === "active");
-
-    if (manualProviderSelectionRef.current) {
-      if (!selectedProviderIsUsable) {
-        const fallbackProvider = preferredProviderId
-          ? visibleProviders.find((provider) => provider.id === preferredProviderId && provider.status === "active")
-          : visibleProviders.find((provider) => provider.status === "active");
-
-        if (fallbackProvider) {
-          setSelectedProviderId(fallbackProvider.id);
-          manualProviderSelectionRef.current = false;
-        }
-      }
+    if (!selectedProviderId) {
       return;
     }
 
-    const requestedProvider = preferredProviderId
-      ? visibleProviders.find((provider) => provider.id === preferredProviderId && provider.status === "active")
-      : undefined;
-
-    if (requestedProvider) {
-      if (selectedProviderId !== requestedProvider.id) {
-        setSelectedProviderId(requestedProvider.id);
-      }
-      return;
+    const selectedProvider = visibleProviders.find((provider) => provider.id === selectedProviderId);
+    if (selectedProvider?.status !== "active") {
+      setSelectedProviderId("");
     }
-
-    if (selectedProviderIsUsable) {
-      return;
-    }
-
-    const preferredProvider = selectedChannel?.providerId
-      ? visibleProviders.find((provider) => provider.id === selectedChannel.providerId && provider.status === "active")
-      : visibleProviders.find((provider) => provider.status === "active");
-
-    const fallbackProvider = preferredProvider ?? visibleProviders[0];
-
-    if (fallbackProvider) {
-      setSelectedProviderId(fallbackProvider.id);
-    }
-  }, [preferredProviderId, visibleProviders, selectedChannel?.providerId, selectedProviderId]);
+  }, [selectedProviderId, visibleProviders]);
 
   useEffect(() => {
     setSelectedGroup("");
@@ -468,6 +471,36 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
     () => visibleProviders.find((provider) => provider.id === selectedProviderId),
     [visibleProviders, selectedProviderId]
   );
+  const providerDiagnostics = useMemo<ProviderChannelDiagnostics | null>(() => {
+    if (!selectedProvider) return null;
+
+    const providerChannels = channels.filter((channel) => channel.providerId === selectedProvider.id);
+    const counts = providerChannels.reduce(
+      (result, channel) => {
+        const status = channel.status === "active" || channel.status === "inactive" || channel.status === "stale" || channel.status === "archived"
+          ? channel.status
+          : "inactive";
+        result[status] += 1;
+        return result;
+      },
+      { active: 0, inactive: 0, stale: 0, archived: 0 }
+    );
+
+    return {
+      providerId: selectedProvider.id,
+      status: selectedProvider.status,
+      availabilityStatus: selectedProvider.availabilityStatus ?? "unknown",
+      healthScore: selectedProvider.healthScore ?? 0,
+      ...(selectedProvider.lastSuccessfulStreamLoadAt ? { lastSuccessfulStreamLoadAt: selectedProvider.lastSuccessfulStreamLoadAt } : {}),
+      totalChannels: providerChannels.length,
+      contentTotals: {
+        live: providerChannels.filter((channel) => channel.contentType === "live").length,
+        movies: providerChannels.filter((channel) => channel.contentType === "movie").length,
+        series: providerChannels.filter((channel) => channel.contentType === "series").length
+      },
+      counts
+    };
+  }, [channels, selectedProvider]);
   const activeProviderChannels = useMemo(
     () => {
       const visibleChannels = channels.filter((channel) => visibleProviderIds.has(channel.providerId));
@@ -581,95 +614,58 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
   }, [filteredSelectedGroupChannels, onSelectChannel, selectedChannel, selectedProviderId, showLegacyChannelBrowser]);
 
   useEffect(() => {
-    if (selectedCompetition && selectedSportId && selectedCompetition.sportId !== selectedSportId) {
-      setSelectedCompetitionId("");
-    }
-  }, [selectedCompetition, selectedSportId]);
-
-  useEffect(() => {
-    if (selectedHomeTeam && selectedSportId && selectedHomeTeam.sportId !== selectedSportId) {
-      setSelectedHomeTeamId("");
-    }
-  }, [selectedHomeTeam, selectedSportId]);
-
-  useEffect(() => {
-    if (selectedAwayTeam && selectedSportId && selectedAwayTeam.sportId !== selectedSportId) {
-      setSelectedAwayTeamId("");
-    }
-  }, [selectedAwayTeam, selectedSportId]);
-
-  useEffect(() => {
     if (!selectedCompetitionId) {
       setCanonicalFixtures([]);
-      setSelectedCanonicalFixtureId("");
+      setCompetitionTeams([]);
       return;
     }
-    void apiClient.listFixtures({ competitionId: selectedCompetitionId, limit: 100 }).then(setCanonicalFixtures).catch(() => setCanonicalFixtures([]));
-  }, [selectedCompetitionId]);
+    void Promise.all([
+      apiClient.listFixtures({ sportId: selectedSportId, competitionId: selectedCompetitionId, limit: 100 }),
+      apiClient.listCompetitionTeams(selectedCompetitionId)
+    ]).then(([fixtures, teamsForCompetition]) => {
+      setCanonicalFixtures(fixtures);
+      setCompetitionTeams(teamsForCompetition);
+    }).catch(() => {
+      setCanonicalFixtures([]);
+      setCompetitionTeams([]);
+    });
+  }, [selectedCompetitionId, selectedSportId]);
 
+  const validCanonicalFixtures = useMemo(
+    () => canonicalFixtures.filter((fixture) =>
+      isPublicationFixtureValid(fixture, { sportId: selectedSportId, hostId: selectedHostId, competitionId: selectedCompetitionId, competitionTeams })
+    ),
+    [canonicalFixtures, competitionTeams, selectedCompetitionId, selectedHostId, selectedSportId]
+  );
   const selectedCanonicalFixture = useMemo(
-    () => canonicalFixtures.find((fixture) => fixture.id === selectedCanonicalFixtureId),
-    [canonicalFixtures, selectedCanonicalFixtureId]
+    () => validCanonicalFixtures.find((fixture) => fixture.id === selectedCanonicalFixtureId),
+    [selectedCanonicalFixtureId, validCanonicalFixtures]
   );
 
   useEffect(() => {
-    if (!selectedCanonicalFixture) return;
+    if (!selectedCanonicalFixture) {
+      if (selectedCanonicalFixtureId) setSelectedCanonicalFixtureId("");
+      return;
+    }
     setSelectedHomeTeamId(selectedCanonicalFixture.homeTeamId);
     setSelectedAwayTeamId(selectedCanonicalFixture.awayTeamId);
     setStartsAt(utcToOperatorKickoff(selectedCanonicalFixture.startsAt));
-  }, [selectedCanonicalFixture]);
+  }, [selectedCanonicalFixture, selectedCanonicalFixtureId]);
 
   const filteredCompetitions = useMemo(
-    () => (selectedSportId ? competitions.filter((competition) => competition.sportId === selectedSportId) : competitions),
-    [competitions, selectedSportId]
+    () => filterPublicationCompetitions(competitions, selectedSportId, selectedHostId),
+    [competitions, selectedHostId, selectedSportId]
   );
 
   const filteredTeams = useMemo(
-    () =>
-      teams.filter((team) => {
-        const matchesSport = selectedSportId ? team.sportId === selectedSportId : true;
-        const matchesCompetitionCountry = selectedCompetition?.countryId ? team.countryId === selectedCompetition.countryId : true;
-        return matchesSport && matchesCompetitionCountry;
-      }),
-    [teams, selectedSportId, selectedCompetition?.countryId]
+    () => selectedCompetitionId ? competitionTeams : [],
+    [competitionTeams, selectedCompetitionId]
   );
+  const filteredHosts = useMemo(() => filterPublicationHosts(hosts, selectedSportId), [hosts, selectedSportId]);
   const backendOffline = backendStatus !== "online";
   const providerRisk = selectedProvider?.availabilityStatus === "offline" || selectedProvider?.availabilityStatus === "degraded";
-  const streamFailed = assignment?.stream.healthStatus === "failed" || assignment?.stream.status === "failed";
+  const streamFailed = assignment?.publication.availability === "offline";
   const terminalAssignment = Boolean(assignment && !canApprove && !canPublish);
-
-  useEffect(() => {
-    if (!selectedProviderId) {
-      setProviderDiagnostics(null);
-      setProviderDiagnosticsError(null);
-      return;
-    }
-
-    let active = true;
-
-    const loadProviderDiagnostics = async () => {
-      try {
-        const diagnostics = await apiClient.getProviderDiagnostics(selectedProviderId);
-        if (!active) {
-          return;
-        }
-        setProviderDiagnostics(diagnostics);
-        setProviderDiagnosticsError(null);
-      } catch (error) {
-        if (!active) {
-          return;
-        }
-        setProviderDiagnostics(null);
-        setProviderDiagnosticsError(error instanceof Error ? error.message : String(error));
-      }
-    };
-
-    void loadProviderDiagnostics();
-
-    return () => {
-      active = false;
-    };
-  }, [selectedProviderId]);
 
   useEffect(() => {
     const diagnostics = {
@@ -778,10 +774,11 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
 
     (async () => {
       try {
-        const [sportsData, competitionsData, teamsData] = await Promise.all([
+        const [sportsData, competitionsData, teamsData, hostsData] = await Promise.all([
           apiClient.listSports(),
           apiClient.listCompetitions(),
-          apiClient.listTeams()
+          apiClient.listTeams(),
+          apiClient.listHosts()
         ]);
 
         if (!active) {
@@ -791,6 +788,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
         setSports(sportsData);
         setCompetitions(competitionsData);
         setTeams(teamsData);
+        setHosts(hostsData);
       } catch {
         // Keep default assignment values if the desktop data load fails.
       }
@@ -830,20 +828,38 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
   }, []);
 
   const handleAssign = useCallback(async () => {
-    if (!selectedChannel || !canAssign) {
-      setStatus(!selectedChannel ? "Select a channel first." : "Preview confirmation is required.");
+    if (!selectedChannel) {
+      setStatus("Select a source first.");
       return;
     }
 
-    if (!selectedCompetition || !selectedHomeTeam || !selectedAwayTeam || !selectedSport) {
-      setStatus("Select sport, competition, home team, and away team before assigning.");
+    if (!previewConfirmed) {
+      setStatus("Preview confirmation is required.");
       return;
     }
 
-    setStatus("Assigning match stream...");
+    if (!selectedSport || !selectedHostId || !selectedCompetition || !selectedHomeTeam || !selectedAwayTeam) {
+      setStatus("Select sport, host, competition, home team, and away team before creating the publication draft.");
+      return;
+    }
+
+    if (sameTeamSelected) {
+      setStatus("Home and away teams must be different.");
+      return;
+    }
+
+    if (!canAssign) {
+      setStatus("Complete match details before creating the publication draft.");
+      return;
+    }
+
+    setStatus("Creating publication draft...");
     try {
       await onAssignMatch({
         ...(selectedCanonicalFixtureId ? { canonicalFixtureId: selectedCanonicalFixtureId } : {}),
+        competitionId: selectedCompetition.id,
+        homeTeamId: selectedHomeTeam.id,
+        awayTeamId: selectedAwayTeam.id,
         sportName: selectedSport?.name ?? "Unknown",
         competitionName: selectedCompetition.name,
         homeTeamName: selectedHomeTeam.name,
@@ -851,29 +867,31 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
         startsAt: localDateTimeToUtc(startsAt) ?? "",
         channelId: selectedChannel.id
       });
-      setStatus("Stream assigned. Approval is now available.");
-    } catch {
-      setStatus("Assignment was not confirmed. Check backend connection and try again.");
+      setStatus("Publication draft created. Approval is now available.");
+    } catch (error) {
+      setStatus(error instanceof CanonicalFixtureRequiredError
+        ? error.message
+        : error instanceof Error ? error.message : "Publication draft failed.");
     }
-  }, [selectedChannel, canAssign, selectedCanonicalFixtureId, selectedCompetition, selectedHomeTeam, selectedAwayTeam, selectedSport, startsAt, onAssignMatch]);
+  }, [sameTeamSelected, selectedChannel, canAssign, selectedCanonicalFixtureId, selectedCompetition, selectedHomeTeam, selectedAwayTeam, selectedSport, startsAt, onAssignMatch]);
 
-  const handleApprove = useCallback(async (stream: Stream) => {
-    setStatus("Approving stream...");
+  const handleApprove = useCallback(async (publicationId: string) => {
+    setStatus("Approving publication...");
     try {
-      await onApprove(stream.id);
-      setStatus("Stream approved. Publication is now available.");
-    } catch {
-      setStatus("Approval was not confirmed. State was restored from the last valid value.");
+      await onApprove(publicationId);
+      setStatus("Publication approved. It is now ready to publish.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Publication approval failed. State was restored from the last valid value.");
     }
   }, [onApprove]);
 
-  const handlePublish = useCallback(async (stream: Stream) => {
-    setStatus("Publishing live match...");
+  const handlePublish = useCallback(async (publicationId: string) => {
+    setStatus("Publishing live feed...");
     try {
-      await onPublish(stream.id);
-      setStatus("Published to live feed.");
-    } catch {
-      setStatus("Publishing was not confirmed. Match remains in its last safe state.");
+      await onPublish(publicationId);
+      setStatus("Live publication published to the feed.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Publication publish failed. The publication remains in its last safe state.");
     }
   }, [onPublish]);
 
@@ -931,43 +949,12 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
 
       {!liveMode ? (
         <div style={{ display: "grid", gap: 12 }}>
-          <div className="priority-strip simplified-priority-strip content-type-strip">
-          {[
-            { key: "live", label: "Live TV", icon: "📺" },
-            { key: "movies", label: "Movies", icon: "🎬" },
-            { key: "series", label: "Series", icon: "📺" },
-            { key: "favorites", label: "Favorites", icon: "⭐" }
-          ].map((option) => {
-            const selected = selectedContentType === option.key;
-            return (
-              <button
-                key={option.key}
-                type="button"
-                className={`priority-card ${selected ? "live" : ""}`}
-                onClick={() => setSelectedContentType(option.key as ContentTypeOption)}
-                style={{
-                  textAlign: "left",
-                  cursor: "pointer",
-                  border: selected ? "1px solid #4ad7ff" : "1px solid #243649",
-                  background: selected ? "rgba(74, 215, 255, 0.12)" : "rgba(8, 16, 24, 0.85)",
-                  boxShadow: selected && option.key === "favorites" ? "0 0 0 1px rgba(74, 215, 255, 0.2) inset" : undefined
-                }}
-              >
-                <span style={{ fontSize: "1.1rem" }}>{option.icon}</span>
-                <strong>{option.label}</strong>
-                <span style={{ color: "#8fa1b3", fontSize: "0.8rem" }}>
-                  {option.key === "favorites"
-                    ? `${favoriteChannelIds.length} saved`
-                    : option.key === "live"
-                    ? `${providerDiagnostics?.contentTotals.live ?? 0} channels`
-                    : option.key === "movies"
-                    ? `${providerDiagnostics?.contentTotals.movies ?? 0} movies`
-                    : `${providerDiagnostics?.contentTotals.series ?? 0} series`}
-                </span>
-              </button>
-            );
-          })}
-          </div>
+          <IptvHeroCards
+            providerId={selectedProviderId}
+            selectedContentType={selectedContentType}
+            favoriteCount={favoriteChannelIds.length}
+            onSelectContentType={setSelectedContentType}
+          />
 
           <div className="console-panel" style={{ padding: 12 }}>
             <label style={{ display: "grid", gap: 6, color: "#8fa1b3" }}>
@@ -1006,7 +993,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
                   const sport = competition ? sports.find((s) => s.id === competition.sportId) : undefined;
 
                   return (
-                    <article key={liveMatch.stream.id} onClick={() => onOpenMatch?.(match?.id)} style={{ cursor: onOpenMatch ? "pointer" : "default" }}>
+                    <article key={liveMatch.publication.publicationId} onClick={() => onOpenMatch?.(match?.id)} style={{ cursor: onOpenMatch ? "pointer" : "default" }}>
                       <div className="live-match-main">
                         <div className="live-match-teams">
                           {homeTeam?.logoUrl ? <img src={resolveAssetUrl(homeTeam.logoUrl)} alt={homeTeam.name} className="match-logo" onError={(e) => { (e.currentTarget as HTMLImageElement).src = FALLBACK_LOGO; }} /> : <img src={FALLBACK_LOGO} alt="placeholder" className="match-logo" />}
@@ -1046,6 +1033,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
               <div className="preview-player-card">
                 <StreamPreviewPanel
                   channel={selectedChannel}
+                  providerType={selectedProvider?.type}
                   onHealthChange={onReportHealth}
                   onPreviewReady={onPreviewReady}
                   compact
@@ -1064,15 +1052,6 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
               <div className="preview-meta-card">
                 <div className="preview-meta-title">{previewChannelMetadata.title}</div>
                 <p>{previewChannelMetadata.description}</p>
-
-                {providerDiagnosticsError ? (
-                  <div className="preview-meta-section">
-                    <span className="preview-meta-label">Diagnostics</span>
-                    <ul>
-                      <li>{providerDiagnosticsError}</li>
-                    </ul>
-                  </div>
-                ) : null}
 
                 <div className="preview-meta-section">
                   <span className="preview-meta-label">Upcoming</span>
@@ -1206,8 +1185,8 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
             <section className="match-control-panel console-panel">
               <div className="panel-heading panel-heading-accent">
                 <div>
-                  <h3>Match Control</h3>
-                  <span>Assign the previewed stream to a live match</span>
+                  <h3>Publication Control</h3>
+                  <span>Bind the previewed source to a live match publication</span>
                 </div>
                 <span className="status-pill">{status}</span>
               </div>
@@ -1215,8 +1194,42 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
               <div className="match-control-grid">
                 <div className="match-control-column">
                   <label className="dropdown-label">
+                    <span>Sport</span>
+                    <select value={selectedSportId} onChange={(e) => {
+                      setSelectedSportId(e.target.value);
+                      setSelectedHostId("");
+                      setSelectedCompetitionId("");
+                      setSelectedHomeTeamId("");
+                      setSelectedAwayTeamId("");
+                      setSelectedCanonicalFixtureId("");
+                    }}>
+                      <option value="">-- Select sport --</option>
+                      {sports.map((sport) => <option key={sport.id} value={sport.id}>{sport.name}</option>)}
+                    </select>
+                  </label>
+
+                  <label className="dropdown-label">
+                    <span>Host</span>
+                    <select value={selectedHostId} onChange={(e) => {
+                      setSelectedHostId(e.target.value);
+                      setSelectedCompetitionId("");
+                      setSelectedHomeTeamId("");
+                      setSelectedAwayTeamId("");
+                      setSelectedCanonicalFixtureId("");
+                    }} disabled={!selectedSportId}>
+                      <option value="">-- Select host --</option>
+                      {filteredHosts.map((host) => <option key={host.id} value={host.id}>{host.name}</option>)}
+                    </select>
+                  </label>
+
+                  <label className="dropdown-label">
                     <span>Competition</span>
-                    <select value={selectedCompetitionId} onChange={(e) => setSelectedCompetitionId(e.target.value)}>
+                    <select value={selectedCompetitionId} onChange={(e) => {
+                      setSelectedCompetitionId(e.target.value);
+                      setSelectedHomeTeamId("");
+                      setSelectedAwayTeamId("");
+                      setSelectedCanonicalFixtureId("");
+                    }} disabled={!selectedHostId}>
                       <option value="">-- Select competition --</option>
                       {filteredCompetitions.map((competition) => (
                         <option key={competition.id} value={competition.id}>
@@ -1233,7 +1246,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
                     <span>Canonical Season Fixture (optional)</span>
                     <select value={selectedCanonicalFixtureId} onChange={(e) => setSelectedCanonicalFixtureId(e.target.value)} disabled={!selectedCompetitionId}>
                       <option value="">No canonical fixture</option>
-                      {canonicalFixtures.map((fixture) => (
+                      {validCanonicalFixtures.map((fixture) => (
                         <option key={fixture.id} value={fixture.id}>
                           {fixture.homeTeam?.name} vs {fixture.awayTeam?.name} · {new Date(fixture.startsAt).toLocaleString()} · {fixture.season?.name ?? "Season unavailable"} · {fixture.status}
                         </option>
@@ -1245,7 +1258,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
 
                   <label className="dropdown-label">
                     <span>Home Team</span>
-                    <select value={selectedHomeTeamId} onChange={(e) => setSelectedHomeTeamId(e.target.value)}>
+                    <select value={selectedHomeTeamId} onChange={(e) => setSelectedHomeTeamId(e.target.value)} disabled={!selectedCompetitionId}>
                       <option value="">-- Select home team --</option>
                       {filteredTeams.map((team) => (
                         <option key={team.id} value={team.id}>
@@ -1262,7 +1275,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
                 <div className="match-control-column">
                   <label className="dropdown-label">
                     <span>Away Team</span>
-                    <select value={selectedAwayTeamId} onChange={(e) => setSelectedAwayTeamId(e.target.value)}>
+                    <select value={selectedAwayTeamId} onChange={(e) => setSelectedAwayTeamId(e.target.value)} disabled={!selectedCompetitionId}>
                       <option value="">-- Select away team --</option>
                       {filteredTeams.map((team) => (
                         <option key={team.id} value={team.id}>
@@ -1273,18 +1286,6 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
                     {selectedSport ? (
                       <small>{filteredTeams.length} team{filteredTeams.length === 1 ? "" : "s"} for {selectedSport.name}</small>
                     ) : null}
-                  </label>
-
-                  <label className="dropdown-label">
-                    <span>Sport</span>
-                    <select value={selectedSportId} onChange={(e) => setSelectedSportId(e.target.value)}>
-                      <option value="">-- Select sport --</option>
-                      {sports.map((sport) => (
-                        <option key={sport.id} value={sport.id}>
-                          {sport.name}
-                        </option>
-                      ))}
-                    </select>
                   </label>
 
                   <label className="kickoff-label">
@@ -1299,37 +1300,39 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
               </div>
 
               <div className="blocked-reason">
-                {!selectedChannel && "Blocked: select an IPTV channel."}
-                {selectedChannel && !previewConfirmed && "Blocked: preview must be confirmed before assignment."}
+                {!selectedChannel && "Blocked: select an IPTV channel source."}
+                {selectedChannel && !previewConfirmed && "Blocked: preview must be confirmed before creating the publication draft."}
+                {!selectedHostId && "Select a host."}
                 {!selectedCompetition && "Select a competition."}
                 {!selectedSportId && "Select a sport."}
                 {!selectedHomeTeam && "Select a home team."}
                 {!selectedAwayTeam && "Select an away team."}
-                {selectedChannel && previewConfirmed && !matchDetailsComplete && "Complete match details before assignment."}
+                {sameTeamSelected && "Home and away teams must be different."}
+                {selectedChannel && previewConfirmed && !matchDetailsComplete && "Complete match details before creating the publication draft."}
                 {backendOffline && "Waiting for backend reconnection."}
-                {assignment?.stream.healthStatus === "degraded" && "Signal unstable. Keep previewing before publish."}
-                {assignment?.stream.healthStatus === "failed" && "Stream failed. Choose another source."}
-                {!backendOffline && assignment && !canApprove && !canPublish && `Current state: ${assignment.match.status} / ${assignment.stream.status}.`}
+                {assignment?.publication.availability === "degraded" && "Signal unstable. Keep previewing before publishing."}
+                {assignment?.publication.availability === "offline" && "Publication source failed. Choose another source."}
+                {!backendOffline && assignment && !canApprove && !canPublish && `Current publication state: ${assignment.publication.publicationStatus} / ${assignment.publication.availability}.`}
               </div>
 
               <div className="action-stack">
                 <button type="button" disabled={!canAssign || backendOffline || streamFailed} onClick={handleAssign}>
-                  Assign Previewed Stream
+                  Create Publication Draft
                 </button>
                 <button
                   type="button"
                   disabled={!assignment || !canApprove || backendOffline || streamFailed}
-                  onClick={() => assignment && void handleApprove(assignment.stream)}
+                  onClick={() => assignment && void handleApprove(assignment.publication.publicationId)}
                 >
-                  Approve Stream
+                  Approve Publication
                 </button>
                 <button
                   className="publish-button"
                   type="button"
                   disabled={!assignment || !canPublish || backendOffline || streamFailed}
-                  onClick={() => assignment && void handlePublish(assignment.stream)}
+                  onClick={() => assignment && void handlePublish(assignment.publication.publicationId)}
                 >
-                  Publish Live
+                  Publish Live Feed
                 </button>
               </div>
             </section>
@@ -1338,7 +1341,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
               <div className="panel-heading panel-heading-accent">
                 <div>
                   <h3>Active Work Item</h3>
-                  <span>Current broadcast assignment summary</span>
+                  <span>Current publication summary</span>
                 </div>
                 <span className="status-pill">{unifiedStatus.label}</span>
               </div>

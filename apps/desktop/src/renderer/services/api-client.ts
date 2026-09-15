@@ -25,6 +25,8 @@ import type {
   ProviderChannelDiagnostics,
   ProviderConnectionTest,
   PublishedLiveMatch,
+  PublicationArtifact,
+  PublicationArtifactSubmission,
   Sport,
   Stream,
   Team,
@@ -865,6 +867,9 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
+  listPublishedLiveMatches() {
+    return request<PublishedLiveMatch[]>("/live-matches/current");
+  },
   getActiveStream(matchId: string) {
     return request<any>(`/matches/${encodeURIComponent(matchId)}/active-stream`);
   },
@@ -907,6 +912,53 @@ export const apiClient = {
       }
     });
   },
+  bindPublicationArtifact(publicationId: string, matchId: string, accessToken: string) {
+    return request<PublicationArtifact>(`/publication-artifacts/${publicationId}/bind`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${accessToken}`
+      },
+      body: JSON.stringify({ matchId })
+    });
+  },
+  setPublicationDelivery(publicationId: string, input: { deliveryReference: string; playbackUrl: string }, accessToken: string) {
+    return request<PublicationArtifact>(`/publication-artifacts/${publicationId}/delivery`, {
+      method: "POST", headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input)
+    });
+  },
+  approvePublicationArtifact(publicationId: string, accessToken: string) {
+    return request<PublicationArtifact>(`/publication-artifacts/${publicationId}/approve`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${accessToken}`
+      }
+    });
+  },
+  publishPublicationArtifact(publicationId: string, accessToken: string) {
+    return request<PublicationArtifact>(`/publication-artifacts/${publicationId}/publish`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${accessToken}`
+      }
+    });
+  },
+  revokePublicationArtifact(publicationId: string, accessToken: string) {
+    return request<PublicationArtifact>(`/publication-artifacts/${publicationId}/revoke`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${accessToken}`
+      }
+    });
+  },
+  updatePublicationAvailability(publicationId: string, availability: PublicationArtifact["availability"], accessToken?: string) {
+    return request<PublicationArtifact>(`/publication-artifacts/${publicationId}/availability`, {
+      method: "POST",
+      ...(accessToken ? {
+        headers: { authorization: `Bearer ${accessToken}` }
+      } : {}),
+      body: JSON.stringify({ availability })
+    });
+  },
   reportStreamHealth(streamId: string, input: { status: Stream["healthStatus"]; reason?: string }) {
     return request<Stream>(`/streams/${streamId}/health`, {
       method: "POST",
@@ -915,6 +967,33 @@ export const apiClient = {
   },
   listLiveMatches() {
     return request<PublishedLiveMatch[]>("/live-matches/current");
+  },
+  submitPublicationArtifact(input: PublicationArtifactSubmission) {
+    return request<PublicationArtifact>("/publication-artifacts", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  listPublishedPublicationFeed() {
+    return request<Array<{
+      publication: PublicationArtifact;
+      match: {
+        id: string;
+        competitionId?: string;
+        seasonId?: string | null;
+        homeTeamId?: string;
+        awayTeamId?: string;
+        startsAt?: string;
+        status?: string;
+        createdAt?: string;
+        updatedAt?: string;
+        venueName?: string | null;
+        homeTeamName?: string | null;
+        awayTeamName?: string | null;
+        competitionName?: string | null;
+        sportName?: string | null;
+      };
+    }>>("/publication-artifacts/published");
   },
   async getMobileFeatures() {
     let response: Response;

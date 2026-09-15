@@ -21,8 +21,7 @@ clubsRouter.get("/:clubId", (request, response) => {
   const fixtures = listCanonicalFixturesForTeam(clubId);
   const news = new NewsRepository().listArticles({ status: "published", teamId: clubId });
   const live = fixtures.filter((fixture: any) => fixture?.status === "live");
-  const streams = fixtures.flatMap((fixture: any) => fixture?.streams ?? []);
-  response.json({ data: { club, competitions: club.competitions, seasons: club.seasons, fixtures, results: fixtures.filter((fixture: any) => ["ended", "completed"].includes(fixture?.status)), news, live, streams } });
+  response.json({ data: { club, competitions: club.competitions, seasons: club.seasons, fixtures, results: fixtures.filter((fixture: any) => ["ended", "completed"].includes(fixture?.status)), news, live } });
 });
 
 clubsRouter.post("/", protectedRoute, (request, response) => {

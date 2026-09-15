@@ -34,9 +34,7 @@ export const cascadeTargets: Record<EntityType, string[]> = {
     "host_competition_links",
     "sport_competition_links",
     "scheduling_matches",
-    "match_streams",
-    "matches",
-    "streams"
+    "matches"
   ],
   team: [
     "competition_teams",
@@ -45,15 +43,13 @@ export const cascadeTargets: Record<EntityType, string[]> = {
     "competition_club_links",
     "competition_national_team_links",
     "scheduling_matches",
-    "match_streams",
-    "matches",
-    "streams"
+    "matches"
   ]
 };
 
 export const orphanTargets: Record<EntityType, string[]> = {
   sport: ["competitions", "teams", "scheduling_matches"],
   country: ["competitions", "teams", "scheduling_matches"],
-  competition: ["competition_teams", "scheduling_matches", "match_streams", "matches", "streams"],
-  team: ["competition_teams", "scheduling_matches", "match_streams", "matches", "streams"]
+  competition: ["competition_teams", "scheduling_matches", "matches"],
+  team: ["competition_teams", "scheduling_matches", "matches"]
 };

@@ -17,7 +17,7 @@ const mobile = await import("./mobile-read-model-service.js");
 function seed() {
   const db = getDatabase();
   const now = new Date().toISOString();
-  for (const table of ["streams", "news_article_categories", "news_articles", "match_streams", "scheduling_matches", "matches", "competition_season_teams", "seasons", "competitions", "teams", "providers", "channels", "countries", "sports"]) {
+  for (const table of ["publication_delivery", "publication_artifacts", "news_article_categories", "news_articles", "scheduling_matches", "matches", "competition_season_teams", "seasons", "competitions", "teams", "countries", "sports"]) {
     db.prepare(`DELETE FROM ${table}`).run();
   }
   db.prepare("INSERT INTO sports (id, name, slug, status, created_at, updated_at) VALUES (?, ?, ?, 'active', ?, ?)").run("sport-football", "Football", "football", now, now);
@@ -31,11 +31,11 @@ function seed() {
   db.prepare("UPDATE teams SET host_id = ?, country_id = NULL WHERE id = ?").run("host-germany", "team-bayern");
   db.prepare("INSERT INTO competition_season_teams (id, competition_id, season_id, team_id, membership_status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)").run("membership-bayern", "competition-bundesliga", "season-2026", "team-bayern", now, now);
   db.prepare("INSERT INTO competition_season_teams (id, competition_id, season_id, team_id, membership_status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)").run("membership-dortmund", "competition-bundesliga", "season-2026", "team-dortmund", now, now);
-  db.prepare("INSERT INTO providers (id, name, base_url, type, auth_type, status, created_at, updated_at) VALUES (?, ?, ?, 'manual', 'none', 'active', ?, ?)").run("provider-1", "Public Provider", "https://provider.example", now, now);
-  db.prepare("INSERT INTO channels (id, provider_id, name, url, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)").run("channel-1", "provider-1", "Sports HD", "https://stream.example/live.m3u8", now, now);
   const fixture = createCanonicalFixture({ competitionId: "competition-bundesliga", seasonId: "season-2026", homeTeamId: "team-bayern", awayTeamId: "team-dortmund", startsAt: "2099-08-20T15:00:00.000Z", venueName: "Arena" });
   assert.ok(fixture);
-  db.prepare("INSERT INTO streams (id, match_id, channel_id, protocol, status, approval_status, health_status, failure_count, created_at, updated_at) VALUES (?, ?, ?, 'hls', 'active', 'active', 'active', 0, ?, ?)").run("stream-1", fixture.id, "channel-1", now, now);
+  const publication = db.prepare("INSERT INTO publication_artifacts (publication_id, match_id, schema_version, source_reference, capability, publication_status, availability, created_at, updated_at, published_at) VALUES (?, ?, 1, ?, 'live', 'published', 'ready', ?, ?, ?)");
+  publication.run("publication-1", fixture.id, "source-local-1", now, now, now);
+  db.prepare("INSERT INTO publication_delivery (publication_id, delivery_reference, playback_url, updated_at) VALUES (?, ?, ?, ?)").run("publication-1", "delivery-1", "https://media.example/live/match.m3u8", now);
   const article = new NewsRepository().createArticle({ title: "Important Bundesliga story", status: "published" });
   const repository = new NewsRepository();
   const suggestions = [
@@ -49,7 +49,7 @@ function seed() {
   return { fixture, article };
 }
 
-test("mobile read model exposes stable club, fixture, News, season, and stream relationships", () => {
+test("mobile read model exposes publication delivery without IPTV stream relationships", () => {
   const { fixture, article } = seed();
   const clubs = mobile.mobileClubs({ sportId: "sport-football" });
   assert.equal(clubs.length, 3);
@@ -63,7 +63,9 @@ test("mobile read model exposes stable club, fixture, News, season, and stream r
   assert.equal(mobile.mobileClubNews("team-bayern").filter((item) => item.id === article.id).length, 1);
   assert.equal(mobile.mobileClubNews("team-dortmund").filter((item) => item.id === article.id).length, 1);
   assert.equal(mobile.mobileFixture(fixture.id)?.news.filter((item) => item.id === article.id).length, 1);
-  assert.equal(mobile.mobileFixture(fixture.id)?.streams[0]?.providerId, "provider-1");
+  assert.equal(mobile.mobileFixture(fixture.id)?.playbackUrl, "https://media.example/live/match.m3u8");
+  db.prepare("DELETE FROM publication_delivery WHERE publication_id = ?").run("publication-1");
+  assert.equal(mobile.mobileFixture(fixture.id)?.playbackUrl, null);
   assert.equal(mobile.mobileCompetitionFixtures("competition-bundesliga").length, 1);
   assert.equal(mobile.mobileSeasonFixtures("season-2026")?.fixtures.length, 1);
   assert.equal(mobile.mobileSeasonTeams("season-2026")?.teams.length, 2);

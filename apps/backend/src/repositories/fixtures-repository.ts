@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 import { getDatabase } from "../db/connection.js";
-import { listStreams } from "./streams-repository.js";
 
 export interface CanonicalFixtureInput {
   competitionId: string;
@@ -97,7 +96,6 @@ export function getCanonicalFixtureById(fixtureId: string) {
   `).get(fixtureId) as any;
 
   if (!row) return undefined;
-  const streams = listStreams({ matchId: fixtureId });
   return {
     id: row.id,
     competitionId: row.competition_id,
@@ -116,8 +114,7 @@ export function getCanonicalFixtureById(fixtureId: string) {
     competition: { id: row.competition_id, name: row.competition_name, slug: row.competition_slug, logoUrl: row.competition_logo_url ?? null },
     season: row.season_id ? { id: row.season_id, name: row.season_name } : null,
     homeTeam: { id: row.home_team_id, name: row.home_team_name, shortName: row.home_team_short_name, logoUrl: row.home_team_logo_url, ...(row.home_team_host_id ? { hostId: row.home_team_host_id } : {}) },
-    awayTeam: { id: row.away_team_id, name: row.away_team_name, shortName: row.away_team_short_name, logoUrl: row.away_team_logo_url, ...(row.away_team_host_id ? { hostId: row.away_team_host_id } : {}) },
-    streams
+    awayTeam: { id: row.away_team_id, name: row.away_team_name, shortName: row.away_team_short_name, logoUrl: row.away_team_logo_url, ...(row.away_team_host_id ? { hostId: row.away_team_host_id } : {}) }
   };
 }
 
@@ -144,9 +141,6 @@ export function listCanonicalFixtures(filters?: { sportId?: string; sportIds?: s
 export function deleteCanonicalFixture(fixtureId: string): boolean {
   const database = getDatabase();
   if (!database.prepare("SELECT id FROM matches WHERE id = ?").get(fixtureId)) return false;
-  const streamUsage = database.prepare("SELECT COUNT(*) AS count FROM streams WHERE match_id = ?").get(fixtureId) as { count: number };
-  if (streamUsage.count > 0) throw Object.assign(new Error("fixture_in_use"), { count: streamUsage.count });
-
   database.exec("BEGIN TRANSACTION;");
   try {
     const result = database.prepare("DELETE FROM matches WHERE id = ?").run(fixtureId);

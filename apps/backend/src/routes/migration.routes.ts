@@ -71,7 +71,6 @@ function validateAdminAuth(req: Request, res: Response, next: Function) {
 // - regions (no deps)
 // - sports (no deps)
 // - countries (FK to regions)
-// - providers (no deps)
 // - competitions (FK to sports, countries, regions)
 // - seasons (FK to competitions)
 // - teams (FK to sports, countries)
@@ -82,7 +81,6 @@ const IMPORT_ORDER = [
   'countries',
   'hosts',
   'sport_countries',
-  'providers',
   'competitions',
   'seasons',
   'teams',
@@ -90,9 +88,6 @@ const IMPORT_ORDER = [
   'matches',
   'scheduling_matches',
   'scheduling_match_links',
-  'match_streams',
-  'streams',
-  'channels',
   'operator_users',
   'operator_settings',
   'auth_sessions',
@@ -398,8 +393,6 @@ router.post('/import/:tableName', (req: Request, res: Response) => {
     'countries',
     'hosts',
     'sport_countries',
-    'providers',
-    'channels',
     'competitions',
     'seasons',
     'teams',
@@ -407,8 +400,6 @@ router.post('/import/:tableName', (req: Request, res: Response) => {
     'matches',
     'scheduling_matches',
     'scheduling_match_links',
-    'match_streams',
-    'streams',
     'operator_users',
     'operator_settings',
     'auth_sessions',
@@ -480,9 +471,9 @@ router.get('/count/:tableName', (req: Request, res: Response) => {
 
   // Validate table name
   const validTables = [
-    'sports', 'regions', 'countries', 'hosts', 'sport_countries', 'providers',
-    'channels', 'competitions', 'seasons', 'teams', 'competition_teams',
-    'matches', 'scheduling_matches', 'scheduling_match_links', 'match_streams', 'streams',
+    'sports', 'regions', 'countries', 'hosts', 'sport_countries',
+    'competitions', 'seasons', 'teams', 'competition_teams',
+    'matches', 'scheduling_matches', 'scheduling_match_links',
     'operator_users', 'operator_settings', 'auth_sessions',
     'entity_catalog_mapping', 'sport_host_links', 'sport_competition_links',
     'sport_club_links', 'sport_national_team_links', 'competition_club_links',
@@ -525,13 +516,10 @@ router.get('/status', (req: Request, res: Response) => {
 
     const tables = [
       'sports',
-      'providers',
-      'channels',
       'competitions',
       'seasons',
       'teams',
       'matches',
-      'streams',
       'operator_users',
     ];
 
@@ -549,8 +537,6 @@ router.get('/status', (req: Request, res: Response) => {
 
     const critical = {
       sports: (counts.sports ?? 0) > 0,
-      providers: (counts.providers ?? 0) > 0,
-      channels: (counts.channels ?? 0) > 0,
       matches: (counts.matches ?? 0) > 0,
     };
 

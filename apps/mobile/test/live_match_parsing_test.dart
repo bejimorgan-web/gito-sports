@@ -66,4 +66,19 @@ void main() {
     expect(match.playbackUrl, 'https://stream.example/live2.m3u8');
     expect(match.hasPlayableStream, isTrue);
   });
+
+  test('LiveMatch.fromJson does not use legacy URL fields when playbackUrl is absent', () {
+    final match = LiveMatch.fromJson({
+      'match': {'id': 'match-3', 'status': 'published'},
+      'stream': {
+        'id': 'stream-3',
+        'status': 'active',
+        'healthStatus': 'active',
+        'url': 'https://legacy.example/secret.m3u8',
+      },
+      'channel': {'url': 'https://legacy.example/channel.m3u8'},
+    });
+
+    expect(match.playbackUrl, isEmpty);
+  });
 }

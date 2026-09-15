@@ -223,14 +223,19 @@ mobileRouter.get("/seasons/:seasonId/teams", (request, response) => {
 });
 
 mobileRouter.get("/matches/live", (request, response) => {
-  const matches = MatchService.listPublishedLiveMatches().map((match) => ({
-    ...match,
-    homeTeamLogoUrl: normalizeUploadsUrl(request, match.homeTeamLogoUrl),
-    awayTeamLogoUrl: normalizeUploadsUrl(request, match.awayTeamLogoUrl),
-    competitionLogoUrl: normalizeUploadsUrl(request, match.competitionLogoUrl),
-    sportLogoUrl: normalizeUploadsUrl(request, match.sportLogoUrl),
-    countryLogoUrl: normalizeUploadsUrl(request, match.countryLogoUrl),
-  }));
+  const matches = listPublishedPublicationFeed()
+    .filter((entry: any) => typeof entry.playbackUrl === "string" && entry.playbackUrl.length > 0)
+    .map((entry: any) => ({
+      match: entry.match,
+      publication: entry.publication,
+      playbackUrl: entry.playbackUrl,
+      deliveryReference: entry.deliveryReference,
+      stream: { id: entry.publication.publicationId, status: "active", healthStatus: entry.publication.availability === "degraded" ? "degraded" : "active" },
+      homeTeamName: entry.match.homeTeamName,
+      awayTeamName: entry.match.awayTeamName,
+      competitionName: entry.match.competitionName,
+      sportName: entry.match.sportName
+    }));
 
   response.json({
     data: matches

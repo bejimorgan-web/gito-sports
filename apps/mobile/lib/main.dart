@@ -742,7 +742,8 @@ class LiveMatch {
   bool get hasPlayableStream =>
       matchStatus == 'published' &&
       streamStatus == 'active' &&
-      streamHealth != 'failed';
+      streamHealth != 'failed' &&
+      playbackUrl.isNotEmpty;
 
   ViewerMatchState viewerState(FeedConnectionState connectionState) {
     if (connectionState == FeedConnectionState.offline) {
@@ -769,15 +770,12 @@ class LiveMatch {
   factory LiveMatch.fromJson(Map<String, Object?> json) {
     final match = json['match'] as Map<String, Object?>? ?? {};
     final stream = json['stream'] as Map<String, Object?>? ?? {};
-    final channel = json['channel'] as Map<String, Object?>?;
     final fallbackId = (stream['id'] ?? match['id'] ?? 'match').toString();
 
     final homeTeamName = json['homeTeamName'] ?? match['homeTeamName'];
     final awayTeamName = json['awayTeamName'] ?? match['awayTeamName'];
     final competitionName = json['competitionName'] ?? match['competitionName'];
-    final playbackUrl = _normalizeMediaUrl(
-      json['playbackUrl'] ?? stream['url'] ?? match['url'] ?? channel?['url'],
-    );
+    final playbackUrl = _normalizeMediaUrl(json['playbackUrl']);
     final startsAtSource = match['startsAt'] ?? json['startsAt'];
     final matchStatusSource =
         match['status'] ?? json['status'] ?? json['matchStatus'];
@@ -1530,6 +1528,7 @@ class LiveScoresScreen extends StatefulWidget {
 class _LiveScoresScreenState extends State<LiveScoresScreen> {
   final _mobileApi = const MobileApiService();
   final _fixtures = <MobileFixture>[];
+  final _publishedPublications = <MobilePublishedPublication>[];
   List<MobileSport> _sports = const <MobileSport>[];
   String? _selectedSportId;
   DateTime _selectedDate = DateTime.now();
@@ -1553,6 +1552,7 @@ class _LiveScoresScreenState extends State<LiveScoresScreen> {
   }
 
   Future<void> _refreshScores() async {
+    debugPrint('[MobileDebug] _refreshScores START');
     try {
       final sports = await _mobileApi.getSports();
       final selectedSportId =
@@ -1560,30 +1560,60 @@ class _LiveScoresScreenState extends State<LiveScoresScreen> {
       final following = await resolveMobileFollowingIds(_mobileApi);
       final day = DateTime.utc(
           _selectedDate.year, _selectedDate.month, _selectedDate.day);
-      final nextFixtures = await _mobileApi.getFixtures(
-        mode: _following ? 'following' : 'all',
-        sportId: selectedSportId,
-        sportIds: _following ? following.sports : const <String>[],
-        teamIds: _following ? following.teams : const <String>[],
-        competitionIds: _following ? following.competitions : const <String>[],
-        from: day.toIso8601String(),
-        to: day.add(const Duration(days: 1)).toIso8601String(),
-      );
+      final fixturesFuture = () async {
+        debugPrint('[MobileDebug] getFixtures START');
+        final fixtures = await _mobileApi.getFixtures(
+          mode: _following ? 'following' : 'all',
+          sportId: selectedSportId,
+          sportIds: _following ? following.sports : const <String>[],
+          teamIds: _following ? following.teams : const <String>[],
+          competitionIds:
+              _following ? following.competitions : const <String>[],
+          from: day.toIso8601String(),
+          to: day.add(const Duration(days: 1)).toIso8601String(),
+        );
+        debugPrint(
+            '[MobileDebug] getFixtures SUCCESS count=${fixtures.length}');
+        return fixtures;
+      }();
+      final publicationsFuture = () async {
+        debugPrint('[MobileDebug] getPublishedPublications START');
+        final publications = await _mobileApi.getPublishedPublications();
+        debugPrint(
+            '[MobileDebug] getPublishedPublications SUCCESS count=${publications.length}');
+        return publications;
+      }();
+      final results = await Future.wait([
+        fixturesFuture,
+        publicationsFuture,
+      ]);
+      debugPrint('[MobileDebug] Future.wait SUCCESS');
+      final nextFixtures = results[0] as List<MobileFixture>;
+      final publishedPublications =
+          results[1] as List<MobilePublishedPublication>;
 
       if (!mounted) {
         return;
       }
 
       setState(() {
+        debugPrint(
+            '[MobileDebug] updating published state count=${publishedPublications.length}');
         _fixtures
           ..clear()
           ..addAll(nextFixtures);
+        _publishedPublications
+          ..clear()
+          ..addAll(publishedPublications);
         _sports = sports;
         _selectedSportId = selectedSportId;
         _connectionState = FeedConnectionState.online;
         _firstLoad = false;
+        debugPrint(
+            '[MobileDebug] published state updated count=${_publishedPublications.length}');
       });
-    } catch (_) {
+    } catch (error) {
+      debugPrint('[MobileDebug] _refreshScores ERROR $error');
       if (!mounted) {
         return;
       }
@@ -1599,6 +1629,8 @@ class _LiveScoresScreenState extends State<LiveScoresScreen> {
 
   @override
   Widget build(BuildContext context) {
+    debugPrint(
+        '[MobileDebug] Published Live render count=${_publishedPublications.length}');
     return WatermarkedPage(
       logoAsset: appLogoAsset,
       child: SafeArea(
@@ -1624,6 +1656,27 @@ class _LiveScoresScreenState extends State<LiveScoresScreen> {
                   ),
                 ),
               ),
+              if (_publishedPublications.isNotEmpty) ...[
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 8, 18, 4),
+                    child: Text('Published Live',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleLarge
+                            ?.copyWith(fontWeight: FontWeight.w900)),
+                  ),
+                ),
+                SliverList.separated(
+                  itemCount: _publishedPublications.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) => Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                    child: _PublishedPublicationCard(
+                        publication: _publishedPublications[index]),
+                  ),
+                ),
+              ],
               SliverToBoxAdapter(
                 child: SingleChildScrollView(
                   padding:
@@ -1799,6 +1852,38 @@ class _CanonicalFixtureCard extends StatelessWidget {
               ])),
               _FixtureLogo(url: fixture.awayClub.logoUrl),
             ]),
+          ),
+        ),
+      );
+}
+
+class _PublishedPublicationCard extends StatelessWidget {
+  const _PublishedPublicationCard({required this.publication});
+  final MobilePublishedPublication publication;
+
+  @override
+  Widget build(BuildContext context) => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(publication.match.competitionName ?? 'Published match',
+                  style: Theme.of(context).textTheme.labelLarge),
+              const SizedBox(height: 6),
+              Text(
+                  '${publication.match.homeTeamName ?? publication.match.homeTeamId} vs ${publication.match.awayTeamName ?? publication.match.awayTeamId}',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w800)),
+              const SizedBox(height: 6),
+              Text(publication.match.startsAt?.toLocal().toString() ??
+                  'Kickoff unavailable'),
+              Text(
+                  '${publication.publicationStatus} · ${publication.availability}',
+                  style: Theme.of(context).textTheme.labelSmall),
+            ],
           ),
         ),
       );
@@ -2145,7 +2230,8 @@ class _SportsScreenState extends State<SportsScreen> {
           future: _sports,
           emptyText: 'No configured sports available.',
           builder: (context, sports) => RefreshIndicator(
-            onRefresh: () async => setState(() => _sports = widget.api.getSports()),
+            onRefresh: () async =>
+                setState(() => _sports = widget.api.getSports()),
             child: ListView.separated(
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(18),
@@ -2155,10 +2241,13 @@ class _SportsScreenState extends State<SportsScreen> {
                 final sport = sports[index];
                 return Card(
                   child: ListTile(
-                    leading: _CatalogLogo(url: sport.logoUrl, label: sport.name),
+                    leading:
+                        _CatalogLogo(url: sport.logoUrl, label: sport.name),
                     title: Text(sport.name),
-                    onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                      builder: (_) => SportHostsScreen(sport: sport, api: widget.api),
+                    onTap: () =>
+                        Navigator.of(context).push(MaterialPageRoute<void>(
+                      builder: (_) =>
+                          SportHostsScreen(sport: sport, api: widget.api),
                     )),
                   ),
                 );
@@ -2190,8 +2279,10 @@ class SportHostsScreen extends StatelessWidget {
                 child: ListTile(
                   leading: _CatalogLogo(url: host.logoUrl, label: host.name),
                   title: Text(host.name),
-                  onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                    builder: (_) => HostCompetitionsScreen(sport: sport, host: host, api: api),
+                  onTap: () =>
+                      Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => HostCompetitionsScreen(
+                        sport: sport, host: host, api: api),
                   )),
                 ),
               );
@@ -2202,7 +2293,8 @@ class SportHostsScreen extends StatelessWidget {
 }
 
 class HostCompetitionsScreen extends StatelessWidget {
-  const HostCompetitionsScreen({required this.sport, required this.host, required this.api, super.key});
+  const HostCompetitionsScreen(
+      {required this.sport, required this.host, required this.api, super.key});
   final MobileSport sport;
   final MobileHost host;
   final MobileApiService api;
@@ -2221,10 +2313,16 @@ class HostCompetitionsScreen extends StatelessWidget {
               final competition = competitions[index];
               return Card(
                 child: ListTile(
-                  leading: _CatalogLogo(url: competition.logoUrl, label: competition.name),
+                  leading: _CatalogLogo(
+                      url: competition.logoUrl, label: competition.name),
                   title: Text(competition.name),
-                  onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                    builder: (_) => CompetitionFixturesScreen(sport: sport, host: host, competition: competition, api: api),
+                  onTap: () =>
+                      Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => CompetitionFixturesScreen(
+                        sport: sport,
+                        host: host,
+                        competition: competition,
+                        api: api),
                   )),
                 ),
               );
@@ -2235,7 +2333,12 @@ class HostCompetitionsScreen extends StatelessWidget {
 }
 
 class CompetitionFixturesScreen extends StatelessWidget {
-  const CompetitionFixturesScreen({required this.sport, required this.host, required this.competition, required this.api, super.key});
+  const CompetitionFixturesScreen(
+      {required this.sport,
+      required this.host,
+      required this.competition,
+      required this.api,
+      super.key});
   final MobileSport sport;
   final MobileHost host;
   final MobileCompetition competition;
@@ -2255,11 +2358,14 @@ class CompetitionFixturesScreen extends StatelessWidget {
               final fixture = fixtures[index];
               return Card(
                 child: ListTile(
-                  title: Text('${fixture.homeClub.name} vs ${fixture.awayClub.name}'),
+                  title: Text(
+                      '${fixture.homeClub.name} vs ${fixture.awayClub.name}'),
                   subtitle: Text(fixture.competition.name),
                   trailing: Text(fixture.scoreLabel),
-                  onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                    builder: (_) => FixtureDetailScreen(fixtureId: fixture.id, api: api),
+                  onTap: () =>
+                      Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) =>
+                        FixtureDetailScreen(fixtureId: fixture.id, api: api),
                   )),
                 ),
               );
@@ -2620,9 +2726,15 @@ class LiveTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // The server returns only fully published, active stream assignments. Keep
+    // the imminent fixtures visible as well, rather than making a valid stream
+    // disappear during the 30 minutes immediately before kickoff.
     final liveMatches = matches
-        .where((match) =>
-            match.viewerState(connectionState) == ViewerMatchState.live)
+        .where((match) {
+          final state = match.viewerState(connectionState);
+          return state == ViewerMatchState.live ||
+              state == ViewerMatchState.startingSoon;
+        })
         .toList(growable: false);
     final sports = <String, List<LiveMatch>>{};
 
@@ -2695,7 +2807,7 @@ class LiveTab extends StatelessWidget {
                               padding: const EdgeInsets.fromLTRB(18, 0, 18, 0),
                               child: LiveMatchCard(
                                 match: match,
-                                state: ViewerMatchState.live,
+                                state: match.viewerState(connectionState),
                               ),
                             );
                           },

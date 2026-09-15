@@ -7,7 +7,6 @@ import { DatabaseSync, allowSqliteInstantiation } from "./sqlite.js";
 import { env, runtimeConfig } from "../config/env.js";
 import { listBackups } from "../services/database-backup-service.js";
 import { readInitialSchema, readNewsSchema } from "./schema.js";
-import { rehydrateSyncStateOnStartup } from "../system/startup.js";
 import { startBackupService, stopBackupService } from "../services/database-backup-service.js";
 import { scheduleBackgroundJob } from "../background/backgroundJobRunner.js";
 import { stopBackgroundJobs } from "../background/backgroundJobRunner.js";
@@ -74,20 +73,14 @@ function validateDatabaseStartup(database: DatabaseSync, databasePath: string) {
   
   // Fetch all required metrics
   const sportCount = getCount(database, "sports");
-  const providerCount = getCount(database, "providers");
-  const channelCount = getCount(database, "channels");
   const matchCount = getCount(database, "matches");
-  const streamCount = getCount(database, "streams");
   
   console.log(`[startup] SPORT_COUNT=${sportCount}`);
-  console.log(`[startup] PROVIDER_COUNT=${providerCount}`);
-  console.log(`[startup] CHANNEL_COUNT=${channelCount}`);
   console.log(`[startup] MATCH_COUNT=${matchCount}`);
-  console.log(`[startup] STREAM_COUNT=${streamCount}`);
   
   // Legacy detailed log
   console.log(
-    `[startup] table row counts: matches=${matchCount}, streams=${streamCount}, scheduling_matches=${getCount(database, "scheduling_matches")}, match_streams=${getCount(database, "match_streams")}`
+    `[startup] table row counts: matches=${matchCount}, scheduling_matches=${getCount(database, "scheduling_matches")}`
   );
   console.log(`[startup] ===================================================`);
 }
@@ -113,9 +106,6 @@ function isLikelyGiToDatabase(databasePath: string): boolean {
         "competitions",
         "seasons",
         "matches",
-        "streams",
-        "providers",
-        "channels",
         "operator_users",
         "news_articles",
         "news_article_categories",
@@ -284,36 +274,6 @@ export function getDatabase(): DatabaseSync {
     throw err;
   }
 
-  // Ensure Phase 1 IPTV tables exist even on existing database files.
-  try {
-    if (hasTable(database, "channels")) {
-      const channelColumns = database.prepare("PRAGMA table_info(channels)").all() as Array<{ name: string }>;
-      if (!channelColumns.some((column) => column.name === "category_id")) {
-        database.exec("ALTER TABLE channels ADD COLUMN category_id TEXT;");
-        console.log("[startup] added channels.category_id for provider catalogue grouping");
-      }
-    }
-    if (
-      !hasTable(database, "iptv_providers") ||
-      !hasTable(database, "iptv_channels") ||
-      !hasTable(database, "iptv_provider_health") ||
-      !hasTable(database, "iptv_channel_index") ||
-      !hasTable(database, "iptv_categories") ||
-      !hasTable(database, "iptv_movies") ||
-      !hasTable(database, "iptv_series") ||
-      !hasTable(database, "iptv_seasons") ||
-      !hasTable(database, "iptv_series_episodes") ||
-      !hasTable(database, "iptv_epg_channels") ||
-      !hasTable(database, "iptv_epg_programmes")
-    ) {
-      database.exec(readInitialSchema());
-      console.log("[startup] applied missing IPTV schema fragments to existing database");
-    }
-  } catch (err) {
-    console.error("[startup] failed to apply missing IPTV schema", err);
-    throw err;
-  }
-
   // If DB was freshly created (size zero), apply initial schema
   try {
     const stats = fs.statSync(resolvedDatabasePath);
@@ -379,10 +339,6 @@ export function getDatabase(): DatabaseSync {
   // Validate startup and ensure DB is healthy. If validation throws, propagate up.
   validateDatabaseStartup(database, resolvedDatabasePath);
 
-  // Rehydration is handled by the scheduled background job below. Avoid
-  // running it during startup because large provider databases can block the
-  // HTTP event loop and delay IPTV requests.
-
   if (!runtimeConfig.newsTestMode) {
     try {
       const newsService = new NewsService();
@@ -399,8 +355,6 @@ export function getDatabase(): DatabaseSync {
       console.error("[startup] failed to start backup service", err);
     }
 
-    // Example periodic rehydration job: refresh provider availability every 5 minutes
-    scheduleBackgroundJob("rehydrate-providers", 5 * 60 * 1000, () => rehydrateSyncStateOnStartup());
   }
 
   return database;
@@ -1058,315 +1012,7 @@ function seedShadowCatalogLayer(database: DatabaseSync) {
   }
 }
 
-function repairBrokenChannelsProviderReference(database: DatabaseSync) {
-  if (!hasTable(database, "channels") || !hasTable(database, "providers")) {
-    return;
-  }
-
-  const foreignKeys = database.prepare("PRAGMA foreign_key_list(channels)").all() as Array<{ from: string; table: string; to: string }>; 
-  const providerReference = foreignKeys.find((fk) => fk.from === "provider_id");
-
-  if (providerReference && providerReference.table === "providers") {
-    return;
-  }
-
-  console.warn("[startup] repairing channels.provider_id foreign key to point at providers(id)");
-
-  const legacyRows = database.prepare("SELECT COUNT(*) AS count FROM channels").get() as { count: number };
-  const validProviderIds = database.prepare("SELECT id FROM providers").all() as Array<{ id: string }>;
-  const validProviderSet = new Set(validProviderIds.map((row) => row.id));
-  const invalidCount = database.prepare("SELECT COUNT(*) AS count FROM channels WHERE provider_id NOT IN (SELECT id FROM providers)").get() as { count: number };
-
-  if (legacyRows.count > 0 && invalidCount.count > 0) {
-    console.warn(`[startup] removing ${invalidCount.count} channel rows that reference missing provider ids during repair`);
-  }
-
-  database.exec("PRAGMA foreign_keys = OFF;");
-
-  try {
-    database.exec("ALTER TABLE channels RENAME TO channels_legacy_broken;");
-    database.exec(`
-      CREATE TABLE channels (
-        id TEXT PRIMARY KEY,
-        provider_id TEXT NOT NULL,
-        name TEXT NOT NULL,
-        external_ref TEXT,
-        tvg_name TEXT,
-        category_id TEXT,
-        group_name TEXT,
-        logo_url TEXT,
-        url TEXT NOT NULL,
-        content_type TEXT NOT NULL DEFAULT 'live' CHECK (content_type IN ('live', 'movie', 'series')),
-        status TEXT NOT NULL DEFAULT 'active',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY (provider_id) REFERENCES providers(id) ON DELETE CASCADE
-      )
-    `);
-
-    const legacyTvgName = hasColumn(database, "channels_legacy_broken", "tvg_name") ? "tvg_name" : "NULL AS tvg_name";
-    const preservedChannelRows = database.prepare(`
-      SELECT id, provider_id, name, external_ref, ${legacyTvgName}, category_id, group_name, logo_url, url, content_type, status, created_at, updated_at
-      FROM channels_legacy_broken
-      WHERE provider_id IN (SELECT id FROM providers)
-    `).all() as Array<Record<string, unknown>>;
-
-    if (preservedChannelRows.length > 0) {
-      const insertColumns = [
-        "id",
-        "provider_id",
-        "name",
-        "external_ref",
-        "tvg_name",
-        "category_id",
-        "group_name",
-        "logo_url",
-        "url",
-        "content_type",
-        "status",
-        "created_at",
-        "updated_at"
-      ];
-
-      const placeholders = insertColumns.map(() => "?").join(", ");
-      const insertStmt = database.prepare(`INSERT INTO channels (${insertColumns.join(", ")}) VALUES (${placeholders})`);
-
-      for (const row of preservedChannelRows) {
-        insertStmt.run(...insertColumns.map((column) => row[column] ?? null));
-      }
-    }
-
-    database.exec("DROP TABLE channels_legacy_broken;");
-  } finally {
-    database.exec("PRAGMA foreign_keys = ON;");
-  }
-}
-
-function repairLegacyChildTableReferences(database: DatabaseSync) {
-  const repairs = [
-    {
-      table: "streams",
-      createSql: `
-        CREATE TABLE streams (
-          id TEXT PRIMARY KEY,
-          match_id TEXT NOT NULL,
-          channel_id TEXT NOT NULL,
-          protocol TEXT NOT NULL DEFAULT 'hls',
-          status TEXT NOT NULL DEFAULT 'idle',
-          approval_status TEXT NOT NULL DEFAULT 'idle',
-          approved_by_user_id TEXT,
-          approved_at TEXT,
-          rejection_reason TEXT,
-          published_at TEXT,
-          health_status TEXT NOT NULL DEFAULT 'unknown',
-          health_reason TEXT,
-          failure_count INTEGER NOT NULL DEFAULT 0,
-          last_health_at TEXT,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL,
-          FOREIGN KEY (match_id) REFERENCES matches(id),
-          FOREIGN KEY (channel_id) REFERENCES channels(id)
-        )
-      `,
-      insertSql: `
-        INSERT INTO streams (
-          id,
-          match_id,
-          channel_id,
-          protocol,
-          status,
-          approval_status,
-          approved_by_user_id,
-          approved_at,
-          rejection_reason,
-          published_at,
-          health_status,
-          health_reason,
-          failure_count,
-          last_health_at,
-          created_at,
-          updated_at
-        )
-        SELECT
-          id,
-          match_id,
-          channel_id,
-          protocol,
-          status,
-          approval_status,
-          approved_by_user_id,
-          approved_at,
-          rejection_reason,
-          published_at,
-          health_status,
-          health_reason,
-          failure_count,
-          last_health_at,
-          created_at,
-          updated_at
-        FROM streams_legacy_schema_repair
-      `,
-      legacyTable: "streams_legacy_schema_repair"
-    },
-    {
-      table: "match_streams",
-      createSql: `
-        CREATE TABLE match_streams (
-          id TEXT PRIMARY KEY,
-          match_id TEXT NOT NULL,
-          provider_id TEXT NOT NULL,
-          channel_id TEXT NOT NULL,
-          stream_url TEXT NOT NULL,
-          priority INTEGER NOT NULL DEFAULT 0,
-          is_active INTEGER NOT NULL DEFAULT 1,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL,
-          FOREIGN KEY (match_id) REFERENCES scheduling_matches(id),
-          FOREIGN KEY (provider_id) REFERENCES providers(id),
-          FOREIGN KEY (channel_id) REFERENCES channels(id),
-          UNIQUE (match_id, channel_id)
-        )
-      `,
-      insertSql: `
-        INSERT INTO match_streams (
-          id,
-          match_id,
-          provider_id,
-          channel_id,
-          stream_url,
-          priority,
-          is_active,
-          created_at,
-          updated_at
-        )
-        SELECT
-          id,
-          match_id,
-          provider_id,
-          channel_id,
-          stream_url,
-          priority,
-          is_active,
-          created_at,
-          updated_at
-        FROM match_streams_legacy_schema_repair
-      `,
-      legacyTable: "match_streams_legacy_schema_repair"
-    }
-  ] as const;
-
-  for (const repair of repairs) {
-    if (!hasTable(database, repair.table)) {
-      continue;
-    }
-
-    const schemaRow = database
-      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
-      .get(repair.table) as { sql: string } | undefined;
-
-    if (!schemaRow) {
-      continue;
-    }
-
-    if (!schemaRow.sql.includes("channels_legacy_broken") && !schemaRow.sql.includes("providers_legacy_upgrade")) {
-      continue;
-    }
-
-    console.warn(`[startup] repairing stale legacy foreign-key references in ${repair.table}`);
-
-    database.exec("PRAGMA foreign_keys = OFF;");
-
-    try {
-      database.exec("BEGIN TRANSACTION;");
-      database.exec(`ALTER TABLE ${repair.table} RENAME TO ${repair.legacyTable};`);
-      database.exec(repair.createSql);
-      database.exec(repair.insertSql);
-      database.exec(`DROP TABLE ${repair.legacyTable};`);
-      database.exec("COMMIT;");
-    } catch (error) {
-      database.exec("ROLLBACK;");
-      throw error;
-    } finally {
-      database.exec("PRAGMA foreign_keys = ON;");
-    }
-  }
-}
-
 export function migrateExistingOperationalState(database: DatabaseSync) {
-  repairLegacyChildTableReferences(database);
-
-  const purgedProviderCount = purgeDeletedProviderData(database);
-  if (purgedProviderCount > 0) {
-    console.log(`[startup] permanently deleted ${purgedProviderCount} removed IPTV provider record(s) and their owned data`);
-  }
-  repairBrokenChannelsProviderReference(database);
-
-  if (hasTable(database, "providers")) {
-    if (!hasColumn(database, "providers", "expires_at")) {
-      database.exec("ALTER TABLE providers ADD COLUMN expires_at TEXT;");
-    }
-
-    if (!hasColumn(database, "providers", "availability_status")) {
-      database.exec("ALTER TABLE providers ADD COLUMN availability_status TEXT NOT NULL DEFAULT 'unknown';");
-    }
-
-    if (!hasColumn(database, "providers", "sync_mode")) {
-      database.exec("ALTER TABLE providers ADD COLUMN sync_mode TEXT NOT NULL DEFAULT 'partial';");
-    }
-
-    if (!hasColumn(database, "providers", "last_successful_stream_load_at")) {
-      database.exec("ALTER TABLE providers ADD COLUMN last_successful_stream_load_at TEXT;");
-    }
-
-    if (!hasColumn(database, "providers", "failed_channel_loads")) {
-      database.exec("ALTER TABLE providers ADD COLUMN failed_channel_loads INTEGER NOT NULL DEFAULT 0;");
-    }
-
-    if (!hasColumn(database, "providers", "health_score")) {
-      database.exec("ALTER TABLE providers ADD COLUMN health_score INTEGER NOT NULL DEFAULT 100;");
-    }
-
-    if (!hasColumn(database, "providers", "deleted")) {
-      database.exec("ALTER TABLE providers ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;");
-    }
-  }
-
-  if (hasTable(database, "streams")) {
-    if (!hasColumn(database, "streams", "status")) {
-      database.exec("ALTER TABLE streams ADD COLUMN status TEXT NOT NULL DEFAULT 'idle';");
-    }
-
-    if (!hasColumn(database, "streams", "health_status")) {
-      database.exec("ALTER TABLE streams ADD COLUMN health_status TEXT NOT NULL DEFAULT 'unknown';");
-    }
-
-    if (!hasColumn(database, "streams", "health_reason")) {
-      database.exec("ALTER TABLE streams ADD COLUMN health_reason TEXT;");
-    }
-
-    if (!hasColumn(database, "streams", "failure_count")) {
-      database.exec("ALTER TABLE streams ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0;");
-    }
-
-    if (!hasColumn(database, "streams", "last_health_at")) {
-      database.exec("ALTER TABLE streams ADD COLUMN last_health_at TEXT;");
-    }
-  }
-
-  if (hasTable(database, "channels")) {
-    if (!hasColumn(database, "channels", "tvg_name")) {
-      database.exec("ALTER TABLE channels ADD COLUMN tvg_name TEXT;");
-    }
-
-    if (!hasColumn(database, "channels", "logo_url")) {
-      database.exec("ALTER TABLE channels ADD COLUMN logo_url TEXT;");
-    }
-
-    if (!hasColumn(database, "channels", "content_type")) {
-      database.exec("ALTER TABLE channels ADD COLUMN content_type TEXT NOT NULL DEFAULT 'live';");
-    }
-  }
-
   if (hasTable(database, "sports") && !hasColumn(database, "sports", "logo_url")) {
     database.exec("ALTER TABLE sports ADD COLUMN logo_url TEXT;");
   }
@@ -1675,94 +1321,4 @@ export function migrateExistingOperationalState(database: DatabaseSync) {
 
   seedShadowCatalogLayer(database);
 
-  if (hasTable(database, "providers")) {
-    database.exec(
-      `UPDATE providers
-        SET status = CASE
-          WHEN status IN ('active', 'pending', 'failed', 'invalid') THEN status
-          WHEN status = 'inactive' THEN 'failed'
-          WHEN status = 'archived' THEN 'invalid'
-          ELSE 'pending'
-        END`
-    );
-  }
-
-  if (hasTable(database, "streams")) {
-    database.exec(
-      `UPDATE streams
-        SET status = CASE approval_status
-          WHEN 'pending_review' THEN 'assigned'
-          WHEN 'draft' THEN 'idle'
-          WHEN 'rejected' THEN 'failed'
-          WHEN 'suspended' THEN 'disabled'
-          WHEN 'approved' THEN CASE WHEN published_at IS NULL THEN 'approved' ELSE 'active' END
-          ELSE status
-        END
-        WHERE approval_status IN ('pending_review', 'draft', 'rejected', 'suspended', 'approved')`
-    );
-  }
-
-  if (hasTable(database, "matches") && hasTable(database, "streams")) {
-    database.exec(
-      `UPDATE matches
-        SET status = CASE
-          WHEN status = 'completed' THEN 'ended'
-          WHEN status = 'scheduled' AND id IN (SELECT match_id FROM streams) THEN 'assigned'
-          ELSE status
-        END
-        WHERE status IN ('completed', 'scheduled')`
-    );
-  }
-}
-
-function deleteProviderOwnedRows(database: DatabaseSync, providerId: string) {
-  const statements = [
-    ["iptv_series_episodes", "series_id IN (SELECT id FROM iptv_series WHERE provider_id = ?)"] as const,
-    ["iptv_seasons", "provider_id = ?"] as const,
-    ["iptv_movies", "provider_id = ?"] as const,
-    ["iptv_series", "provider_id = ?"] as const,
-    ["iptv_epg_programmes", "provider_id = ?"] as const,
-    ["iptv_epg_channels", "provider_id = ?"] as const,
-    ["iptv_categories", "provider_id = ?"] as const,
-    ["iptv_channel_index", "provider_id = ?"] as const,
-    ["iptv_channels", "provider_id = ?"] as const,
-    ["iptv_provider_health", "provider_id = ?"] as const,
-    ["iptv_logs", "provider_id = ?"] as const,
-    ["streams", "channel_id IN (SELECT id FROM channels WHERE provider_id = ?)"] as const,
-    ["match_streams", "provider_id = ?"] as const,
-    ["channels", "provider_id = ?"] as const,
-    ["iptv_providers", "id = ?"] as const
-  ];
-
-  for (const [table, predicate] of statements) {
-    if (hasTable(database, table) && (table !== "streams" || hasTable(database, "channels"))) {
-      database.prepare(`DELETE FROM ${table} WHERE ${predicate}`).run(providerId);
-    }
-  }
-}
-
-function purgeDeletedProviderData(database: DatabaseSync): number {
-  if (!hasTable(database, "providers")) return 0;
-
-  const providerIds = hasColumn(database, "providers", "deleted")
-    ? database.prepare("SELECT id FROM providers WHERE deleted = 1").all() as Array<{ id: string }>
-    : [];
-  const orphanIds = hasTable(database, "channels")
-    ? database.prepare("SELECT DISTINCT c.provider_id AS id FROM channels c LEFT JOIN providers p ON p.id = c.provider_id WHERE p.id IS NULL").all() as Array<{ id: string }>
-    : [];
-  const ids = [...new Set([...providerIds, ...orphanIds].map((row) => row.id))];
-  if (ids.length === 0) return 0;
-
-  database.exec("BEGIN TRANSACTION;");
-  try {
-    for (const providerId of ids) {
-      deleteProviderOwnedRows(database, providerId);
-      database.prepare("DELETE FROM providers WHERE id = ?").run(providerId);
-    }
-    database.exec("COMMIT;");
-    return ids.length;
-  } catch (error) {
-    database.exec("ROLLBACK;");
-    throw error;
-  }
 }

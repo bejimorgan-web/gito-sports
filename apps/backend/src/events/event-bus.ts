@@ -1,19 +1,8 @@
 export type EventName =
-  | "iptv:sync:completed"
-  | "iptv:channel:inserted"
-  | "iptv:channel:updated"
-  | "iptv:channel:inactive"
-  | "iptv:provider:updated"
-  | "iptv:ingestion:completed"
-  | "iptv:channel:rejected"
-  | "iptv:channel:duplicate_detected"
   | "scores:updated"
   | "scores:cache:refreshed"
   | "scores:retry"
   | "scores:failed"
-  | "stream:recovered"
-  | "stream:failed"
-  | "stream:reconnected"
   | string;
 
 export type EventPayload = unknown;

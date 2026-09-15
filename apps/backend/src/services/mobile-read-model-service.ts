@@ -9,10 +9,10 @@ import { listSeasons, getSeasonById } from "../repositories/seasons-repository.j
 import type { ScoreMatchSummary } from "./score-service.js";
 import { getCachedScoreSnapshot } from "./score-service.js";
 import { getFixtureLineups } from "../repositories/fixture-lineups-repository.js";
+import { getPublishedPublicationDeliveryByMatchId } from "../repositories/publication-artifact-repository.js";
 
 export type MobileClub = Team & { sport: Pick<Sport, "id" | "name">; country: Pick<Country, "id" | "name"> | null };
 export type MobileSeason = Season & { competition?: Pick<Competition, "id" | "name" | "slug"> };
-export type MobileStream = { id: string; matchId: string; channelId: string; channelName: string; providerId: string; providerName: string; status: string; approvalStatus: string; healthStatus: string };
 export type MobileFixture = {
   id: string;
   startsAt: string;
@@ -27,7 +27,7 @@ export type MobileFixture = {
   score: { home: number | null; away: number | null; winner: string | null } | null;
   liveState: { isLive: boolean; status: string; homeScore: number | null; awayScore: number | null; elapsed: number | null; updatedAt: string | null } | null;
   live: boolean;
-  streams: MobileStream[];
+  playbackUrl: string | null;
   lineups: MobileLineup[];
 };
 export type MobileLineup = {
@@ -76,19 +76,6 @@ function clubFromRow(row: any, fallback?: { sport?: { id: string; name: string }
   };
 }
 
-function safeStreams(matchId: string): MobileStream[] {
-  const rows = getDatabase().prepare(`
-    SELECT s.id, s.match_id, s.channel_id, s.status, s.approval_status, s.health_status,
-           c.name AS channel_name, c.provider_id, p.name AS provider_name
-    FROM streams s
-    JOIN channels c ON c.id = s.channel_id
-    JOIN providers p ON p.id = c.provider_id
-    WHERE s.match_id = ?
-    ORDER BY s.updated_at DESC
-  `).all(matchId) as any[];
-  return rows.map((row) => ({ id: row.id, matchId: row.match_id, channelId: row.channel_id, channelName: row.channel_name, providerId: row.provider_id, providerName: row.provider_name, status: row.status, approvalStatus: row.approval_status, healthStatus: row.health_status }));
-}
-
 export function mapMobileFixture(fixture: any, suppliedSnapshot?: ScoreMatchSummary | null): MobileFixture {
   const home = clubFromRow(fixture.homeTeam, { sport: fixture.sport, country: fixture.country });
   const away = clubFromRow(fixture.awayTeam, { sport: fixture.sport, country: fixture.country });
@@ -118,7 +105,7 @@ export function mapMobileFixture(fixture: any, suppliedSnapshot?: ScoreMatchSumm
     score,
     liveState,
     live: liveState?.isLive ?? fixture.status === "live",
-    streams: safeStreams(fixture.id)
+    playbackUrl: getPublishedPublicationDeliveryByMatchId(fixture.id)?.playbackUrl ?? null
     ,lineups: fixtureLineups(fixture.id)
   };
 }

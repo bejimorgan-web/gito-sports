@@ -7,31 +7,6 @@ const cleanupIntervalMs = 12 * 60 * 60 * 1000; // 12 hours
 const backupFilenamePattern = /^gito-backup-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}(?:-\d+)?\.sqlite$/;
 const minimumBackupHeadroomBytes = 16 * 1024 * 1024;
 
-/**
- * IPTV catalogue tables that are regenerable and should be excluded from backup.
- * These tables contain data derived from provider sync and can be safely rebuilt.
- * 
- * Note: 'channels' table is NOT in this list because streams/match_streams 
- * have foreign key dependencies on it and must retain all channel references.
- * 
- * Analysis: Schema has 62 tables total. We exclude only 11 small regenerable
- * IPTV catalogue tables (349 + 14 + 19 + 17 + 12 + 28 + 1 ≈ 440 rows, <1MB).
- * Primary space savings comes from reducing backup retention from 20 to 5.
- */
-const EXCLUDED_REGENERABLE_TABLES = new Set([
-  'iptv_categories',      // 349 rows
-  'iptv_channel_index',   // 0 rows (search index)
-  'iptv_channels',        // 0 rows (legacy)
-  'iptv_epg_channels',    // 14 rows
-  'iptv_epg_programmes',  // 19 rows
-  'iptv_logs',            // 0 rows (transient)
-  'iptv_movies',          // 17 rows
-  'iptv_provider_health', // 0 rows (transient)
-  'iptv_seasons',         // 12 rows
-  'iptv_series',          // 28 rows
-  'iptv_series_episodes'  // 1 row
-]);
-
 let backupInFlight = false;
 let lastBackupError: string | null = null;
 let lastBackupCompletedAt: string | null = null;
@@ -160,7 +135,7 @@ function validateBackupContents(
     const identifier = quoteIdentifier(name);
     const sourceCount = Number((sourceDb.prepare(`SELECT COUNT(*) AS count FROM ${identifier}`).get() as { count: number }).count);
     const backupCount = Number((backupDb.prepare(`SELECT COUNT(*) AS count FROM ${identifier}`).get() as { count: number }).count);
-    const expectedCount = EXCLUDED_REGENERABLE_TABLES.has(name) ? 0 : sourceCount;
+    const expectedCount = sourceCount;
 
     if (backupCount !== expectedCount) {
       throw new Error(`Backup row count mismatch for ${name}: source=${sourceCount} backup=${backupCount} expected=${expectedCount}`);
@@ -243,13 +218,6 @@ async function createSchemaPreservingBackup(sourcePath: string, backupPath: stri
 
     for (const table of tables) {
       const tableName = table.name;
-      if (EXCLUDED_REGENERABLE_TABLES.has(tableName)) {
-        // Schema exists but no data is copied.
-        console.log(`[backup] ${tableName}: excluded (schema preserved, 0 rows)`);
-        totalRowsExcluded++;
-        continue;
-      }
-
       try {
         backupDb.prepare(`INSERT INTO main.${quoteIdentifier(tableName)} SELECT * FROM src.${quoteIdentifier(tableName)}`).run();
         const count = backupDb.prepare(`SELECT COUNT(*) AS count FROM main.${quoteIdentifier(tableName)}`).get() as { count: number };

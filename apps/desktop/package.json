@@ -14,12 +14,14 @@
     "electron:serve": "node ./scripts/electron-serve.cjs",
     "electron:dev": "concurrently \"npm run dev\" \"npm run electron:serve\"",
     "electron:build": "npm run build && electron-builder",
-    "start": "npm run build && npx electron ."
+    "start": "npm run build && npx electron .",
+    "test:chromium:capability": "npx electron ./scripts/chromium-capability-harness.cjs"
   },
   "dependencies": {
     "@gito/shared": "0.1.0",
     "@sentry/electron": "^7.14.0",
     "@vitejs/plugin-react": "^4.2.1",
+    "better-sqlite3": "^12.11.1",
     "hls.js": "^1.6.16",
     "i18n-iso-countries": "^7.14.0",
     "react": "^18.2.0",

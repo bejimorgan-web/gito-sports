@@ -49,6 +49,13 @@ const createTableSql = `
   );
   CREATE INDEX IF NOT EXISTS idx_publication_artifacts_match ON publication_artifacts(match_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_publication_artifacts_status ON publication_artifacts(publication_status, availability);
+  CREATE TABLE IF NOT EXISTS publication_delivery (
+    publication_id TEXT PRIMARY KEY,
+    delivery_reference TEXT NOT NULL,
+    playback_url TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (publication_id) REFERENCES publication_artifacts(publication_id) ON DELETE CASCADE
+  );
 `;
 
 let schemaReady = false;
@@ -186,6 +193,24 @@ export function getPublicationArtifactByMatchId(matchId: string) {
   return row ? mapPublication(row) : undefined;
 }
 
+export function getPublishedPublicationDeliveryByMatchId(matchId: string): { playbackUrl: string; deliveryReference: string } | undefined {
+  ensureSchema();
+  const row = getDatabase().prepare(`
+    SELECT delivery.delivery_reference, delivery.playback_url
+    FROM publication_artifacts artifact
+    JOIN publication_delivery delivery ON delivery.publication_id = artifact.publication_id
+    WHERE artifact.match_id = ?
+      AND artifact.publication_status = 'published'
+      AND (artifact.expires_at IS NULL OR artifact.expires_at > ?)
+    ORDER BY COALESCE(artifact.published_at, artifact.updated_at) DESC, artifact.publication_id DESC
+    LIMIT 1
+  `).get(matchId, now()) as { delivery_reference: string; playback_url: string } | undefined;
+
+  return row
+    ? { playbackUrl: row.playback_url, deliveryReference: row.delivery_reference }
+    : undefined;
+}
+
 export function listPublishedPublicationFeed() {
   ensureSchema();
   const nowAt = now();
@@ -204,13 +229,16 @@ export function listPublishedPublicationFeed() {
       home.name AS home_team_name,
       away.name AS away_team_name,
       competition.name AS competition_name,
-      sport.name AS sport_name
+      sport.name AS sport_name,
+      delivery.delivery_reference,
+      delivery.playback_url
     FROM publication_artifacts pa
     JOIN matches m ON m.id = pa.match_id
     LEFT JOIN teams home ON home.id = m.home_team_id
     LEFT JOIN teams away ON away.id = m.away_team_id
     LEFT JOIN competitions competition ON competition.id = m.competition_id
     LEFT JOIN sports sport ON sport.id = competition.sport_id
+    LEFT JOIN publication_delivery delivery ON delivery.publication_id = pa.publication_id
     WHERE pa.publication_status = 'published'
       AND (pa.expires_at IS NULL OR pa.expires_at > ?)
       AND NOT EXISTS (
@@ -242,6 +270,8 @@ export function listPublishedPublicationFeed() {
     away_team_name: string | null;
     competition_name: string | null;
     sport_name: string | null;
+    delivery_reference: string | null;
+    playback_url: string | null;
   }>;
 
   return rows.map((row) => ({
@@ -261,7 +291,9 @@ export function listPublishedPublicationFeed() {
       ...(row.away_team_name ? { awayTeamName: row.away_team_name } : {}),
       ...(row.competition_name ? { competitionName: row.competition_name } : {}),
       ...(row.sport_name ? { sportName: row.sport_name } : {})
-    }
+    },
+    ...(row.delivery_reference ? { deliveryReference: row.delivery_reference } : {}),
+    ...(row.playback_url ? { playbackUrl: row.playback_url } : {})
   }));
 }
 
@@ -271,6 +303,22 @@ export function bindPublicationArtifact(publicationId: string, matchId: string) 
   if (!current) return undefined;
   if (current.match_id !== matchId) throw new Error("publication_match_conflict");
   return mapPublication(current);
+}
+
+/** Stores only an opaque reference and a public credential-free playback URL. */
+export function setPublicationDelivery(publicationId: string, input: { deliveryReference: string; playbackUrl: string }) {
+  ensureSchema();
+  if (!getRow(publicationId)) return undefined;
+  const deliveryReference = validatePublicationSourceReference(input.deliveryReference);
+  let playbackUrl: URL;
+  try { playbackUrl = new URL(input.playbackUrl); } catch { throw new Error("publication_delivery_url_invalid"); }
+  if (playbackUrl.protocol !== "https:" || playbackUrl.username || playbackUrl.password || /(?:token|key|password|secret|auth|user)/i.test(playbackUrl.search)) {
+    throw new Error("publication_delivery_url_unsafe");
+  }
+  getDatabase().prepare(`INSERT INTO publication_delivery (publication_id, delivery_reference, playback_url, updated_at)
+    VALUES (?, ?, ?, ?) ON CONFLICT(publication_id) DO UPDATE SET delivery_reference = excluded.delivery_reference, playback_url = excluded.playback_url, updated_at = excluded.updated_at`)
+    .run(publicationId, deliveryReference, playbackUrl.toString(), now());
+  return getPublicationArtifactById(publicationId);
 }
 
 export function updatePublicationArtifact(

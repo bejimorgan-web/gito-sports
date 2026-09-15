@@ -6,9 +6,7 @@ export const healthRouter = Router();
 
 function getCount(database: ReturnType<typeof getDatabase>, table: string) {
   try {
-    const query = table === "providers"
-      ? "SELECT COUNT(1) AS count FROM providers WHERE deleted = 0"
-      : `SELECT COUNT(1) AS count FROM ${table}`;
+    const query = `SELECT COUNT(1) AS count FROM ${table}`;
     const row = database.prepare(query).get() as { count: number };
     return Number(row?.count ?? 0);
   } catch {
@@ -26,9 +24,7 @@ function databaseSchemaReady(database: ReturnType<typeof getDatabase>): boolean 
       "competitions",
       "seasons",
       "matches",
-      "streams",
-      "providers",
-      "channels",
+      "publication_artifacts",
       "operator_users",
       "news_articles",
       "news_article_categories",
@@ -61,13 +57,12 @@ healthRouter.get("/", (_request, response) => {
 
   const counts = {
     sports: getCount(db, "sports"),
-    providers: getCount(db, "providers"),
-    channels: getCount(db, "channels"),
     competitions: getCount(db, "competitions"),
     seasons: getCount(db, "seasons"),
     teams: getCount(db, "teams"),
     matches: getCount(db, "matches"),
-    streams: getCount(db, "streams"),
+    publication_artifacts: getCount(db, "publication_artifacts"),
+    publication_delivery: getCount(db, "publication_delivery"),
     operator_users: getCount(db, "operator_users"),
   };
 

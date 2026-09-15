@@ -26,7 +26,7 @@ function seed() {
   return { db, seasonId: season.id };
 }
 
-test("canonical fixture setup requires season membership and never touches legacy scheduling tables", () => {
+test("canonical fixture setup requires season membership and uses sports tables only", () => {
   const { db, seasonId } = seed();
   assert.throws(() => createCanonicalFixture({ competitionId: "competition-1", seasonId, homeTeamId: "team-1", awayTeamId: "team-2", startsAt: "" }), (error: any) => error?.code === "invalid_starts_at" && /required/i.test(error.message));
   assert.throws(() => createCanonicalFixture({ competitionId: "competition-1", seasonId, homeTeamId: "team-1", awayTeamId: "team-2", startsAt: "2026-09-20T15:00" }), (error: any) => error?.code === "invalid_starts_at" && /explicit timezone/i.test(error.message));
@@ -37,7 +37,6 @@ test("canonical fixture setup requires season membership and never touches legac
   assert.throws(() => createCanonicalFixture({ competitionId: "competition-1", seasonId, homeTeamId: "team-1", awayTeamId: "team-2", startsAt: "2026-09-20T15:30:00Z" }), /canonical_fixture_duplicate/);
   assert.throws(() => createCanonicalFixture({ competitionId: "competition-1", seasonId, homeTeamId: "team-1", awayTeamId: "team-2", startsAt: "2026-09-20T15:00:00Z", externalProvider: "manual", externalMatchId: "fixture-1" }), /canonical_fixture_external_duplicate/);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM scheduling_matches").get().count, 0);
-  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM match_streams").get().count, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM matches").get().count, 1);
   const fixtureId = fixture!.id;
   const rescheduled = updateCanonicalFixture(fixtureId, { startsAt: "2026-09-22T18:00:00.000Z", venueName: "New Arena", status: "postponed" });

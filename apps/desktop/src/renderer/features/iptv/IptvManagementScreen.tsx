@@ -26,6 +26,8 @@ interface IptvManagementScreenProps {
   channelPage: PaginatedChannels<Channel>;
   onLoadChannelPage: (options: { page: number; q?: string; category?: string; providerId?: string }) => Promise<void>;
   providers: IPTVProvider[];
+  selectedProviderId: string;
+  onSelectProvider: (providerId: string) => void;
   providerDiagnostics: Record<string, ProviderChannelDiagnostics>;
   onCreateProvider: (input: CreateProviderRequest) => Promise<IPTVProvider & { syncOperationId?: string }>;
   onIngestM3u: (providerId: string, playlist: string) => Promise<void>;
@@ -35,9 +37,9 @@ interface IptvManagementScreenProps {
   onTestProvider: (input: CreateProviderRequest) => Promise<ProviderConnectionTest>;
   onTestProviderById?: (providerId: string) => Promise<any>;
   onSetProviderStatus?: (providerId: string, status: string) => Promise<void>;
-  onStartIptvOperation: (type: IptvOperationType, input?: { providerId?: string; playlist?: string; baseUrl?: string; username?: string; password?: string }) => Promise<IptvOperation>;
-  onGetIptvOperation: (operationId: string) => Promise<IptvOperation>;
-  onCancelIptvOperation: (operationId: string) => Promise<IptvOperation>;
+  onStartIptvOperation: (type: IptvOperationType, input?: { providerId?: string; playlist?: string; baseUrl?: string }) => Promise<IptvOperation>;
+  onGetIptvOperation: (operationId: string) => Promise<IptvOperation | null>;
+  onCancelIptvOperation: (operationId: string) => Promise<IptvOperation | null>;
   onRefreshIptv: () => Promise<void>;
 }
 
@@ -46,6 +48,8 @@ export function IptvManagementScreen({
   channelPage,
   onLoadChannelPage,
   providers,
+  selectedProviderId,
+  onSelectProvider,
   providerDiagnostics,
   onCreateProvider,
   onIngestM3u,
@@ -60,7 +64,6 @@ export function IptvManagementScreen({
   onCancelIptvOperation,
   onRefreshIptv
 }: IptvManagementScreenProps) {
-  const [selectedProviderId, setSelectedProviderId] = useState("");
   const [providerName, setProviderName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [type, setType] = useState<CreateProviderRequest["type"]>("manual");
@@ -69,7 +72,7 @@ export function IptvManagementScreen({
   const [playlist, setPlaylist] = useState("");
   const [statusMessage, setStatusMessage] = useState("Ready");
   const [importStatus, setImportStatus] = useState("Ready");
-  const [operation, setOperation] = useState<IptvOperation>();
+  const [operation, setOperation] = useState<IptvOperation | null>();
   const [providerAction, setProviderAction] = useState<"idle" | "validating" | "saving">("idle");
   const [statusChangingProviderId, setStatusChangingProviderId] = useState<string | null>(null);
   const [deletingProviderId, setDeletingProviderId] = useState<string | null>(null);
@@ -103,7 +106,7 @@ export function IptvManagementScreen({
     }
     const timer = window.setInterval(() => {
       void onGetIptvOperation(operation.id)
-        .then(setOperation)
+        .then((nextOperation) => setOperation(nextOperation ?? null))
         .catch((error) => {
           const message = error instanceof Error ? error.message : "Unable to read validation status.";
           setStatusMessage(message);
@@ -126,17 +129,6 @@ export function IptvManagementScreen({
     return () => window.clearTimeout(timer);
   }, [channelSearch, channelCategory, channelProviderFilter, onLoadChannelPage]);
 
-  useEffect(() => {
-    if (!selectedProviderId) {
-      const firstActiveProvider = providers.find((provider) => provider.status === "active");
-      if (firstActiveProvider) setSelectedProviderId(firstActiveProvider.id);
-    }
-    if (!channelProviderFilter) {
-      const firstActiveProvider = providers.find((provider) => provider.status === "active");
-      if (firstActiveProvider) setChannelProviderFilter(firstActiveProvider.id);
-    }
-  }, [channelProviderFilter, providers, selectedProviderId]);
-
   const loadChannelPage = (page: number) => {
     void onLoadChannelPage({
       page,
@@ -146,14 +138,14 @@ export function IptvManagementScreen({
     });
   };
 
-  const startOperation = async (type: IptvOperationType, input: { providerId?: string; playlist?: string; baseUrl?: string; username?: string; password?: string } = {}) => {
+  const startOperation = async (type: IptvOperationType, input: { providerId?: string; playlist?: string; baseUrl?: string } = {}) => {
     const started = await onStartIptvOperation(type, input);
     setOperation(started);
     return started;
   };
 
   const handleSelectProvider = (providerId: string) => {
-    setSelectedProviderId(providerId);
+    onSelectProvider(providerId);
     setChannelProviderFilter(providerId);
     const provider = providers.find((item) => item.id === providerId);
 
@@ -185,35 +177,58 @@ export function IptvManagementScreen({
       return;
     }
 
-    setStatusMessage("Validating provider connection...");
-    setProviderAction("validating");
+    setStatusMessage(selectedProviderId ? "Saving provider..." : "Creating provider...");
+    setProviderAction("saving");
 
     try {
-      const validationResult = await onTestProvider(providerInput);
-      if (!validationResult.ok) {
-        setStatusMessage(validationResult.message || "Provider validation failed.");
-        return;
-      }
-
-      setStatusMessage(selectedProviderId ? "Saving provider..." : "Creating provider...");
-      setProviderAction("saving");
+      let providerId = selectedProviderId;
 
       if (selectedProviderId && onUpdateProvider) {
         await onUpdateProvider(selectedProviderId, providerInput);
-        if (type === "xtream") {
-          setStatusMessage("Provider updated. Synchronizing live TV, movies, and series...");
-          await onSyncXtream(selectedProviderId);
-          setStatusMessage("Provider updated and full catalogue synchronization started.");
-        } else {
-          setStatusMessage("Provider updated.");
-        }
       } else {
         const createdProvider = await onCreateProvider(providerInput);
-        setStatusMessage(createdProvider.type === "xtream" ? "Provider created. Synchronizing Xtream catalogue..." : "Provider created.");
+        providerId = createdProvider.id;
+        setStatusMessage(createdProvider.type === "xtream" ? "Provider created. Synchronizing Xtream catalogue..." : createdProvider.type === "m3u" ? "Provider created. Starting M3U catalogue sync..." : "Provider created.");
         if (createdProvider.syncOperationId) {
           const syncOperation = await onGetIptvOperation(createdProvider.syncOperationId);
           setOperation(syncOperation);
         }
+      }
+
+      if (providerId && onTestProviderById) {
+        setStatusMessage("Validating provider connection...");
+        const validationResult = await onTestProviderById(providerId);
+        if (!validationResult?.ok) {
+          setStatusMessage(validationResult?.message || "Provider validation failed.");
+          return;
+        }
+      } else {
+        setStatusMessage("Validating provider connection...");
+        const validationResult = await onTestProvider(providerInput);
+        if (!validationResult?.ok) {
+          setStatusMessage(validationResult?.message || "Provider validation failed.");
+          return;
+        }
+      }
+
+      if (selectedProviderId && onUpdateProvider) {
+        if (type === "xtream") {
+          setStatusMessage("Provider updated. Synchronizing live TV, movies, and series...");
+          await onSyncXtream(selectedProviderId);
+          setStatusMessage("Provider updated and full catalogue synchronization started.");
+        } else if (type === "m3u") {
+          setStatusMessage("Provider updated. Starting M3U catalogue sync...");
+          await startOperation("m3u_import", { providerId: selectedProviderId });
+          setStatusMessage("Provider updated and M3U catalogue sync started.");
+        } else {
+          setStatusMessage("Provider updated.");
+        }
+      }
+
+      if (!selectedProviderId && type === "m3u" && providerId) {
+        setStatusMessage("Provider validated. Starting M3U catalogue sync...");
+        await startOperation("m3u_import", { providerId });
+        setStatusMessage("Provider validated and M3U catalogue sync started.");
       }
     } catch (error) {
       setStatusMessage(getFriendlyErrorMessage(error) || "Provider save failed.");
@@ -238,11 +253,13 @@ export function IptvManagementScreen({
 
     try {
       if (type === "xtream") {
+        if (!selectedProviderId) {
+          setStatusMessage("Save the provider first so credentials can be stored securely and validated locally.");
+          return;
+        }
+
         await startOperation("xtream_validation", {
-          ...(selectedProviderId ? { providerId: selectedProviderId } : {}),
-          baseUrl: baseUrl.trim(),
-          username: username.trim(),
-          password
+          providerId: selectedProviderId
         });
         setStatusMessage("Validation started. Follow the progress below.");
       } else if (type === "m3u") {
@@ -405,8 +422,8 @@ export function IptvManagementScreen({
       <IptvChannelsScreen
         providers={providers}
         selectedProviderId={channelProviderFilter}
-        onProviderFilterChange={setChannelProviderFilter}
-        below={channelProviderFilter ? <IptvCatalogueScreen providerId={channelProviderFilter} /> : (
+        onProviderFilterChange={handleSelectProvider}
+        below={selectedProviderId ? <IptvCatalogueScreen providerId={selectedProviderId} /> : (
           <section className="console-panel iptv-catalogue-empty">
             <h3>IPTV Content Browser</h3>
             <p className="field-note">Select a saved IPTV provider to browse its channel groups, movies, series, seasons, episodes, and guide data.</p>

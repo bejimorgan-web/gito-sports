@@ -52,13 +52,17 @@ export function FixtureWorkspaceScreen({
     void Promise.all([
       apiClient.listCompetitions(),
       apiClient.listClubs(),
-      apiClient.listProviders(),
-      apiClient.listChannels(),
+      window.gito?.desktopStorage?.providerAccounts.list(),
+      window.gito?.desktopStorage?.channels.list(),
     ]).then(([competitionData, clubData, providerData, channelData]) => {
       setCompetitions(competitionData);
       setClubs(clubData);
-      setProviders(providerData);
-      setChannels(channelData);
+      setProviders((providerData ?? []).map((provider) => ({ id: provider.id, name: provider.name })));
+      setChannels((channelData ?? []).map((channel) => ({
+        id: channel.id,
+        providerId: channel.providerAccountId,
+        name: channel.name
+      })));
     });
   }, []);
   useEffect(() => {

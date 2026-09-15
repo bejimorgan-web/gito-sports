@@ -157,24 +157,10 @@ export function deleteEntity(entityType: EntityType, entityId: string, operatorI
     }
 
     if (entityType === "competition") {
-      affectedRecords.match_streams_removed = deleteRows(
-        database,
-        "match_streams",
-        "DELETE FROM match_streams WHERE match_id IN (SELECT id FROM scheduling_matches WHERE competition_id = ?)",
-        [entityId]
-      );
-
       affectedRecords.scheduling_matches_removed = deleteRows(
         database,
         "scheduling_matches",
         "DELETE FROM scheduling_matches WHERE competition_id = ?",
-        [entityId]
-      );
-
-      affectedRecords.streams_removed = deleteRows(
-        database,
-        "streams",
-        "DELETE FROM streams WHERE match_id IN (SELECT id FROM matches WHERE competition_id = ?)",
         [entityId]
       );
 
@@ -222,24 +208,10 @@ export function deleteEntity(entityType: EntityType, entityId: string, operatorI
     }
 
     if (entityType === "team") {
-      affectedRecords.match_streams_removed = deleteRows(
-        database,
-        "match_streams",
-        "DELETE FROM match_streams WHERE match_id IN (SELECT id FROM scheduling_matches WHERE home_team_id = ? OR away_team_id = ?)",
-        [entityId, entityId]
-      );
-
       affectedRecords.scheduling_matches_removed = deleteRows(
         database,
         "scheduling_matches",
         "DELETE FROM scheduling_matches WHERE home_team_id = ? OR away_team_id = ?",
-        [entityId, entityId]
-      );
-
-      affectedRecords.streams_removed = deleteRows(
-        database,
-        "streams",
-        "DELETE FROM streams WHERE match_id IN (SELECT id FROM matches WHERE home_team_id = ? OR away_team_id = ?)",
         [entityId, entityId]
       );
 

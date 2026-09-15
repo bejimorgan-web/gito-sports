@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
-import type { Channel, MatchAssignmentResult, PublishedLiveMatch, Stream } from "@gito/shared";
+import type { Channel } from "@gito/shared";
 import { apiClient } from "../../services/api-client";
 import { resolveAssetUrl } from "../../components/asset-url";
+import type { DesktopPublicationContext } from "../../services/publication-artifact";
 
 interface LiveMatchApprovalScreenProps {
-  assignment: MatchAssignmentResult | undefined;
-  liveMatches: PublishedLiveMatch[];
+  assignment: DesktopPublicationContext | undefined;
+  liveMatches: DesktopPublicationContext[];
   channels: Channel[];
-  onApprove: (streamId: string) => Promise<void>;
-  onPublish: (streamId: string) => Promise<void>;
-  onReassign: (streamId: string, channelId: string) => Promise<void>;
-  onDelete: (streamId: string) => Promise<void>;
+  onApprove: (publicationId: string) => Promise<void>;
+  onPublish: (publicationId: string) => Promise<void>;
+  onReassign: (publicationId: string, channelId: string) => Promise<void>;
+  onDelete: (publicationId: string) => Promise<void>;
   onOpenMatch?: (matchId?: string) => void;
 }
 
@@ -26,10 +27,10 @@ export function LiveMatchApprovalScreen({
 }: LiveMatchApprovalScreenProps) {
   const FALLBACK_LOGO = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="100%" height="100%" fill="%23081018"/></svg>';
   const [reassignChannel, setReassignChannel] = useState<Record<string, string>>({});
-  const [deletingStreamId, setDeletingStreamId] = useState<string | null>(null);
+  const [deletingPublicationId, setDeletingPublicationId] = useState<string | null>(null);
   const selectableChannels = channels;
-  const canApprove = assignment?.stream.status === "assigned" || assignment?.stream.status === "testing";
-  const canPublish = assignment?.match.status === "approved" && assignment.stream.status === "approved";
+  const canApprove = assignment?.publication.publicationStatus === "draft";
+  const canPublish = assignment?.publication.publicationStatus === "approved";
   const [competitions, setCompetitions] = useState<any[]>([]);
   const [teams, setTeams] = useState<any[]>([]);
   const [sports, setSports] = useState<any[]>([]);
@@ -58,61 +59,62 @@ export function LiveMatchApprovalScreen({
     <section className="screen-stack">
       <header className="screen-header">
         <p className="eyebrow">Approvals</p>
-        <h2>Live Match Control</h2>
-        <span>Approve assigned streams and publish live matches to delivery endpoints.</span>
+        <h2>Publication Control</h2>
+        <span>Approve publication drafts and publish live feed entries.</span>
       </header>
       <section className="console-panel">
         <div className="panel-heading">
-          <h3>Approval Queue</h3>
-          <span>{assignment ? `${assignment.match.status} / ${assignment.stream.status}` : "No pending stream"}</span>
+          <h3>Publication Queue</h3>
+          <span>{assignment ? `${assignment.publication.publicationStatus} / ${assignment.publication.availability}` : "No pending publication"}</span>
         </div>
         {assignment ? (
           <div className="approval-item">
             <div>
-              <strong>{assignment.channel.name}</strong>
-              <span>Stream ID: {assignment.stream.id}</span>
+              <strong>{assignment.source.channel?.name ?? "Selected source"}</strong>
+              <span>Publication ID: {assignment.publication.publicationId}</span>
             </div>
             <div className="button-row">
-              <button type="button" disabled={!canApprove} onClick={() => void onApprove(assignment.stream.id)}>
-                Approve Stream
+              <button type="button" disabled={!canApprove} onClick={() => void onApprove(assignment.publication.publicationId)}>
+                Approve Publication
               </button>
-              <button type="button" disabled={!canPublish} onClick={() => void onPublish(assignment.stream.id)}>
-                Publish Live
+              <button type="button" disabled={!canPublish} onClick={() => void onPublish(assignment.publication.publicationId)}>
+                Publish Live Feed
               </button>
             </div>
           </div>
         ) : (
           <div className="approval-empty">
-            <strong>No streams pending review.</strong>
-            <span>Assigned match streams will appear here before mobile publication.</span>
+            <strong>No publications pending review.</strong>
+            <span>Draft publications will appear here before they are published.</span>
           </div>
         )}
       </section>
       <section className="console-panel">
         <div className="panel-heading">
           <h3>Published Feed</h3>
-          <span>{liveMatches.length} live</span>
+          <span>{liveMatches.length} live publications</span>
         </div>
         <div className="channel-list">
           {liveMatches.map((liveMatch) => {
+            const publicationId = liveMatch.publication.publicationId;
             const selectedChannelId =
-              reassignChannel[liveMatch.stream.id] ?? selectableChannels[0]?.id ?? liveMatch.channel.id;
-            const canReassign = selectedChannelId !== liveMatch.channel.id && selectableChannels.length > 0;
+              reassignChannel[publicationId] ?? selectableChannels.find((channel) => channel.id === liveMatch.source.channelId)?.id ?? selectableChannels[0]?.id ?? liveMatch.source.channel?.id ?? "";
+            const canReassign = Boolean(selectedChannelId && liveMatch.source.channelId && selectedChannelId !== liveMatch.source.channelId && selectableChannels.length > 0);
 
             const match: any = liveMatch.match as any;
             const competition = competitions.find((c) => c.id === match.competitionId);
             const homeTeam = teams.find((t) => t.id === match.homeTeamId);
             const awayTeam = teams.find((t) => t.id === match.awayTeamId);
             const sport = competition ? sports.find((s) => s.id === competition.sportId) : undefined;
-            const homeTeamLogo = homeTeam?.logoUrl ?? liveMatch.homeTeamLogoUrl;
-            const awayTeamLogo = awayTeam?.logoUrl ?? liveMatch.awayTeamLogoUrl;
-            const competitionLogo = competition?.logoUrl ?? liveMatch.competitionLogoUrl;
-            const competitionName = competition?.name ?? liveMatch.competitionName ?? "";
-            const homeTeamLabel = homeTeam?.name ?? liveMatch.homeTeamName ?? match.homeTeamId;
-            const awayTeamLabel = awayTeam?.name ?? liveMatch.awayTeamName ?? match.awayTeamId;
+            const homeTeamLogo = homeTeam?.logoUrl ?? match.homeTeamLogoUrl ?? null;
+            const awayTeamLogo = awayTeam?.logoUrl ?? match.awayTeamLogoUrl ?? null;
+            const competitionLogo = competition?.logoUrl ?? match.competitionLogoUrl ?? null;
+            const competitionName = competition?.name ?? match.competitionName ?? "";
+            const homeTeamLabel = homeTeam?.name ?? match.homeTeamName ?? match.homeTeamId;
+            const awayTeamLabel = awayTeam?.name ?? match.awayTeamName ?? match.awayTeamId;
 
             return (
-              <div className="feed-row" key={liveMatch.stream.id}>
+              <div className="feed-row" key={publicationId}>
                 <div className="feed-row-main">
                   <div className="match-summary" onClick={() => onOpenMatch?.(match?.id)} style={{ cursor: onOpenMatch ? "pointer" : "default" }}>
                     <div className="teams">
@@ -129,8 +131,8 @@ export function LiveMatchApprovalScreen({
                     </div>
                   </div>
                   <div className="feed-channel">
-                    <strong>{liveMatch.channel.name}</strong>
-                    <span>{liveMatch.provider.name}</span>
+                    <strong>{liveMatch.source.channel?.name ?? "Unavailable source"}</strong>
+                    <span>{liveMatch.source.provider?.name ?? "Local mapping unresolved"}</span>
                   </div>
                 </div>
                 <div className="feed-row-actions">
@@ -141,7 +143,7 @@ export function LiveMatchApprovalScreen({
                       onChange={(event) =>
                         setReassignChannel((current) => ({
                           ...current,
-                          [liveMatch.stream.id]: event.target.value
+                          [publicationId]: event.target.value
                         }))
                       }
                     >
@@ -152,22 +154,22 @@ export function LiveMatchApprovalScreen({
                       ))}
                     </select>
                   </label>
-                  <button type="button" disabled={!canReassign} onClick={() => void onReassign(liveMatch.stream.id, selectedChannelId)}>
+                  <button type="button" disabled={!canReassign} onClick={() => void onReassign(publicationId, selectedChannelId)}>
                     Edit Station
                   </button>
                   <button
                     type="button"
                     className="secondary"
-                    disabled={deletingStreamId !== null}
+                    disabled={deletingPublicationId !== null}
                     onClick={() => {
-                      if (window.confirm(`Remove published stream from feed for "${liveMatch.channel.name}"?`)) {
-                        if (deletingStreamId) return;
-                        setDeletingStreamId(liveMatch.stream.id);
-                        void onDelete(liveMatch.stream.id).finally(() => setDeletingStreamId(null));
+                      if (window.confirm(`Remove published feed item for "${liveMatch.source.channel?.name ?? "this source"}"?`)) {
+                        if (deletingPublicationId) return;
+                        setDeletingPublicationId(publicationId);
+                        void onDelete(publicationId).finally(() => setDeletingPublicationId(null));
                       }
                     }}
                   >
-                    {deletingStreamId === liveMatch.stream.id ? "Deleting…" : "Remove"}
+                    {deletingPublicationId === publicationId ? "Deleting…" : "Remove"}
                   </button>
                 </div>
               </div>

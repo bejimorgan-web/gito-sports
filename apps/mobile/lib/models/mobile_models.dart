@@ -44,7 +44,8 @@ class MobileHost {
         sportId: '${json['sportId'] ?? json['sport_id'] ?? ''}',
         name: '${json['name'] ?? ''}',
         type: json['type']?.toString() ?? json['hostType']?.toString(),
-        countryId: json['countryId']?.toString() ?? json['country_id']?.toString(),
+        countryId:
+            json['countryId']?.toString() ?? json['country_id']?.toString(),
         logoUrl: json['logoUrl']?.toString() ?? json['logo_url']?.toString(),
         status: json['status']?.toString(),
       );
@@ -93,13 +94,17 @@ class MobileClub {
 }
 
 class MobileCompetition {
-    const MobileCompetition(
-            {required this.id, required this.name, this.slug, this.sportId, this.logoUrl});
+  const MobileCompetition(
+      {required this.id,
+      required this.name,
+      this.slug,
+      this.sportId,
+      this.logoUrl});
   final String id;
   final String name;
   final String? slug;
   final String? sportId;
-    final String? logoUrl;
+  final String? logoUrl;
   factory MobileCompetition.fromJson(Map<String, dynamic> json) =>
       MobileCompetition(
           id: '${json['id'] ?? ''}',
@@ -131,6 +136,87 @@ class MobileSeason {
       startsAt: json['startsAt']?.toString(),
       endsAt: json['endsAt']?.toString(),
       status: '${json['status'] ?? ''}');
+}
+
+class MobilePublishedPublication {
+  const MobilePublishedPublication({
+    required this.schemaVersion,
+    required this.publicationId,
+    required this.matchId,
+    required this.sourceReference,
+    required this.capability,
+    required this.publicationStatus,
+    required this.availability,
+    this.expiresAt,
+    required this.match,
+  });
+
+  final int schemaVersion;
+  final String publicationId;
+  final String matchId;
+  final String sourceReference;
+  final String capability;
+  final String publicationStatus;
+  final String availability;
+  final String? expiresAt;
+  final MobilePublishedMatch match;
+
+  factory MobilePublishedPublication.fromJson(Map<String, dynamic> json) {
+    final publication =
+        Map<String, dynamic>.from(json['publication'] as Map? ?? const {});
+    return MobilePublishedPublication(
+      schemaVersion: int.tryParse('${publication['schemaVersion'] ?? 0}') ?? 0,
+      publicationId: '${publication['publicationId'] ?? ''}',
+      matchId: '${publication['matchId'] ?? ''}',
+      sourceReference: '${publication['sourceReference'] ?? ''}',
+      capability: '${publication['capability'] ?? ''}',
+      publicationStatus: '${publication['publicationStatus'] ?? ''}',
+      availability: '${publication['availability'] ?? ''}',
+      expiresAt: publication['expiresAt']?.toString(),
+      match: MobilePublishedMatch.fromJson(
+          Map<String, dynamic>.from(json['match'] as Map? ?? const {})),
+    );
+  }
+}
+
+class MobilePublishedMatch {
+  const MobilePublishedMatch({
+    required this.id,
+    required this.competitionId,
+    required this.homeTeamId,
+    required this.awayTeamId,
+    required this.startsAt,
+    this.venueName,
+    this.homeTeamName,
+    this.awayTeamName,
+    this.competitionName,
+    this.sportName,
+  });
+
+  final String id;
+  final String competitionId;
+  final String homeTeamId;
+  final String awayTeamId;
+  final DateTime? startsAt;
+  final String? venueName;
+  final String? homeTeamName;
+  final String? awayTeamName;
+  final String? competitionName;
+  final String? sportName;
+
+  factory MobilePublishedMatch.fromJson(Map<String, dynamic> json) =>
+      MobilePublishedMatch(
+        id: '${json['id'] ?? ''}',
+        competitionId: '${json['competitionId'] ?? ''}',
+        homeTeamId: '${json['homeTeamId'] ?? ''}',
+        awayTeamId: '${json['awayTeamId'] ?? ''}',
+        startsAt: DateTime.tryParse('${json['startsAt'] ?? ''}'),
+        venueName: json['venueName']?.toString(),
+        homeTeamName: json['homeTeamName']?.toString(),
+        awayTeamName: json['awayTeamName']?.toString(),
+        competitionName: json['competitionName']?.toString(),
+        sportName: json['sportName']?.toString(),
+      );
 }
 
 class MobileStream {
@@ -287,33 +373,79 @@ class MobileNewsArticle {
 }
 
 class MobileLineupPlayer {
-    const MobileLineupPlayer({required this.playerId, required this.name, this.slotIndex, this.shirtNumber, this.photoUrl, this.position, this.availability = 'available'});
-    final String playerId;
-    final String name;
-    final int? slotIndex;
-    final int? shirtNumber;
-    final String? photoUrl;
-    final String? position;
-    final String availability;
-    factory MobileLineupPlayer.fromJson(Map<String, dynamic> json) => MobileLineupPlayer(
-            playerId: '${json['playerId'] ?? ''}', name: '${json['name'] ?? 'Player'}', slotIndex: (json['slotIndex'] as num?)?.toInt(), shirtNumber: (json['shirtNumber'] as num?)?.toInt(), photoUrl: json['photoUrl']?.toString(), position: json['position']?.toString(), availability: '${json['availability'] ?? 'available'}');
+  const MobileLineupPlayer(
+      {required this.playerId,
+      required this.name,
+      this.slotIndex,
+      this.shirtNumber,
+      this.photoUrl,
+      this.position,
+      this.availability = 'available'});
+  final String playerId;
+  final String name;
+  final int? slotIndex;
+  final int? shirtNumber;
+  final String? photoUrl;
+  final String? position;
+  final String availability;
+  factory MobileLineupPlayer.fromJson(Map<String, dynamic> json) =>
+      MobileLineupPlayer(
+          playerId: '${json['playerId'] ?? ''}',
+          name: '${json['name'] ?? 'Player'}',
+          slotIndex: (json['slotIndex'] as num?)?.toInt(),
+          shirtNumber: (json['shirtNumber'] as num?)?.toInt(),
+          photoUrl: json['photoUrl']?.toString(),
+          position: json['position']?.toString(),
+          availability: '${json['availability'] ?? 'available'}');
 }
 
 class MobileLineup {
-    const MobileLineup({required this.teamId, required this.status, required this.formationName, required this.formation, required this.positions, required this.starters, required this.substitutes, this.captainPlayerId});
-    final String teamId;
-    final String status;
-    final String formationName;
-    final String formation;
-    final List<Map<String, dynamic>> positions;
-    final List<MobileLineupPlayer> starters;
-    final List<MobileLineupPlayer> substitutes;
-    final String? captainPlayerId;
-    factory MobileLineup.fromJson(Map<String, dynamic> json) {
-        final formation = Map<String, dynamic>.from(json['formation'] as Map? ?? const {});
-        return MobileLineup(teamId: '${json['teamId'] ?? ''}', status: '${json['status'] ?? 'not_available'}', formationName: '${formation['name'] ?? ''}', formation: '${formation['formation'] ?? ''}', positions: (formation['positions'] as List? ?? const []).whereType<Map>().map((item) => Map<String, dynamic>.from(item)).toList(), starters: (json['starters'] as List? ?? const []).whereType<Map>().map((item) => MobileLineupPlayer.fromJson(Map<String, dynamic>.from(item))).toList(), substitutes: (json['substitutes'] as List? ?? const []).whereType<Map>().map((item) => MobileLineupPlayer.fromJson(Map<String, dynamic>.from(item))).toList(), captainPlayerId: json['captainPlayerId']?.toString());
-    }
-    String get statusLabel => status == 'confirmed' ? 'Confirmed Lineup' : status == 'possible' ? 'Possible Lineup' : 'Lineups not available yet.';
+  const MobileLineup(
+      {required this.teamId,
+      required this.status,
+      required this.formationName,
+      required this.formation,
+      required this.positions,
+      required this.starters,
+      required this.substitutes,
+      this.captainPlayerId});
+  final String teamId;
+  final String status;
+  final String formationName;
+  final String formation;
+  final List<Map<String, dynamic>> positions;
+  final List<MobileLineupPlayer> starters;
+  final List<MobileLineupPlayer> substitutes;
+  final String? captainPlayerId;
+  factory MobileLineup.fromJson(Map<String, dynamic> json) {
+    final formation =
+        Map<String, dynamic>.from(json['formation'] as Map? ?? const {});
+    return MobileLineup(
+        teamId: '${json['teamId'] ?? ''}',
+        status: '${json['status'] ?? 'not_available'}',
+        formationName: '${formation['name'] ?? ''}',
+        formation: '${formation['formation'] ?? ''}',
+        positions: (formation['positions'] as List? ?? const [])
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList(),
+        starters: (json['starters'] as List? ?? const [])
+            .whereType<Map>()
+            .map((item) =>
+                MobileLineupPlayer.fromJson(Map<String, dynamic>.from(item)))
+            .toList(),
+        substitutes: (json['substitutes'] as List? ?? const [])
+            .whereType<Map>()
+            .map((item) =>
+                MobileLineupPlayer.fromJson(Map<String, dynamic>.from(item)))
+            .toList(),
+        captainPlayerId: json['captainPlayerId']?.toString());
+  }
+  String get statusLabel => status == 'confirmed'
+      ? 'Confirmed Lineup'
+      : status == 'possible'
+          ? 'Possible Lineup'
+          : 'Lineups not available yet.';
 }
 
 class MobileFixture {
@@ -331,8 +463,8 @@ class MobileFixture {
       this.score,
       this.liveState,
       required this.live,
-    required this.streams,
-    this.lineups = const []});
+      required this.streams,
+      this.lineups = const []});
   final String id;
   final DateTime? startsAt;
   final String status;
@@ -347,7 +479,7 @@ class MobileFixture {
   final Map<String, dynamic>? liveState;
   final bool live;
   final List<MobileStream> streams;
-    final List<MobileLineup> lineups;
+  final List<MobileLineup> lineups;
   factory MobileFixture.fromJson(Map<String, dynamic> json) => MobileFixture(
       id: '${json['id'] ?? ''}',
       startsAt: DateTime.tryParse('${json['startsAt'] ?? ''}'),
@@ -378,8 +510,8 @@ class MobileFixture {
           ? Map<String, dynamic>.from(json['liveState'] as Map)
           : null,
       live: json['live'] == true,
-    streams: (json['streams'] as List? ?? const []).whereType<Map>().map((item) => MobileStream.fromJson(Map<String, dynamic>.from(item))).toList(),
-    lineups: (json['lineups'] as List? ?? const []).whereType<Map>().map((item) => MobileLineup.fromJson(Map<String, dynamic>.from(item))).toList());
+      streams: (json['streams'] as List? ?? const []).whereType<Map>().map((item) => MobileStream.fromJson(Map<String, dynamic>.from(item))).toList(),
+      lineups: (json['lineups'] as List? ?? const []).whereType<Map>().map((item) => MobileLineup.fromJson(Map<String, dynamic>.from(item))).toList());
   String get scoreLabel {
     if (score == null) return live ? 'LIVE' : status;
     final home = score?['home'];

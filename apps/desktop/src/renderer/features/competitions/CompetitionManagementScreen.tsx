@@ -38,7 +38,7 @@ export function CompetitionManagementScreen({
       homeTeamName,
       awayTeamName,
       startsAt: new Date(startsAt).toISOString(),
-      channelId: selectedChannel.id
+      streamUrl: selectedChannel.url
     });
     setStatus("Match stream assigned for review.");
   }

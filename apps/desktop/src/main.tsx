@@ -4,16 +4,6 @@ import ReactDOM from "react-dom/client";
 import { App } from "./renderer/App";
 import "./renderer/styles.css";
 
-declare global {
-  interface Window {
-    gito?: {
-      onNavigateToScreen?: (callback: (screen: string) => void) => (() => void) | void;
-      sendRendererError?: (data: unknown) => void;
-      sendRendererConsoleError?: (args: unknown) => void;
-    };
-  }
-}
-
 export {}; 
 
 function mountApp() {

@@ -3,6 +3,7 @@ import { app, BrowserWindow, ipcMain, Menu } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { registerDesktopPersistenceIpc } from "./desktop-persistence-ipc.js";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 // Respect the explicit environment-provided dev server URL. Fallback to
@@ -181,7 +182,10 @@ function createMainWindow() {
   void mainWindow.loadFile(productionIndexFile).catch(() => loadErrorScreen(mainWindow));
 }
 
-app.whenReady().then(createMainWindow);
+app.whenReady().then(() => {
+  registerDesktopPersistenceIpc();
+  createMainWindow();
+});
 
 // Receive forwarded renderer errors
 ipcMain.on('renderer-error', (_event, data) => {

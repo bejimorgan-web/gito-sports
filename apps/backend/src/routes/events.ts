@@ -49,8 +49,6 @@ export function broadcastEvent(eventType: string, payload?: unknown, eventId?: s
   }
 }
 
-const broadcastItemLevelIptvEvents = process.env.IPTV_ITEM_EVENT_STREAMING === "true" || process.env.NODE_ENV !== "production";
-
 /**
  * SSE Endpoint: /api/events
  *
@@ -76,25 +74,14 @@ eventsRouter.get("/", (request, response) => {
   const handlers = new Map<string, Function>();
 
   const eventTypes = [
-    "iptv:ingestion:completed",
-    "iptv:channel:inserted",
-    "iptv:channel:updated",
-    "iptv:channel:inactive",
-    "iptv:channel:duplicate_detected",
-    "iptv:provider:updated",
-    "iptv:sync:completed",
     "scores:updated",
     "scores:cache:refreshed",
     "scores:retry",
     "scores:failed",
-    "stream:recovered",
-    "stream:failed",
-    "stream:reconnected"
   ];
 
   for (const eventType of eventTypes) {
     const handler = (payload?: unknown) => {
-      if (!broadcastItemLevelIptvEvents && eventType.startsWith("iptv:channel:")) return;
       // Generate unique event ID for deduplication
       const eventId = `${eventType}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       broadcastEvent(eventType, payload, eventId);

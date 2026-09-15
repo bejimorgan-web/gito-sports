@@ -88,7 +88,8 @@ export type StreamSource = Channel;
 export interface Stream {
   id: EntityId;
   matchId: EntityId;
-  channelId: EntityId;
+  channelId?: EntityId;
+  streamUrl?: string;
   protocol: StreamProtocol;
   status: StreamLifecycleStatus;
   approvalStatus: StreamApprovalStatus;

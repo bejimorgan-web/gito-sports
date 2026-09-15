@@ -115,6 +115,39 @@ void main() {
     expect(detail.nextFixture?.id, 'match-1');
   });
 
+  test('parses provider-neutral published publication metadata without streams',
+      () {
+    final publication = MobilePublishedPublication.fromJson({
+      'publication': {
+        'schemaVersion': 1,
+        'publicationId': 'publication-1',
+        'matchId': 'match-1',
+        'sourceReference': 'source-opaque-1',
+        'capability': 'live',
+        'publicationStatus': 'published',
+        'availability': 'ready',
+        'expiresAt': null,
+      },
+      'match': {
+        'id': 'match-1',
+        'competitionId': 'competition-1',
+        'homeTeamId': 'team-home',
+        'awayTeamId': 'team-away',
+        'startsAt': '2026-08-20T15:00:00Z',
+        'competitionName': 'League',
+        'homeTeamName': 'Home FC',
+        'awayTeamName': 'Away FC',
+      },
+    });
+
+    expect(publication.publicationId, 'publication-1');
+    expect(publication.publicationStatus, 'published');
+    expect(publication.availability, 'ready');
+    expect(publication.match.homeTeamName, 'Home FC');
+    expect(publication.match.awayTeamName, 'Away FC');
+    expect(publication.sourceReference, 'source-opaque-1');
+  });
+
   test('parses News media, body, and source metadata', () {
     final article = MobileNewsArticle.fromJson({
       'id': 'article-1',
@@ -154,12 +187,21 @@ void main() {
       'bodyBlocks': [
         {'type': 'paragraph', 'text': 'Before'},
         {'type': 'image', 'url': 'https://example.com/image.jpg'},
-        {'type': 'video', 'platform': 'youtube', 'url': 'https://youtube.com/watch?v=1'},
-        {'type': 'social', 'platform': 'x', 'url': 'https://x.com/example/status/1'},
+        {
+          'type': 'video',
+          'platform': 'youtube',
+          'url': 'https://youtube.com/watch?v=1'
+        },
+        {
+          'type': 'social',
+          'platform': 'x',
+          'url': 'https://x.com/example/status/1'
+        },
       ],
     });
 
-    expect(article.bodyBlocks.map((block) => block.type).toList(), ['paragraph', 'image', 'video', 'social']);
+    expect(article.bodyBlocks.map((block) => block.type).toList(),
+        ['paragraph', 'image', 'video', 'social']);
     expect(article.bodyBlocks[1].url, 'https://example.com/image.jpg');
   });
 }

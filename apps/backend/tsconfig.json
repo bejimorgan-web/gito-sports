@@ -21,5 +21,5 @@
   },
   "references": [{ "path": "../../packages/shared" }],
   "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.test.ts", "src/services/iptv-test-environment.ts"]
+  "exclude": ["src/**/*.test.ts", "src/services/iptv-test-environment.ts", "src/repositories/match-streams-repository.ts", "src/services/stream-resolution-service.ts", "src/repositories/streams-repository.ts", "src/services/stream-service.ts", "src/routes/streams.ts", "src/routes/live-matches.ts", "src/repositories/provider-repository.ts", "src/repositories/iptv-catalogue-repository.ts", "src/repositories/iptv-operation-repository.ts", "src/repositories/iptv-repository.ts", "src/routes/iptv.ts", "src/services/iptv-*.ts", "src/services/m3u-*.ts", "src/services/xtream-codes.ts"]
 }

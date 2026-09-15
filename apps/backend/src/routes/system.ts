@@ -62,13 +62,12 @@ systemRouter.get("/health", async (_req, res) => {
   const diskPressure = backupStats.disk && backupStats.requiredBackupBytes
     ? backupStats.disk.freeBytes < backupStats.requiredBackupBytes
     : false;
-  const status = dbOk && health.scoreService === "ok" && health.iptvService === "ok" && !diskPressure && !backupStats.lastBackupError ? "ok" : "degraded";
+  const status = dbOk && health.scoreService === "ok" && !diskPressure && !backupStats.lastBackupError ? "ok" : "degraded";
 
   res.json({
     status,
     uptime: process.uptime(),
     db: health.db,
-    iptv: health.iptvService,
     liveScores: health.scoreService,
     renderMode: process.env.DATABASE_PATH ? true : false,
     uploads: uploadStorage,
