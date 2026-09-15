@@ -114,8 +114,19 @@ export function mobileSports() {
   return listSports().filter((sport) => sport.status === "active").map((sport) => ({ id: sport.id, name: sport.name, slug: sport.slug, logoUrl: sport.logoUrl ?? null }));
 }
 
-export function mobileCompetitions() {
-  return listCompetitions().filter((competition) => competition.status === "active").map((competition) => ({ id: competition.id, name: competition.name, slug: competition.slug, sportId: competition.sportId }));
+export function mobileCompetitions(filters?: { sportId?: string; hostId?: string; countryId?: string }) {
+  return listCompetitions(filters)
+    .filter((competition) => competition.status === "active")
+    .map((competition) => ({
+      id: competition.id,
+      name: competition.name,
+      slug: competition.slug,
+      sportId: competition.sportId,
+      ...(competition.hostId ? { hostId: competition.hostId } : {}),
+      ...(competition.countryId ? { countryId: competition.countryId } : {}),
+      ...(competition.regionId ? { regionId: competition.regionId } : {}),
+      logoUrl: competition.logoUrl ?? null
+    }));
 }
 
 export function mobileClubs(filters?: { sportId?: string; countryId?: string; status?: string; teamIds?: string[] }) {

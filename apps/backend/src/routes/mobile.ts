@@ -80,7 +80,11 @@ function parseListQueryValue(value: unknown): string[] {
 }
 
 mobileRouter.get("/sports", (_request, response) => response.json({ data: mobileSports() }));
-mobileRouter.get("/competitions", (_request, response) => response.json({ data: mobileCompetitions() }));
+mobileRouter.get("/competitions", (request, response) => response.json({ data: mobileCompetitions({
+  ...(typeof request.query.sportId === "string" ? { sportId: request.query.sportId } : {}),
+  ...(typeof request.query.hostId === "string" ? { hostId: request.query.hostId } : {}),
+  ...(typeof request.query.countryId === "string" ? { countryId: request.query.countryId } : {})
+}) }));
 mobileRouter.get("/publications", (_request, response) => response.json({ data: listPublishedPublicationFeed() }));
 
 mobileRouter.get("/clubs", (request, response) => {
