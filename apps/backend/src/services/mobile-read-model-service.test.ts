@@ -23,10 +23,10 @@ function seed() {
   db.prepare("INSERT INTO sports (id, name, slug, status, created_at, updated_at) VALUES (?, ?, ?, 'active', ?, ?)").run("sport-football", "Football", "football", now, now);
   db.prepare("INSERT INTO countries (id, name, iso2_code, iso3_code, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)").run("country-germany", "Germany", "DE", "DEU", now, now);
   db.prepare("INSERT INTO hosts (id, sport_id, name, host_type, country_id, status, created_at, updated_at) VALUES (?, ?, ?, 'country', ?, 'active', ?, ?)").run("host-germany", "sport-football", "Germany", "country-germany", now, now);
-  db.prepare("INSERT INTO competitions (id, sport_id, country_id, name, slug, scope, competition_type, participant_type, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'domestic', 'league', 'clubs', 'active', ?, ?)").run("competition-bundesliga", "sport-football", "country-germany", "Bundesliga", "bundesliga", now, now);
+  db.prepare("INSERT INTO competitions (id, sport_id, host_id, country_id, name, slug, scope, competition_type, participant_type, logo_url, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'domestic', 'league', 'clubs', ?, 'active', ?, ?)").run("competition-bundesliga", "sport-football", "host-germany", "country-germany", "Bundesliga", "bundesliga", "https://example.com/bundesliga.png", now, now);
   db.prepare("INSERT INTO seasons (id, competition_id, name, status) VALUES (?, ?, ?, 'active')").run("season-2026", "competition-bundesliga", "2026/27");
   for (const [id, name, slug] of [["team-bayern", "Bayern Munich", "bayern-munich"], ["team-dortmund", "Borussia Dortmund", "borussia-dortmund"], ["team-other", "Another Club", "another-club"]] as const) {
-    db.prepare("INSERT INTO teams (id, sport_id, country_id, name, slug, type, status, created_at, updated_at) VALUES (?, 'sport-football', 'country-germany', ?, ?, 'club', 'active', ?, ?)").run(id, name, slug, now, now);
+    db.prepare("INSERT INTO teams (id, sport_id, country_id, name, slug, type, logo_url, status, created_at, updated_at) VALUES (?, 'sport-football', 'country-germany', ?, ?, 'club', ?, 'active', ?, ?)").run(id, name, slug, `https://example.com/${slug}.png`, now, now);
   }
   db.prepare("UPDATE teams SET host_id = ?, country_id = NULL WHERE id = ?").run("host-germany", "team-bayern");
   db.prepare("INSERT INTO competition_season_teams (id, competition_id, season_id, team_id, membership_status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)").run("membership-bayern", "competition-bundesliga", "season-2026", "team-bayern", now, now);
@@ -64,6 +64,19 @@ test("mobile read model exposes publication delivery without IPTV stream relatio
   assert.equal(mobile.mobileClubNews("team-dortmund").filter((item) => item.id === article.id).length, 1);
   assert.equal(mobile.mobileFixture(fixture.id)?.news.filter((item) => item.id === article.id).length, 1);
   assert.equal(mobile.mobileFixture(fixture.id)?.playbackUrl, "https://media.example/live/match.m3u8");
+  const mapped = mobile.mobileFixture(fixture.id)!;
+  assert.equal(mapped.competition.logoUrl, "https://example.com/bundesliga.png");
+  assert.equal(mapped.homeClub.logoUrl, "https://example.com/bayern-munich.png");
+  assert.equal(mapped.awayClub.logoUrl, "https://example.com/borussia-dortmund.png");
+  assert.deepEqual(mobile.mobileCompetitions({ sportId: "sport-football", hostId: "host-germany" }), [{
+    id: "competition-bundesliga",
+    name: "Bundesliga",
+    slug: "bundesliga",
+    sportId: "sport-football",
+    hostId: "host-germany",
+    countryId: "country-germany",
+    logoUrl: "https://example.com/bundesliga.png"
+  }]);
   db.prepare("DELETE FROM publication_delivery WHERE publication_id = ?").run("publication-1");
   assert.equal(mobile.mobileFixture(fixture.id)?.playbackUrl, null);
   assert.equal(mobile.mobileCompetitionFixtures("competition-bundesliga").length, 1);
@@ -131,6 +144,44 @@ test("mobile read model exposes publication delivery without IPTV stream relatio
   assert.ok(byCompetition.some((item) => item.id === article.id));
   assert.equal(mixed.filter((item) => item.id === article.id).length, 1);
   assert.equal(byTeam.filter((item) => item.id === article.id).length, 1);
+});
+
+test("mobile competition catalog preserves canonical host ownership", () => {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  const hosts = [
+    ["host-england", "England", "country-england"],
+    ["host-france", "France", "country-france"],
+    ["host-italy", "Italy", "country-italy"],
+    ["host-uefa", "UEFA", null]
+  ] as const;
+
+  for (const [hostId, name, countryId] of hosts) {
+    if (countryId) {
+      db.prepare("INSERT INTO countries (id, name, iso2_code, iso3_code, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)").run(countryId, name, `${name.slice(0, 2).toUpperCase()}`, `${name.slice(0, 3).toUpperCase()}`, now, now);
+    }
+    db.prepare("INSERT INTO hosts (id, sport_id, name, host_type, country_id, status, created_at, updated_at) VALUES (?, 'sport-football', ?, 'country', ?, 'active', ?, ?)").run(hostId, name, countryId, now, now);
+  }
+
+  const competitions = [
+    ["competition-premier", "Premier League", "host-england", "country-england"],
+    ["competition-efl", "EFL Championship Shield", "host-england", "country-england"],
+    ["competition-ligue1", "Ligue 1", "host-france", "country-france"],
+    ["competition-seriea", "Serie A", "host-italy", "country-italy"],
+    ["competition-uefa", "UEFA Champions League", "host-uefa", null]
+  ] as const;
+
+  for (const [id, name, hostId, countryId] of competitions) {
+    db.prepare("INSERT INTO competitions (id, sport_id, host_id, country_id, name, slug, scope, competition_type, participant_type, logo_url, status, created_at, updated_at) VALUES (?, 'sport-football', ?, ?, ?, ?, 'international', 'league', 'clubs', ?, 'active', ?, ?)").run(id, hostId, countryId, name, id, `https://example.com/${id}.png`, now, now);
+  }
+
+  const namesFor = (hostId: string) => mobile.mobileCompetitions({ sportId: "sport-football", hostId }).map((item) => item.name);
+  assert.deepEqual(namesFor("host-england").sort(), ["EFL Championship Shield", "Premier League"]);
+  assert.deepEqual(namesFor("host-france"), ["Ligue 1"]);
+  assert.deepEqual(namesFor("host-italy"), ["Serie A"]);
+  assert.deepEqual(namesFor("host-uefa"), ["UEFA Champions League"]);
+  assert.equal(namesFor("host-england").includes("Bundesliga"), false);
+  assert.equal(mobile.mobileCompetitions({ sportId: "sport-football", hostId: "host-uefa" })[0]?.logoUrl, "https://example.com/competition-uefa.png");
 });
 
 test.after(() => {

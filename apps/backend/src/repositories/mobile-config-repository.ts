@@ -34,6 +34,22 @@ const normalizeEnabledValue = (value: number | boolean | string | null | undefin
 };
 
 export const MobileConfigRepository = {
+  getPlaybackBrandingUrl(): string | null {
+    const row = getDatabase().prepare("SELECT setting_value FROM operator_settings WHERE setting_key = ? LIMIT 1").get("mobile.playback_branding_url") as { setting_value?: string } | undefined;
+    return row?.setting_value?.trim() || null;
+  },
+
+  setPlaybackBrandingUrl(url: string | null): string | null {
+    const normalized = url?.trim() || null;
+    const now = new Date().toISOString();
+    getDatabase().prepare(`
+      INSERT INTO operator_settings (id, operator_user_id, setting_key, setting_value, created_at, updated_at)
+      VALUES (?, NULL, ?, ?, ?, ?)
+      ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = excluded.updated_at
+    `).run(crypto.randomUUID(), "mobile.playback_branding_url", normalized ?? "", now, now);
+    return normalized;
+  },
+
   /**
    * Get the complete mobile navigation config.
    */

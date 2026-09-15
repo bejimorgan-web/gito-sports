@@ -228,8 +228,19 @@ export function listPublishedPublicationFeed() {
       m.updated_at AS match_updated_at,
       home.name AS home_team_name,
       away.name AS away_team_name,
+      home.logo_url AS home_team_logo_url,
+      away.logo_url AS away_team_logo_url,
       competition.name AS competition_name,
+      competition.logo_url AS competition_logo_url,
+      host.name AS host_name,
+      host.logo_url AS host_logo_url,
+      country.name AS country_name,
+      country.logo_url AS country_logo_url,
+      country.flag_url AS country_flag_url,
+      region.name AS region_name,
+      country_region.name AS country_region_name,
       sport.name AS sport_name,
+      sport.logo_url AS sport_logo_url,
       delivery.delivery_reference,
       delivery.playback_url
     FROM publication_artifacts pa
@@ -237,6 +248,10 @@ export function listPublishedPublicationFeed() {
     LEFT JOIN teams home ON home.id = m.home_team_id
     LEFT JOIN teams away ON away.id = m.away_team_id
     LEFT JOIN competitions competition ON competition.id = m.competition_id
+    LEFT JOIN hosts host ON host.id = competition.host_id
+    LEFT JOIN countries country ON country.id = competition.country_id
+    LEFT JOIN regions region ON region.id = competition.region_id
+    LEFT JOIN regions country_region ON country_region.id = country.region_id
     LEFT JOIN sports sport ON sport.id = competition.sport_id
     LEFT JOIN publication_delivery delivery ON delivery.publication_id = pa.publication_id
     WHERE pa.publication_status = 'published'
@@ -268,8 +283,19 @@ export function listPublishedPublicationFeed() {
     match_updated_at: string;
     home_team_name: string | null;
     away_team_name: string | null;
+    home_team_logo_url: string | null;
+    away_team_logo_url: string | null;
     competition_name: string | null;
+    competition_logo_url: string | null;
+    host_name: string | null;
+    host_logo_url: string | null;
+    country_name: string | null;
+    country_logo_url: string | null;
+    country_flag_url: string | null;
+    region_name: string | null;
+    country_region_name: string | null;
     sport_name: string | null;
+    sport_logo_url: string | null;
     delivery_reference: string | null;
     playback_url: string | null;
   }>;
@@ -289,8 +315,21 @@ export function listPublishedPublicationFeed() {
       ...(row.venue_name ? { venueName: row.venue_name } : {}),
       ...(row.home_team_name ? { homeTeamName: row.home_team_name } : {}),
       ...(row.away_team_name ? { awayTeamName: row.away_team_name } : {}),
+      ...(row.home_team_logo_url ? { homeTeamLogoUrl: row.home_team_logo_url } : {}),
+      ...(row.away_team_logo_url ? { awayTeamLogoUrl: row.away_team_logo_url } : {}),
       ...(row.competition_name ? { competitionName: row.competition_name } : {}),
-      ...(row.sport_name ? { sportName: row.sport_name } : {})
+      ...(row.competition_logo_url ? { competitionLogoUrl: row.competition_logo_url } : {}),
+      ...(row.sport_name ? { sportName: row.sport_name } : {}),
+      ...(row.sport_logo_url ? { sportLogoUrl: row.sport_logo_url } : {}),
+      ...(row.host_name ? { hostName: row.host_name } : {}),
+      ...(row.host_logo_url ? { hostLogoUrl: row.host_logo_url } : {}),
+      ...(row.country_name ? { countryName: row.country_name } : {}),
+      ...(row.country_logo_url || row.country_flag_url
+        ? { countryLogoUrl: row.country_logo_url ?? row.country_flag_url }
+        : {}),
+      ...(row.region_name || row.country_region_name
+        ? { regionName: row.region_name ?? row.country_region_name }
+        : {})
     },
     ...(row.delivery_reference ? { deliveryReference: row.delivery_reference } : {}),
     ...(row.playback_url ? { playbackUrl: row.playback_url } : {})

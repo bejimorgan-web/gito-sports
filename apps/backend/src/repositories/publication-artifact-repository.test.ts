@@ -27,6 +27,7 @@ const {
   updatePublicationArtifact
 } = await import("./publication-artifact-repository.js");
 const { validatePublicationSourceReference } = await import("../services/publication-artifact.js");
+const { buildMobileLiveMatches, isLiveWindowMatch } = await import("../routes/mobile.js");
 
 function seedMatch() {
   const db = getDatabase();
@@ -139,6 +140,130 @@ test("published delivery is match-scoped and accepts only public HTTPS playback"
   assert.equal(published.playbackUrl, "https://media.example/live/match.m3u8");
   assert.equal("channelId" in published, false);
   assert.equal("providerId" in published, false);
+});
+
+test("live publication feed enforces the 30-minute window and canonical ordering", () => {
+  const db = getDatabase();
+  const now = Date.now();
+  const soon = new Date(now + 10 * 60 * 1000).toISOString();
+  const later = new Date(now + 20 * 60 * 1000).toISOString();
+  const latest = new Date(now + 25 * 60 * 1000).toISOString();
+  const hidden = new Date(now + 45 * 60 * 1000).toISOString();
+
+  const sportId = "sport-live-order";
+  const basketballId = "sport-live-basketball";
+  const eplId = "competition-live-epl";
+  const faCupId = "competition-live-facup";
+  const laLigaId = "competition-live-laliga";
+  const nbaId = "competition-live-nba";
+  const englandHostId = "host-live-england";
+  const spainHostId = "host-live-spain";
+  const usaHostId = "host-live-usa";
+
+  db.prepare("INSERT OR IGNORE INTO sports (id, name, slug, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(sportId, "Football", "football-live-order", new Date().toISOString(), new Date().toISOString());
+  db.prepare("INSERT OR IGNORE INTO sports (id, name, slug, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(basketballId, "Basketball", "basketball-live-order", new Date().toISOString(), new Date().toISOString());
+  db.prepare("INSERT OR IGNORE INTO hosts (id, sport_id, name, host_type, country_id, status, created_at, updated_at) VALUES (?, ?, ?, 'country', NULL, 'active', ?, ?)").run(englandHostId, sportId, "England", new Date().toISOString(), new Date().toISOString());
+  db.prepare("INSERT OR IGNORE INTO hosts (id, sport_id, name, host_type, country_id, status, created_at, updated_at) VALUES (?, ?, ?, 'country', NULL, 'active', ?, ?)").run(spainHostId, sportId, "Spain", new Date().toISOString(), new Date().toISOString());
+  db.prepare("INSERT OR IGNORE INTO hosts (id, sport_id, name, host_type, country_id, status, created_at, updated_at) VALUES (?, ?, ?, 'country', NULL, 'active', ?, ?)").run(usaHostId, basketballId, "USA", new Date().toISOString(), new Date().toISOString());
+  db.prepare("INSERT OR IGNORE INTO competitions (id, sport_id, host_id, name, slug, scope, competition_type, participant_type, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'international', 'league', 'clubs', 'active', ?, ?)").run(eplId, sportId, englandHostId, "Premier League", "premier-league-live-order", new Date().toISOString(), new Date().toISOString());
+  db.prepare("INSERT OR IGNORE INTO competitions (id, sport_id, host_id, name, slug, scope, competition_type, participant_type, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'international', 'cup', 'clubs', 'active', ?, ?)").run(faCupId, sportId, englandHostId, "FA Cup", "fa-cup-live-order", new Date().toISOString(), new Date().toISOString());
+  db.prepare("INSERT OR IGNORE INTO competitions (id, sport_id, host_id, name, slug, scope, competition_type, participant_type, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'international', 'league', 'clubs', 'active', ?, ?)").run(laLigaId, sportId, spainHostId, "La Liga", "la-liga-live-order", new Date().toISOString(), new Date().toISOString());
+  db.prepare("INSERT OR IGNORE INTO competitions (id, sport_id, host_id, name, slug, scope, competition_type, participant_type, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'international', 'league', 'clubs', 'active', ?, ?)").run(nbaId, basketballId, usaHostId, "NBA", "nba-live-order", new Date().toISOString(), new Date().toISOString());
+
+  const makeMatch = (id: string, competitionId: string, startsAt: string, status = "scheduled") => {
+    db.prepare("INSERT OR IGNORE INTO teams (id, sport_id, name, slug, type, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'club', 'active', ?, ?) , (?, ?, ?, ?, 'club', 'active', ?, ?)").run(
+      `${id}-home`, sportId, `${id} Home`, `${id}-home`, new Date().toISOString(), new Date().toISOString(),
+      `${id}-away`, sportId, `${id} Away`, `${id}-away`, new Date().toISOString(), new Date().toISOString()
+    );
+    db.prepare("INSERT OR IGNORE INTO matches (id, competition_id, home_team_id, away_team_id, starts_at, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
+      id, competitionId, `${id}-home`, `${id}-away`, startsAt, status, new Date().toISOString(), new Date().toISOString()
+    );
+  };
+
+  makeMatch("match-live-fa-cup", faCupId, soon, "scheduled");
+  makeMatch("match-live-premier", eplId, later, "scheduled");
+  makeMatch("match-live-premier-later", eplId, latest, "scheduled");
+  makeMatch("match-live-la-liga", laLigaId, soon, "scheduled");
+  makeMatch("match-live-nba", nbaId, soon, "scheduled");
+  makeMatch("match-hidden-too-early", eplId, hidden, "scheduled");
+
+  for (const matchId of ["match-hidden-too-early", "match-live-la-liga", "match-live-premier-later", "match-live-nba", "match-live-fa-cup", "match-live-premier"]) {
+    const artifact = createPublicationArtifact({ matchId, sourceReference: `source-${matchId}` });
+    approvePublicationArtifact(artifact.publicationId);
+    publishPublicationArtifact(artifact.publicationId);
+    setPublicationDelivery(artifact.publicationId, { deliveryReference: `delivery-${matchId}`, playbackUrl: `https://media.example/${matchId}.m3u8` });
+  }
+
+  const liveFeed = listPublishedPublicationFeed();
+  const visible = buildMobileLiveMatches(liveFeed, new Date(now)).map((entry: any) => entry.match.id);
+
+  assert.deepEqual(visible, [
+    "match-live-nba",
+    "match-live-fa-cup",
+    "match-live-premier",
+    "match-live-premier-later",
+    "match-live-la-liga"
+  ]);
+  const unknownAvailability = buildMobileLiveMatches(liveFeed, new Date(now)).find((entry: any) => entry.match.id === "match-live-fa-cup");
+  assert.equal(unknownAvailability?.stream.status, "unavailable");
+  assert.equal(unknownAvailability?.stream.healthStatus, "unknown");
+  assert.equal(liveFeed.some((entry: any) => entry.match.id === "match-hidden-too-early"), false);
+  assert.equal(isLiveWindowMatch(new Date(now + 31 * 60 * 1000).toISOString(), "scheduled", new Date(now)), false);
+  assert.equal(isLiveWindowMatch(new Date(now + 30 * 60 * 1000).toISOString(), "scheduled", new Date(now)), true);
+  assert.equal(isLiveWindowMatch(new Date(now + 15 * 60 * 1000).toISOString(), "scheduled", new Date(now)), true);
+  assert.equal(isLiveWindowMatch(new Date(now).toISOString(), "live", new Date(now)), true);
+  assert.equal(isLiveWindowMatch(new Date(now - 10 * 60 * 1000).toISOString(), "ended", new Date(now)), false);
+  assert.equal(isLiveWindowMatch(new Date(now - 10 * 60 * 1000).toISOString(), "cancelled", new Date(now)), false);
+  assert.equal(isLiveWindowMatch(new Date(now - 10 * 60 * 1000).toISOString(), "postponed", new Date(now)), false);
+  assert.equal(isLiveWindowMatch(undefined, "scheduled", new Date(now)), false);
+  assert.equal(isLiveWindowMatch("invalid", "scheduled", new Date(now)), false);
+});
+
+test("live response preserves canonical identity and logo fields", () => {
+  const now = new Date();
+  const live = buildMobileLiveMatches([{
+    match: {
+      id: "match-live-identity",
+      startsAt: new Date(now.getTime() - 5 * 60 * 1000).toISOString(),
+      status: "live",
+      sportName: "Soccer",
+      sportLogoUrl: "/uploads/soccer.png",
+      hostName: "Germany",
+      hostLogoUrl: "/uploads/germany.png",
+      regionName: "Europe",
+      countryName: "Germany",
+      countryLogoUrl: "/uploads/germany-flag.png",
+      competitionName: "Bundesliga",
+      competitionLogoUrl: "/uploads/bundesliga.png",
+      homeTeamName: "Bayern Munich",
+      homeTeamLogoUrl: "/uploads/bayern.png",
+      awayTeamName: "Borussia Dortmund",
+      awayTeamLogoUrl: "/uploads/dortmund.png"
+    },
+    publication: { publicationId: "publication-live-identity", publicationStatus: "published", availability: "ready" },
+    playbackUrl: "https://media.example/live.m3u8"
+  }], now);
+
+  assert.deepEqual(live[0], {
+    match: live[0].match,
+    publication: live[0].publication,
+    playbackUrl: "https://media.example/live.m3u8",
+    deliveryReference: undefined,
+    stream: { id: "publication-live-identity", status: "active", healthStatus: "active" },
+    homeTeamName: "Bayern Munich",
+    awayTeamName: "Borussia Dortmund",
+    competitionName: "Bundesliga",
+    sportName: "Soccer",
+    hostName: "Germany",
+    regionName: "Europe",
+    countryName: "Germany",
+    sportLogoUrl: "/uploads/soccer.png",
+    hostLogoUrl: "/uploads/germany.png",
+    countryLogoUrl: "/uploads/germany-flag.png",
+    competitionLogoUrl: "/uploads/bundesliga.png",
+    homeTeamLogoUrl: "/uploads/bayern.png",
+    awayTeamLogoUrl: "/uploads/dortmund.png"
+  });
 });
 
 test.after(() => {

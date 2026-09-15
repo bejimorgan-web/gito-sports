@@ -8,6 +8,19 @@ import { MobileFeatureService } from "../services/mobile-feature-service.js";
 
 export const adminRouter = Router();
 
+adminRouter.put("/mobile/branding", protectedRoute, (request, response) => {
+  const url = request.body?.playbackBrandingUrl;
+  if (url !== null && typeof url !== "string") {
+    response.status(400).json({ error: "invalid_playback_branding_url" });
+    return;
+  }
+  if (typeof url === "string" && url.trim() && !url.startsWith("/uploads/") && !/^https?:\/\//i.test(url.trim())) {
+    response.status(400).json({ error: "invalid_playback_branding_url" });
+    return;
+  }
+  response.json({ data: { playbackBrandingUrl: MobileConfigRepository.setPlaybackBrandingUrl(url) } });
+});
+
 function getBootstrapTokenFromRequest(request: any): string | null {
   const authHeader = request.headers?.authorization;
   if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {

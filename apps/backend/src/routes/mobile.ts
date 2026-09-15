@@ -3,6 +3,7 @@ import { Router } from "express";
 
 import { MatchService } from "../services/match-service.js";
 import { MobileFeatureService, DEFAULT_NAVIGATION_FEATURES, MobileFeatureNavigationRow } from "../services/mobile-feature-service.js";
+import { MobileConfigRepository } from "../repositories/mobile-config-repository.js";
 import { getDatabase } from "../db/connection.js";
 import { protectedRoute } from "../middleware/protected.js";
 import { listPublishedPublicationFeed } from "../repositories/publication-artifact-repository.js";
@@ -77,6 +78,116 @@ function parseListQueryValue(value: unknown): string[] {
     .flatMap((entry) => entry.split(","))
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0))];
+}
+
+export function isLiveWindowMatch(startedAt: unknown, matchStatus: unknown, now = new Date()): boolean {
+  const normalizedStatus = String(matchStatus ?? "").trim().toLowerCase();
+  const ineligible = new Set([
+    "ended",
+    "cancelled",
+    "postponed",
+    "completed",
+    "aborted",
+    "suspended",
+    "finished",
+    "declined"
+  ]);
+
+  if (ineligible.has(normalizedStatus)) {
+    return false;
+  }
+
+  const kickoff = new Date(String(startedAt ?? ""));
+  if (Number.isNaN(kickoff.getTime())) {
+    return false;
+  }
+
+  const windowStart = new Date(kickoff.getTime() - 30 * 60 * 1000);
+  if (now < windowStart && kickoff > now) {
+    return false;
+  }
+
+  if (now < kickoff) {
+    return now >= windowStart;
+  }
+
+  return true;
+}
+
+function compareLiveEntries(left: any, right: any) {
+  const leftSport = String(left?.match?.sportName ?? "").toLocaleLowerCase();
+  const rightSport = String(right?.match?.sportName ?? "").toLocaleLowerCase();
+  const sportComparison = leftSport.localeCompare(rightSport);
+  if (sportComparison !== 0) {
+    return sportComparison;
+  }
+
+  const leftHost = String(left?.match?.hostName ?? left?.match?.countryName ?? left?.match?.regionName ?? "").toLocaleLowerCase();
+  const rightHost = String(right?.match?.hostName ?? right?.match?.countryName ?? right?.match?.regionName ?? "").toLocaleLowerCase();
+  const hostComparison = leftHost.localeCompare(rightHost);
+  if (hostComparison !== 0) {
+    return hostComparison;
+  }
+
+  const leftCompetition = String(left?.match?.competitionName ?? "").toLocaleLowerCase();
+  const rightCompetition = String(right?.match?.competitionName ?? "").toLocaleLowerCase();
+  const competitionComparison = leftCompetition.localeCompare(rightCompetition);
+  if (competitionComparison !== 0) {
+    return competitionComparison;
+  }
+
+  const kickoffComparison = new Date(left?.match?.startsAt ?? 0).getTime() - new Date(right?.match?.startsAt ?? 0).getTime();
+  if (kickoffComparison !== 0) {
+    return kickoffComparison;
+  }
+
+  return String(left?.match?.id ?? "").localeCompare(String(right?.match?.id ?? ""));
+}
+
+export function buildMobileLiveMatches(feed: any[], now = new Date()) {
+  return feed
+    .filter((entry: any) => {
+      const playbackUrl = typeof entry.playbackUrl === "string" ? entry.playbackUrl.trim() : "";
+      if (!playbackUrl) {
+        return false;
+      }
+
+      return isLiveWindowMatch(entry.match?.startsAt, entry.match?.status ?? entry.publication?.publicationStatus ?? "scheduled", now);
+    })
+    .sort(compareLiveEntries)
+    .map((entry: any) => {
+      const availability = entry.publication?.availability;
+      const playbackAvailable = availability === "ready" || availability === "online" || availability === "degraded";
+      const healthStatus = availability === "ready" || availability === "online"
+        ? "active"
+        : availability === "degraded"
+          ? "degraded"
+          : availability === "offline"
+            ? "failed"
+            : "unknown";
+
+      return {
+        match: entry.match,
+        publication: entry.publication,
+        playbackUrl: entry.playbackUrl,
+        deliveryReference: entry.deliveryReference,
+        stream: { id: entry.publication.publicationId, status: playbackAvailable ? "active" : "unavailable", healthStatus },
+        homeTeamName: entry.match.homeTeamName,
+        awayTeamName: entry.match.awayTeamName,
+        competitionName: entry.match.competitionName,
+        sportName: entry.match.sportName,
+        ...(entry.match.hostName ? { hostName: entry.match.hostName } : {}),
+        ...(entry.match.regionName ? { regionName: entry.match.regionName } : {}),
+        ...(entry.match.countryName ? { countryName: entry.match.countryName } : {}),
+        ...(entry.match.sportLogoUrl ? { sportLogoUrl: entry.match.sportLogoUrl } : {}),
+        ...(entry.match.hostLogoUrl ? { hostLogoUrl: entry.match.hostLogoUrl } : {}),
+        ...(entry.match.regionLogoUrl ? { regionLogoUrl: entry.match.regionLogoUrl } : {}),
+        ...(entry.match.countryLogoUrl ? { countryLogoUrl: entry.match.countryLogoUrl } : {}),
+        ...(entry.match.competitionLogoUrl ? { competitionLogoUrl: entry.match.competitionLogoUrl } : {}),
+        ...(entry.match.homeTeamLogoUrl ? { homeTeamLogoUrl: entry.match.homeTeamLogoUrl } : {}),
+        ...(entry.match.awayTeamLogoUrl ? { awayTeamLogoUrl: entry.match.awayTeamLogoUrl } : {})
+      };
+    });
 }
 
 mobileRouter.get("/sports", (_request, response) => response.json({ data: mobileSports() }));
@@ -226,20 +337,8 @@ mobileRouter.get("/seasons/:seasonId/teams", (request, response) => {
   response.json({ data: result.teams });
 });
 
-mobileRouter.get("/matches/live", (request, response) => {
-  const matches = listPublishedPublicationFeed()
-    .filter((entry: any) => typeof entry.playbackUrl === "string" && entry.playbackUrl.length > 0)
-    .map((entry: any) => ({
-      match: entry.match,
-      publication: entry.publication,
-      playbackUrl: entry.playbackUrl,
-      deliveryReference: entry.deliveryReference,
-      stream: { id: entry.publication.publicationId, status: "active", healthStatus: entry.publication.availability === "degraded" ? "degraded" : "active" },
-      homeTeamName: entry.match.homeTeamName,
-      awayTeamName: entry.match.awayTeamName,
-      competitionName: entry.match.competitionName,
-      sportName: entry.match.sportName
-    }));
+mobileRouter.get("/matches/live", (_request, response) => {
+  const matches = buildMobileLiveMatches(listPublishedPublicationFeed());
 
   response.json({
     data: matches
@@ -268,6 +367,10 @@ mobileRouter.get("/features", (_request, response) => {
       message: "Failed to fetch mobile feature flags"
     });
   }
+});
+
+mobileRouter.get("/branding", (_request, response) => {
+  response.json({ data: { playbackBrandingUrl: MobileConfigRepository.getPlaybackBrandingUrl() } });
 });
 
 mobileRouter.get("/features/debug", (_request, response) => {
