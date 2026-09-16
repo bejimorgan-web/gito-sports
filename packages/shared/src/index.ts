@@ -153,5 +153,6 @@ export type {
   PublicationArtifactSubmission,
   PublicationAvailability,
   PublicationCapability,
-  PublicationStatus
+  PublicationStatus,
+  PublicationPlaybackMode
 } from "./publication.js";

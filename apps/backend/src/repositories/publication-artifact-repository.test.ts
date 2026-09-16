@@ -134,12 +134,31 @@ test("published delivery is match-scoped and accepts only public HTTPS playback"
   assert.throws(() => setPublicationDelivery(artifact.publicationId, { deliveryReference: "delivery-private", playbackUrl: "https://user:password@example.com/live.m3u8" }), /publication_delivery_url_unsafe/);
   assert.throws(() => setPublicationDelivery(artifact.publicationId, { deliveryReference: "delivery-token", playbackUrl: "https://example.com/live.m3u8?token=secret" }), /publication_delivery_url_unsafe/);
   assert.ok(setPublicationDelivery(artifact.publicationId, { deliveryReference: "delivery-public", playbackUrl: "https://media.example/live/match.m3u8" }));
+  assert.throws(() => setPublicationDelivery(artifact.publicationId, {
+    deliveryReference: "delivery-invalid-xtream",
+    playbackMode: "DIRECT_XTREAM",
+    playbackUrl: "https://example.com/not-a-provider-resource.m3u8"
+  }), /publication_delivery_url_unsafe/);
+
+  const xtream = createPublicationArtifact({ matchId: "match-publication", sourceReference: "desktop-xtream-reference" });
+  assert.ok(setPublicationDelivery(xtream.publicationId, {
+    deliveryReference: "delivery-xtream",
+    playbackMode: "DIRECT_XTREAM",
+    playbackUrl: "https://synthetic.test/live/TEST_USER/TEST_PASSWORD/123.m3u8"
+  }));
 
   const published = listPublishedPublicationFeed().find((entry: any) => entry.publication.publicationId === artifact.publicationId) as any;
   assert.equal(published.deliveryReference, "delivery-public");
   assert.equal(published.playbackUrl, "https://media.example/live/match.m3u8");
+  assert.equal(published.playbackMode, "DIRECT_SAFE");
   assert.equal("channelId" in published, false);
   assert.equal("providerId" in published, false);
+
+  approvePublicationArtifact(xtream.publicationId);
+  publishPublicationArtifact(xtream.publicationId);
+  const xtreamFeed = listPublishedPublicationFeed().find((entry: any) => entry.publication.publicationId === xtream.publicationId) as any;
+  assert.equal(xtreamFeed.playbackMode, "DIRECT_XTREAM");
+  assert.equal(xtreamFeed.playbackUrl, "https://synthetic.test/live/TEST_USER/TEST_PASSWORD/123.m3u8");
 });
 
 test("live publication feed enforces the 30-minute window and canonical ordering", () => {
@@ -241,13 +260,15 @@ test("live response preserves canonical identity and logo fields", () => {
       awayTeamLogoUrl: "/uploads/dortmund.png"
     },
     publication: { publicationId: "publication-live-identity", publicationStatus: "published", availability: "ready" },
-    playbackUrl: "https://media.example/live.m3u8"
+    playbackUrl: "https://media.example/live.m3u8",
+    playbackMode: "DIRECT_XTREAM"
   }], now);
 
   assert.deepEqual(live[0], {
     match: live[0].match,
     publication: live[0].publication,
     playbackUrl: "https://media.example/live.m3u8",
+    playbackMode: "DIRECT_XTREAM",
     deliveryReference: undefined,
     stream: { id: "publication-live-identity", status: "active", healthStatus: "active" },
     homeTeamName: "Bayern Munich",

@@ -1,4 +1,5 @@
 import type { PublicationAvailability, PublicationCapability, PublicationStatus } from "@gito/shared";
+import type { PublicationPlaybackMode } from "@gito/shared";
 
 export const PUBLICATION_ARTIFACT_SCHEMA_VERSION = 1;
 
@@ -53,6 +54,35 @@ export function assertPublicationAvailability(value: unknown): asserts value is 
   if (!( ["ready", "degraded", "offline", "unknown"] as const).includes(value as PublicationAvailability)) {
     throw new Error("publication_availability_invalid");
   }
+}
+
+export function assertPublicationPlaybackMode(value: unknown): asserts value is PublicationPlaybackMode {
+  if (value !== "DIRECT_SAFE" && value !== "DIRECT_XTREAM") throw new Error("publication_playback_mode_invalid");
+}
+
+export function validatePublicationDeliveryUrl(value: string, mode: PublicationPlaybackMode): string {
+  let url: URL;
+  try { url = new URL(value); } catch { throw new Error("publication_delivery_url_invalid"); }
+  if (url.protocol !== "https:" || url.username || url.password) throw new Error("publication_delivery_url_unsafe");
+  for (const key of ["token", "key", "password", "secret", "auth", "user"]) {
+    if (url.searchParams.has(key)) throw new Error("publication_delivery_url_unsafe");
+  }
+
+  if (mode === "DIRECT_SAFE") {
+    const pathSegments = url.pathname.split("/").filter(Boolean);
+    const mediaKind = pathSegments[0]?.toLowerCase();
+    if (["live", "movie", "series"].includes(mediaKind ?? "") && pathSegments.length >= 4) {
+      throw new Error("publication_delivery_url_unsafe");
+    }
+  } else {
+    const pathSegments = url.pathname.split("/").filter(Boolean);
+    const mediaKind = pathSegments[0]?.toLowerCase();
+    if (!["live", "movie", "series"].includes(mediaKind ?? "") || pathSegments.length < 4 || !pathSegments.at(-1)?.includes(".")) {
+      throw new Error("publication_delivery_url_unsafe");
+    }
+  }
+
+  return url.toString();
 }
 
 export function assertPublicationStatusTransition(current: PublicationStatus, next: PublicationStatus) {

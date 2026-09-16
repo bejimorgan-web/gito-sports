@@ -921,7 +921,7 @@ export const apiClient = {
       body: JSON.stringify({ matchId })
     });
   },
-  setPublicationDelivery(publicationId: string, input: { deliveryReference: string; playbackUrl: string }, accessToken: string) {
+  setPublicationDelivery(publicationId: string, input: { deliveryReference: string; playbackUrl: string; playbackMode?: "DIRECT_SAFE" | "DIRECT_XTREAM" }, accessToken: string) {
     return request<PublicationArtifact>(`/publication-artifacts/${publicationId}/delivery`, {
       method: "POST", headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input)
     });

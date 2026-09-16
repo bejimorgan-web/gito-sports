@@ -11,6 +11,7 @@ void main() {
       'awayTeamLogoUrl': 'https://example.com/blue.png',
       'competitionLogoUrl': 'https://example.com/super-league.png',
       'playbackUrl': 'https://stream.example/live.m3u8',
+      'playbackMode': 'DIRECT_XTREAM',
       'match': {
         'id': 'match-1',
         'homeTeamId': 'home-1',
@@ -32,6 +33,7 @@ void main() {
     expect(match.awayTeam, 'Blue United');
     expect(match.competition, 'Super League');
     expect(match.playbackUrl, 'https://stream.example/live.m3u8');
+    expect(match.playbackMode, 'DIRECT_XTREAM');
     expect(match.homeTeamLogoUrl, 'https://example.com/green.png');
     expect(match.competitionLogoUrl, 'https://example.com/super-league.png');
     expect(match.hasPlayableStream, isTrue);

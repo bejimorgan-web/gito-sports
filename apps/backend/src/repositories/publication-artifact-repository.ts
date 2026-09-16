@@ -6,6 +6,7 @@ import type {
   PublicationCapability,
   PublicationStatus
 } from "@gito/shared";
+import type { PublicationPlaybackMode } from "@gito/shared";
 import { getDatabase } from "../db/connection.js";
 import {
   PUBLICATION_ARTIFACT_SCHEMA_VERSION,
@@ -13,7 +14,8 @@ import {
   assertPublicationCapability,
   assertPublicationStatus,
   assertPublicationStatusTransition,
-  validatePublicationSourceReference
+  validatePublicationSourceReference,
+  validatePublicationDeliveryUrl
 } from "../services/publication-artifact.js";
 
 type PublicationRow = {
@@ -52,6 +54,7 @@ const createTableSql = `
   CREATE TABLE IF NOT EXISTS publication_delivery (
     publication_id TEXT PRIMARY KEY,
     delivery_reference TEXT NOT NULL,
+    playback_mode TEXT NOT NULL DEFAULT 'DIRECT_SAFE',
     playback_url TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (publication_id) REFERENCES publication_artifacts(publication_id) ON DELETE CASCADE
@@ -68,6 +71,10 @@ function ensureSchema() {
   if (schemaReady) return;
   const database = getDatabase();
   database.exec(createTableSql);
+  const deliveryColumns = database.prepare("PRAGMA table_info(publication_delivery)").all() as Array<{ name: string }>;
+  if (!deliveryColumns.some((column) => column.name === "playback_mode")) {
+    database.exec("ALTER TABLE publication_delivery ADD COLUMN playback_mode TEXT NOT NULL DEFAULT 'DIRECT_SAFE'");
+  }
   const table = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'publication_artifacts'").get() as { sql?: string } | undefined;
   if (table?.sql && !table.sql.includes("'approved'")) {
     database.exec("PRAGMA foreign_keys = OFF;");
@@ -193,10 +200,10 @@ export function getPublicationArtifactByMatchId(matchId: string) {
   return row ? mapPublication(row) : undefined;
 }
 
-export function getPublishedPublicationDeliveryByMatchId(matchId: string): { playbackUrl: string; deliveryReference: string } | undefined {
+export function getPublishedPublicationDeliveryByMatchId(matchId: string): { playbackUrl: string; deliveryReference: string; playbackMode: PublicationPlaybackMode } | undefined {
   ensureSchema();
   const row = getDatabase().prepare(`
-    SELECT delivery.delivery_reference, delivery.playback_url
+    SELECT delivery.delivery_reference, delivery.playback_mode, delivery.playback_url
     FROM publication_artifacts artifact
     JOIN publication_delivery delivery ON delivery.publication_id = artifact.publication_id
     WHERE artifact.match_id = ?
@@ -204,10 +211,10 @@ export function getPublishedPublicationDeliveryByMatchId(matchId: string): { pla
       AND (artifact.expires_at IS NULL OR artifact.expires_at > ?)
     ORDER BY COALESCE(artifact.published_at, artifact.updated_at) DESC, artifact.publication_id DESC
     LIMIT 1
-  `).get(matchId, now()) as { delivery_reference: string; playback_url: string } | undefined;
+  `).get(matchId, now()) as { delivery_reference: string; playback_mode: PublicationPlaybackMode; playback_url: string } | undefined;
 
   return row
-    ? { playbackUrl: row.playback_url, deliveryReference: row.delivery_reference }
+    ? { playbackUrl: row.playback_url, deliveryReference: row.delivery_reference, playbackMode: row.playback_mode }
     : undefined;
 }
 
@@ -242,6 +249,7 @@ export function listPublishedPublicationFeed() {
       sport.name AS sport_name,
       sport.logo_url AS sport_logo_url,
       delivery.delivery_reference,
+      delivery.playback_mode,
       delivery.playback_url
     FROM publication_artifacts pa
     JOIN matches m ON m.id = pa.match_id
@@ -297,6 +305,7 @@ export function listPublishedPublicationFeed() {
     sport_name: string | null;
     sport_logo_url: string | null;
     delivery_reference: string | null;
+    playback_mode: PublicationPlaybackMode | null;
     playback_url: string | null;
   }>;
 
@@ -332,6 +341,7 @@ export function listPublishedPublicationFeed() {
         : {})
     },
     ...(row.delivery_reference ? { deliveryReference: row.delivery_reference } : {}),
+    ...(row.playback_mode ? { playbackMode: row.playback_mode } : {}),
     ...(row.playback_url ? { playbackUrl: row.playback_url } : {})
   }));
 }
@@ -344,19 +354,16 @@ export function bindPublicationArtifact(publicationId: string, matchId: string) 
   return mapPublication(current);
 }
 
-/** Stores only an opaque reference and a public credential-free playback URL. */
-export function setPublicationDelivery(publicationId: string, input: { deliveryReference: string; playbackUrl: string }) {
+/** Stores the selected direct playback URL and its explicit delivery mode. */
+export function setPublicationDelivery(publicationId: string, input: { deliveryReference: string; playbackUrl: string; playbackMode?: PublicationPlaybackMode }) {
   ensureSchema();
   if (!getRow(publicationId)) return undefined;
   const deliveryReference = validatePublicationSourceReference(input.deliveryReference);
-  let playbackUrl: URL;
-  try { playbackUrl = new URL(input.playbackUrl); } catch { throw new Error("publication_delivery_url_invalid"); }
-  if (playbackUrl.protocol !== "https:" || playbackUrl.username || playbackUrl.password || /(?:token|key|password|secret|auth|user)/i.test(playbackUrl.search)) {
-    throw new Error("publication_delivery_url_unsafe");
-  }
-  getDatabase().prepare(`INSERT INTO publication_delivery (publication_id, delivery_reference, playback_url, updated_at)
-    VALUES (?, ?, ?, ?) ON CONFLICT(publication_id) DO UPDATE SET delivery_reference = excluded.delivery_reference, playback_url = excluded.playback_url, updated_at = excluded.updated_at`)
-    .run(publicationId, deliveryReference, playbackUrl.toString(), now());
+  const playbackMode = input.playbackMode ?? "DIRECT_SAFE";
+  const playbackUrl = new URL(validatePublicationDeliveryUrl(input.playbackUrl, playbackMode));
+  getDatabase().prepare(`INSERT INTO publication_delivery (publication_id, delivery_reference, playback_mode, playback_url, updated_at)
+    VALUES (?, ?, ?, ?, ?) ON CONFLICT(publication_id) DO UPDATE SET delivery_reference = excluded.delivery_reference, playback_mode = excluded.playback_mode, playback_url = excluded.playback_url, updated_at = excluded.updated_at`)
+    .run(publicationId, deliveryReference, playbackMode, playbackUrl.toString(), now());
   return getPublicationArtifactById(publicationId);
 }
 

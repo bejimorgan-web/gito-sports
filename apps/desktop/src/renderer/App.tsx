@@ -26,7 +26,7 @@ import { FormationManagementScreen } from "./features/sports/FormationManagement
 import { AuthenticatedLayout } from "./layouts/AuthenticatedLayout";
 import { LoginScreen } from "./screens/LoginScreen";
 import { apiClient, API_BASE_URL, setAccessToken as setClientAccessToken } from "./services/api-client";
-import { buildDesktopPublicationContexts, buildLegacyStreamAssignment, buildSafePublicationPackage, PublicationWorkflowError, resolveOrCreatePublicationMatchId, validateDirectPlaybackUrl } from "./services/publication-artifact";
+import { buildDesktopPublicationContexts, buildLegacyStreamAssignment, buildSafePublicationPackage, PublicationWorkflowError, resolveOrCreatePublicationMatchId, validateDirectPlaybackUrl, validateDirectXtreamPlaybackUrl } from "./services/publication-artifact";
 import type { DesktopPublicationContext } from "./services/publication-artifact";
 import type { DesktopChannel, DesktopProviderAccount } from "../desktop-persistence-contract";
 import type { NavigationKey } from "./types/navigation";
@@ -820,6 +820,23 @@ export function App() {
       throw new PublicationWorkflowError("fixture_creation", error);
     }
     const providerName = providers.find((provider) => provider.id === selectedChannel.providerId)?.name;
+    const providerType = providers.find((provider) => provider.id === selectedChannel.providerId)?.type;
+    let deliveryUrl: string;
+    let playbackMode: "DIRECT_SAFE" | "DIRECT_XTREAM" = "DIRECT_SAFE";
+    try {
+      deliveryUrl = validateDirectPlaybackUrl(selectedChannel.url);
+    } catch (error) {
+      if (providerType !== "xtream") {
+        throw new PublicationWorkflowError("creation", error);
+      }
+      try {
+        deliveryUrl = validateDirectXtreamPlaybackUrl(selectedChannel.url);
+        playbackMode = "DIRECT_XTREAM";
+      } catch {
+        throw new PublicationWorkflowError("creation", error);
+      }
+    }
+
     const publicationPackage = buildSafePublicationPackage({
       matchId,
       localSource: {
@@ -839,10 +856,10 @@ export function App() {
       throw new PublicationWorkflowError("creation", error);
     }
     try {
-      const deliveryUrl = validateDirectPlaybackUrl(selectedChannel.url);
       await apiClient.setPublicationDelivery(createdPublication.publicationId, {
         deliveryReference: `delivery_${createdPublication.publicationId}`,
-        playbackUrl: deliveryUrl
+        playbackUrl: deliveryUrl,
+        playbackMode
       }, accessToken);
     } catch (error) {
       throw new PublicationWorkflowError("creation", error);
@@ -982,14 +999,23 @@ export function App() {
         throw new Error("publication_assignment_missing");
       }
 
-      await apiClient.revokePublicationArtifact(publicationId, accessToken);
-
       const selectedChannel = channels.find((channel) => channel.id === channelId);
       if (!selectedChannel) {
         throw new Error("selected_channel_required");
       }
 
       const providerName = providers.find((provider) => provider.id === selectedChannel.providerId)?.name;
+      let deliveryUrl: string;
+      let playbackMode: "DIRECT_SAFE" | "DIRECT_XTREAM" = "DIRECT_SAFE";
+      try {
+        deliveryUrl = validateDirectPlaybackUrl(selectedChannel.url);
+      } catch (error) {
+        const providerType = providers.find((provider) => provider.id === selectedChannel.providerId)?.type;
+        if (providerType !== "xtream") throw error;
+        deliveryUrl = validateDirectXtreamPlaybackUrl(selectedChannel.url);
+        playbackMode = "DIRECT_XTREAM";
+      }
+      await apiClient.revokePublicationArtifact(publicationId, accessToken);
       const replacementPackage = buildSafePublicationPackage({
         matchId: existingPublication.match.id,
         localSource: {
@@ -1004,10 +1030,10 @@ export function App() {
 
       const replacementPublication = await apiClient.submitPublicationArtifact(replacementPackage);
       await apiClient.bindPublicationArtifact(replacementPublication.publicationId, existingPublication.match.id, accessToken);
-      const deliveryUrl = validateDirectPlaybackUrl(selectedChannel.url);
       await apiClient.setPublicationDelivery(replacementPublication.publicationId, {
         deliveryReference: `delivery_${replacementPublication.publicationId}`,
-        playbackUrl: deliveryUrl
+        playbackUrl: deliveryUrl,
+        playbackMode
       }, accessToken);
       await window.gito?.desktopStorage?.publicationSources.upsert?.({
         publicationId: replacementPublication.publicationId,

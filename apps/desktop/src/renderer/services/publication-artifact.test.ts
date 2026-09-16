@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildDesktopPublicationContexts, buildLegacyStreamAssignment, buildSafePublicationPackage, validateDirectPlaybackUrl } from "./publication-artifact";
+import { buildDesktopPublicationContexts, buildLegacyStreamAssignment, buildSafePublicationPackage, validateDirectPlaybackUrl, validateDirectXtreamPlaybackUrl } from "./publication-artifact";
 
 test("accepts only credential-free HTTPS direct playback URLs", () => {
   assert.equal(validateDirectPlaybackUrl("https://media.example/live.m3u8"), "https://media.example/live.m3u8");
@@ -12,7 +12,7 @@ test("accepts only credential-free HTTPS direct playback URLs", () => {
 test("rejects credential-bearing Xtream media paths", () => {
   for (const kind of ["live", "movie", "series"]) {
     assert.throws(
-      () => validateDirectPlaybackUrl(`https://provider.example/${kind}/username/password/stream-123.m3u8`),
+      () => validateDirectPlaybackUrl(`https://synthetic.test/${kind}/TEST_USER/TEST_PASSWORD/stream-123.m3u8`),
       /rejects_xtream_credential_path/
     );
   }
@@ -32,6 +32,22 @@ test("rejects before publication delivery receives an unsafe URL", () => {
   );
   assert.equal(deliveryCalls, 0);
 });
+test("requires HTTPS before a publication can use an M3U channel", () => {
+  assert.throws(
+    () => validateDirectPlaybackUrl("http://provider.example/live/channel.m3u8"),
+    /publication_playback_url_requires_https/
+  );
+});
+
+test("accepts only HTTPS Xtream playback paths for direct Xtream mode", () => {
+  assert.equal(
+    validateDirectXtreamPlaybackUrl("https://synthetic.test/live/TEST_USER/TEST_PASSWORD/123.m3u8"),
+    "https://synthetic.test/live/TEST_USER/TEST_PASSWORD/123.m3u8"
+  );
+  assert.throws(() => validateDirectXtreamPlaybackUrl("http://synthetic.test/live/TEST_USER/TEST_PASSWORD/123.m3u8"), /requires_https|unsafe/);
+  assert.throws(() => validateDirectXtreamPlaybackUrl("https://synthetic.test/anything/123.m3u8"), /unsafe/);
+});
+
 
 test("publication payloads contain no local IPTV credentials", () => {
   const publication = buildSafePublicationPackage({

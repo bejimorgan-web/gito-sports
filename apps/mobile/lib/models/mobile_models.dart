@@ -147,6 +147,7 @@ class MobilePublishedPublication {
     required this.capability,
     required this.publicationStatus,
     required this.availability,
+    required this.playbackMode,
     this.expiresAt,
     required this.match,
   });
@@ -158,6 +159,7 @@ class MobilePublishedPublication {
   final String capability;
   final String publicationStatus;
   final String availability;
+    final String playbackMode;
   final String? expiresAt;
   final MobilePublishedMatch match;
 
@@ -172,6 +174,7 @@ class MobilePublishedPublication {
       capability: '${publication['capability'] ?? ''}',
       publicationStatus: '${publication['publicationStatus'] ?? ''}',
       availability: '${publication['availability'] ?? ''}',
+    playbackMode: '${json['playbackMode'] ?? publication['playbackMode'] ?? 'DIRECT_SAFE'}',
       expiresAt: publication['expiresAt']?.toString(),
       match: MobilePublishedMatch.fromJson(
           Map<String, dynamic>.from(json['match'] as Map? ?? const {})),

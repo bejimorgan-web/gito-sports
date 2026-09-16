@@ -713,6 +713,7 @@ class LiveMatch {
     required this.streamStatus,
     required this.streamHealth,
     required this.playbackUrl,
+    this.playbackMode = 'DIRECT_SAFE',
     this.sportName,
     this.countryName,
     this.sportLogoUrl,
@@ -732,6 +733,7 @@ class LiveMatch {
   final String matchStatus;
   final String streamStatus;
   final String streamHealth;
+  final String playbackMode;
   final String playbackUrl;
   final String? sportLogoUrl;
   final String? countryLogoUrl;
@@ -774,6 +776,7 @@ class LiveMatch {
 
     final homeTeamName = json['homeTeamName'] ?? match['homeTeamName'];
     final awayTeamName = json['awayTeamName'] ?? match['awayTeamName'];
+    final playbackMode = '${json['playbackMode'] ?? 'DIRECT_SAFE'}';
     final competitionName = json['competitionName'] ?? match['competitionName'];
     final playbackUrl = _normalizeMediaUrl(json['playbackUrl']);
     final startsAtSource = match['startsAt'] ?? json['startsAt'];
@@ -794,6 +797,7 @@ class LiveMatch {
       startsAt:
           DateTime.tryParse(startsAtSource?.toString() ?? '') ?? DateTime.now(),
       matchStatus: (matchStatusSource ?? 'published').toString(),
+      playbackMode: playbackMode,
       streamStatus: (streamStatusSource ?? 'active').toString(),
       streamHealth: (streamHealthSource ?? 'unknown').toString(),
       playbackUrl: playbackUrl ?? '',
@@ -3441,7 +3445,6 @@ class _PlaybackScreenState extends State<PlaybackScreen>
         eventType: 'playback_start',
         matchId: widget.match.id,
         payload: {
-          'playbackUrl': widget.match.playbackUrl,
         },
       ));
       _scheduleHideControls();
@@ -3471,7 +3474,6 @@ class _PlaybackScreenState extends State<PlaybackScreen>
         eventType: 'buffer_start',
         matchId: widget.match.id,
         payload: {
-          'playbackUrl': widget.match.playbackUrl,
           'timestamp': DateTime.now().toIso8601String(),
         },
       ));
@@ -3490,7 +3492,6 @@ class _PlaybackScreenState extends State<PlaybackScreen>
         eventType: 'buffer_end',
         matchId: widget.match.id,
         payload: {
-          'playbackUrl': widget.match.playbackUrl,
           'bufferDurationSeconds': duration,
           'timestamp': DateTime.now().toIso8601String(),
         },
@@ -3503,8 +3504,7 @@ class _PlaybackScreenState extends State<PlaybackScreen>
       eventType: 'stream_error',
       matchId: widget.match.id,
       payload: {
-        'playbackUrl': widget.match.playbackUrl,
-        'error': error.toString(),
+        'errorType': error.runtimeType.toString(),
         'timestamp': DateTime.now().toIso8601String(),
       },
     ));
@@ -3555,7 +3555,6 @@ class _PlaybackScreenState extends State<PlaybackScreen>
       eventType: 'quality_change',
       matchId: widget.match.id,
       payload: {
-        'playbackUrl': widget.match.playbackUrl,
         'quality': qualityLabel,
         'timestamp': DateTime.now().toIso8601String(),
       },

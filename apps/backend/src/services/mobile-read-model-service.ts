@@ -28,6 +28,7 @@ export type MobileFixture = {
   liveState: { isLive: boolean; status: string; homeScore: number | null; awayScore: number | null; elapsed: number | null; updatedAt: string | null } | null;
   live: boolean;
   playbackUrl: string | null;
+  playbackMode: "DIRECT_SAFE" | "DIRECT_XTREAM" | null;
   lineups: MobileLineup[];
 };
 export type MobileLineup = {
@@ -81,6 +82,7 @@ export function mapMobileFixture(fixture: any, suppliedSnapshot?: ScoreMatchSumm
   const away = clubFromRow(fixture.awayTeam, { sport: fixture.sport, country: fixture.country });
   const snapshot = suppliedSnapshot ?? getCachedScoreSnapshot(fixture.externalMatchId);
   const score = snapshot?.score && typeof snapshot.score === "object" ? snapshot.score : null;
+  const delivery = getPublishedPublicationDeliveryByMatchId(fixture.id);
   const liveState = snapshot && score
     ? {
         isLive: ["1H", "2H", "HT", "ET", "BT", "P", "LIVE", "IN_PLAY", "PAUSED", "SUSPENDED"].includes(snapshot.status),
@@ -105,7 +107,8 @@ export function mapMobileFixture(fixture: any, suppliedSnapshot?: ScoreMatchSumm
     score,
     liveState,
     live: liveState?.isLive ?? fixture.status === "live",
-    playbackUrl: getPublishedPublicationDeliveryByMatchId(fixture.id)?.playbackUrl ?? null
+    playbackUrl: delivery?.playbackUrl ?? null,
+    playbackMode: delivery?.playbackMode ?? null
     ,lineups: fixtureLineups(fixture.id)
   };
 }

@@ -3,6 +3,7 @@ import type { EntityId } from "./naming.js";
 export type PublicationCapability = "live";
 export type PublicationStatus = "draft" | "approved" | "published" | "revoked" | "unavailable";
 export type PublicationAvailability = "ready" | "degraded" | "offline" | "unknown";
+export type PublicationPlaybackMode = "DIRECT_SAFE" | "DIRECT_XTREAM";
 
 export interface PublicationArtifact {
   schemaVersion: number;

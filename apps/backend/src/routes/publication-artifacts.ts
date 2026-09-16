@@ -15,7 +15,8 @@ import {
   PublicationArtifactValidationError,
   assertPublicationAvailability,
   assertPublicationCapability,
-  assertPublicationStatus
+  assertPublicationStatus,
+  assertPublicationPlaybackMode
 } from "../services/publication-artifact.js";
 
 const allowedFields = new Set<keyof PublicationArtifactSubmission>([
@@ -134,10 +135,11 @@ publicationArtifactsRouter.post("/:publicationId/delivery", protectedRoute, (req
   const publicationId = request.params.publicationId;
   const body = request.body as Record<string, unknown>;
   if (!publicationId) { response.status(400).json({ error: "publication_id_required" }); return; }
-  if (Object.keys(body ?? {}).some((key) => key !== "deliveryReference" && key !== "playbackUrl")) { response.status(400).json({ error: "publication_delivery_field_not_allowed" }); return; }
+  if (Object.keys(body ?? {}).some((key) => !["deliveryReference", "playbackUrl", "playbackMode"].includes(key))) { response.status(400).json({ error: "publication_delivery_field_not_allowed" }); return; }
   if (typeof body.deliveryReference !== "string" || typeof body.playbackUrl !== "string") { response.status(400).json({ error: "publication_delivery_fields_required" }); return; }
   try {
-    const artifact = setPublicationDelivery(publicationId, { deliveryReference: body.deliveryReference, playbackUrl: body.playbackUrl });
+    assertPublicationPlaybackMode(body.playbackMode ?? "DIRECT_SAFE");
+    const artifact = setPublicationDelivery(publicationId, { deliveryReference: body.deliveryReference, playbackUrl: body.playbackUrl, playbackMode: body.playbackMode as "DIRECT_SAFE" | "DIRECT_XTREAM" });
     if (!artifact) { response.status(404).json({ error: "publication_artifact_not_found" }); return; }
     response.json({ data: artifact });
   } catch (error) {
