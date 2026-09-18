@@ -3,7 +3,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/mobile_models.dart';
 import '../services/mobile_api_service.dart';
-import '../services/remote_config_service.dart';
 
 class MobileStateView<T> extends StatelessWidget {
   const MobileStateView(
@@ -67,6 +66,11 @@ class _FollowPreferenceState {
     return {'sports': sports, 'competitions': competitions, 'teams': teams};
   }
 
+  static Future<void> saveTeams(Set<String> teams) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_teamsKey, teams.toList()..sort());
+  }
+
   static bool matchesNews(
       MobileNewsArticle article, Map<String, Set<String>> preferences) {
     final sports = preferences['sports'] ?? const <String>{};
@@ -122,7 +126,7 @@ class ClubsScreen extends StatefulWidget {
 }
 
 class _ClubsScreenState extends State<ClubsScreen> {
-  late Future<List<MobileClub>> _clubsFuture;
+  late Future<List<_ClubListItem>> _clubsFuture;
 
   @override
   void initState() {
@@ -130,17 +134,43 @@ class _ClubsScreenState extends State<ClubsScreen> {
     _clubsFuture = _loadClubs();
   }
 
-  Future<List<MobileClub>> _loadClubs() async {
+  Future<List<_ClubListItem>> _loadClubs() async {
     final following = await resolveMobileFollowingIds(widget.api);
-    return following.teams.isEmpty
+    final clubs = following.teams.isEmpty
         ? widget.api.getClubs()
         : widget.api.getClubs(teamIds: following.teams);
+    final loadedClubs = await clubs;
+    final details = await Future.wait(
+        loadedClubs.map((club) => widget.api.getClub(club.id)));
+    final hostsBySport = <String, List<MobileHost>>{};
+    final items = <_ClubListItem>[];
+    for (var index = 0; index < loadedClubs.length; index++) {
+      final club = loadedClubs[index];
+      final detail = details[index];
+      final sportId = detail.club.sportId;
+      final hosts =
+          hostsBySport[sportId] ?? await widget.api.getHosts(sportId: sportId);
+      hostsBySport[sportId] = hosts;
+      final hostId = detail.competitions
+          .map((competition) => competition.hostId)
+          .whereType<String>()
+          .firstWhere((id) => id.isNotEmpty, orElse: () => '');
+      final resolvedHostName =
+          (club.hostName ?? detail.club.hostName ?? '').trim().isNotEmpty
+              ? (club.hostName ?? detail.club.hostName ?? '').trim()
+              : hosts.firstWhere(
+                  (item) => item.id.trim() == hostId.trim(),
+                  orElse: () => const MobileHost(id: '', sportId: '', name: ''),
+                ).name;
+      items.add(_ClubListItem(club: detail.club, hostName: resolvedHostName));
+    }
+    return items;
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('Clubs')),
-        body: FutureBuilder<List<MobileClub>>(
+        body: FutureBuilder<List<_ClubListItem>>(
           future: _clubsFuture,
           builder: (context, snapshot) {
             if (snapshot.connectionState != ConnectionState.done) {
@@ -150,7 +180,7 @@ class _ClubsScreenState extends State<ClubsScreen> {
               return Center(
                   child: Text('Unable to load clubs.\n${snapshot.error}'));
             }
-            final clubs = snapshot.data ?? const <MobileClub>[];
+            final clubs = snapshot.data ?? const <_ClubListItem>[];
             if (clubs.isEmpty) {
               return const Center(child: Text('No clubs available.'));
             }
@@ -163,12 +193,15 @@ class _ClubsScreenState extends State<ClubsScreen> {
               child: ListView.builder(
                 itemCount: clubs.length,
                 itemBuilder: (context, index) {
-                  final club = clubs[index];
+                  final item = clubs[index];
+                  final club = item.club;
                   return ListTile(
                     leading: _Logo(url: club.logoUrl, label: club.name),
                     title: Text(club.name),
                     subtitle: Text(
-                        '${club.country?.name ?? 'Unknown country'} · ${club.sport?.name ?? 'Sport'}'),
+                        item.hostName.trim().isNotEmpty
+                            ? '${item.hostName} - ${club.sport?.name ?? 'Sport'}'
+                            : club.sport?.name ?? 'Sport'),
                     onTap: () => Navigator.of(context).push(
                         MaterialPageRoute<void>(
                             builder: (_) => ClubDetailScreen(
@@ -182,6 +215,13 @@ class _ClubsScreenState extends State<ClubsScreen> {
       );
 }
 
+class _ClubListItem {
+  const _ClubListItem({required this.club, required this.hostName});
+
+  final MobileClub club;
+  final String hostName;
+}
+
 class ClubDetailScreen extends StatefulWidget {
   const ClubDetailScreen(
       {required this.clubId, super.key, this.api = const MobileApiService()});
@@ -193,32 +233,40 @@ class ClubDetailScreen extends StatefulWidget {
 
 class _ClubDetailScreenState extends State<ClubDetailScreen> {
   int tab = 0;
-  bool liveEnabled = true;
+  bool following = false;
 
   @override
   void initState() {
     super.initState();
-    _loadLiveFlag();
+    _loadFollowingState();
   }
 
-  Future<void> _loadLiveFlag() async {
-    final prefs = await SharedPreferences.getInstance();
-    final config =
-        await RemoteConfigService(apiBaseUrl: widget.api.baseUrl, prefs: prefs)
-            .getNavigationConfig();
+  Future<void> _loadFollowingState() async {
+    final preferences = await _FollowPreferenceState.load();
+    final followedTeams = preferences['teams'] ?? const <String>{};
+    final club = await widget.api.getClub(widget.clubId);
     if (mounted) {
-      setState(() {
-        liveEnabled = config.live;
-        if (!liveEnabled && tab == 3) {
-          tab = 1;
-        }
-      });
+      setState(() => following = followedTeams
+          .contains(_FollowPreferenceState._normalize(club.club.name)));
     }
+  }
+
+  Future<void> _toggleFollowing(MobileClub club) async {
+    final preferences = await _FollowPreferenceState.load();
+    final followedTeams = preferences['teams'] ?? <String>{};
+    final normalizedName = _FollowPreferenceState._normalize(club.name);
+    if (following) {
+      followedTeams.remove(normalizedName);
+    } else {
+      followedTeams.add(normalizedName);
+    }
+    await _FollowPreferenceState.saveTeams(followedTeams);
+    if (mounted) setState(() => following = !following);
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
-      appBar: AppBar(title: Text(widget.clubId)),
+      appBar: AppBar(title: const Text('Club')),
       body: MobileStateView<MobileClubDetail>(
           future: widget.api.getClub(widget.clubId),
           emptyText: 'Club not found.',
@@ -226,20 +274,16 @@ class _ClubDetailScreenState extends State<ClubDetailScreen> {
             final futures = [
               widget.api.getClubNews(widget.clubId),
               widget.api.getClubFixtures(widget.clubId),
-              widget.api.getClubResults(widget.clubId),
-              widget.api.getClubLive(widget.clubId)
             ];
-            final tabs = <String>['News', 'Fixtures', 'Results'];
-            if (liveEnabled) {
-              tabs.add('Live');
-            }
+            const tabs = <String>['News', 'Fixtures', 'Competitions', 'Squad'];
             return Column(children: [
-              ListTile(
-                  leading:
-                      _Logo(url: detail.club.logoUrl, label: detail.club.name),
-                  title: Text(detail.club.name),
-                  subtitle: Text(
-                      '${detail.club.country?.name ?? ''} · ${detail.club.sport?.name ?? ''}')),
+              _ClubHeader(
+                club: detail.club,
+                competitions: detail.competitions,
+                api: widget.api,
+                following: following,
+                onToggleFollowing: () => _toggleFollowing(detail.club),
+              ),
               SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
@@ -256,27 +300,167 @@ class _ClubDetailScreenState extends State<ClubDetailScreen> {
                                       setState(() => tab = entry.key))))
                           .toList())),
               Expanded(
-                  child: MobileStateView<dynamic>(
-                      future: futures[tab],
-                      emptyText: tab == 0
-                          ? 'No news available for this club.'
-                          : tab == 3 && liveEnabled
-                              ? 'No live match right now.'
-                              : 'No fixtures scheduled.',
-                      builder: (context, value) => tab == 0
-                          ? _NewsList(
-                              articles: value as List<MobileNewsArticle>,
-                              api: widget.api)
-                            : tab == 1
-                              ? _ClubFixtureList(
-                                fixtures: value as List<MobileFixture>,
-                                clubId: widget.clubId,
-                                api: widget.api)
-                              : _FixtureList(
-                                fixtures: value as List<MobileFixture>,
-                                api: widget.api)))
+                  child: tab == 2
+                      ? _ClubCompetitionsSection(detail: detail)
+                      : tab == 3
+                          ? const _ClubUnavailableSection(
+                              message: 'Squad data is not available yet.')
+                          : MobileStateView<List<dynamic>>(
+                              future: futures[tab].then((value) => value),
+                              emptyText: tab == 0
+                                  ? 'No news available for this club.'
+                                  : 'No fixtures scheduled.',
+                              builder: (context, value) => tab == 0
+                                  ? _NewsList(
+                                      articles:
+                                          value as List<MobileNewsArticle>,
+                                      api: widget.api)
+                                  : _ClubFixtureList(
+                                      fixtures: value as List<MobileFixture>,
+                                      clubId: widget.clubId,
+                                      api: widget.api)))
             ]);
           }));
+}
+
+class _ClubHeader extends StatelessWidget {
+  const _ClubHeader({
+    required this.club,
+    required this.competitions,
+    required this.api,
+    required this.following,
+    required this.onToggleFollowing,
+  });
+
+  final MobileClub club;
+  final List<MobileCompetition> competitions;
+  final MobileApiService api;
+  final bool following;
+  final VoidCallback onToggleFollowing;
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<List<MobileHost>>(
+        future: api.getHosts(sportId: club.sportId),
+        builder: (context, snapshot) {
+          final hostId = competitions
+              .map((competition) => competition.hostId)
+              .whereType<String>()
+              .firstWhere((id) => id.isNotEmpty, orElse: () => '');
+          final host = snapshot.data?.cast<MobileHost?>().firstWhere(
+                (item) => item?.id == hostId,
+                orElse: () => null,
+              );
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 8),
+            child: Column(
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _Logo(url: club.logoUrl, label: club.name),
+                          const SizedBox(height: 8),
+                          Text(club.name,
+                              maxLines: 2, overflow: TextOverflow.ellipsis),
+                          Text(club.sport?.name ?? 'Sport unavailable',
+                              maxLines: 1, overflow: TextOverflow.ellipsis),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 18),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          _Logo(
+                              url: host?.logoUrl, label: host?.name ?? 'Host'),
+                          const SizedBox(height: 8),
+                          Text(host?.name ?? 'Host unavailable',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.right),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: onToggleFollowing,
+                  icon: Icon(following ? Icons.star : Icons.star_border),
+                  label: Text(following ? 'Following' : 'Follow'),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+}
+
+class _ClubCompetitionsSection extends StatefulWidget {
+  const _ClubCompetitionsSection({required this.detail});
+
+  final MobileClubDetail detail;
+
+  @override
+  State<_ClubCompetitionsSection> createState() =>
+      _ClubCompetitionsSectionState();
+}
+
+class _ClubCompetitionsSectionState extends State<_ClubCompetitionsSection> {
+  String? competitionId;
+
+  @override
+  Widget build(BuildContext context) {
+    final competitions = widget.detail.competitions;
+    if (competitions.isEmpty) {
+      return const _ClubUnavailableSection(
+          message: 'No competitions available for this club.');
+    }
+    final selectedId = competitionId ?? competitions.first.id;
+    final selected = competitions.firstWhere((item) => item.id == selectedId);
+    final seasons = widget.detail.seasons
+        .where((season) => season.competitionId == selected.id)
+        .toList();
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        DropdownButtonFormField<String>(
+          initialValue: selected.id,
+          decoration: const InputDecoration(labelText: 'Competition'),
+          items: competitions
+              .map((item) => DropdownMenuItem<String>(
+                    value: item.id,
+                    child: Text(item.name),
+                  ))
+              .toList(),
+          onChanged: (value) => setState(() => competitionId = value),
+        ),
+        const SizedBox(height: 16),
+        Text(selected.name, style: Theme.of(context).textTheme.titleLarge),
+        Text(seasons.isEmpty ? 'Season unavailable' : seasons.first.name),
+        const SizedBox(height: 24),
+        const _ClubUnavailableSection(
+            message: 'Standings unavailable for this competition.'),
+      ],
+    );
+  }
+}
+
+class _ClubUnavailableSection extends StatelessWidget {
+  const _ClubUnavailableSection({required this.message});
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(message, textAlign: TextAlign.center),
+        ),
+      );
 }
 
 class GlobalNewsScreen extends StatefulWidget {
@@ -545,7 +729,8 @@ class FixtureDetailScreen extends StatelessWidget {
               Text('Streams', style: Theme.of(context).textTheme.titleMedium),
               ...fixture.streams.map((stream) => ListTile(
                     title: Text(stream.channelName),
-                    subtitle: Text('${stream.providerName} · ${stream.healthStatus}'),
+                    subtitle:
+                        Text('${stream.providerName} · ${stream.healthStatus}'),
                     trailing: Text(stream.status),
                   )),
             ],
@@ -577,7 +762,9 @@ class _MobileLineups extends StatelessWidget {
         (item) => item.teamId == clubId,
         orElse: () => lineups.first,
       );
-      final team = lineup.teamId == fixture.homeClub.id ? fixture.homeClub : fixture.awayClub;
+      final team = lineup.teamId == fixture.homeClub.id
+          ? fixture.homeClub
+          : fixture.awayClub;
       return _MobileLineupCard(lineup: lineup, team: team, clubOnly: true);
     }
 
@@ -595,7 +782,8 @@ class _MobileLineups extends StatelessWidget {
       children: [
         Text('Lineups', style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 12),
-        _TwoTeamLineupPitch(fixture: fixture, homeLineup: home, awayLineup: away),
+        _TwoTeamLineupPitch(
+            fixture: fixture, homeLineup: home, awayLineup: away),
       ],
     );
   }
@@ -623,7 +811,8 @@ class _MobileLineupCard extends StatelessWidget {
               Text(team.name, style: Theme.of(context).textTheme.titleMedium),
               Text('${lineup.statusLabel} · ${lineup.formationName}'),
               if (lineup.status == 'possible' &&
-                  lineup.starters.any((player) => player.availability != 'available'))
+                  lineup.starters
+                      .any((player) => player.availability != 'available'))
                 const Text(
                   'Some players have limited availability.',
                   style: TextStyle(fontSize: 12),
@@ -631,13 +820,17 @@ class _MobileLineupCard extends StatelessWidget {
               const SizedBox(height: 8),
               _MobileLineupPitch(lineup: lineup, logoUrl: team.logoUrl),
               const SizedBox(height: 8),
-              if (!clubOnly) const Text('Substitutes', style: TextStyle(fontWeight: FontWeight.bold)),
+              if (!clubOnly)
+                const Text('Substitutes',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
               if (clubOnly) ...[
-                const Text('Coach', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text('Coach',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 4),
                 const Text('Coach information not available.'),
                 const SizedBox(height: 12),
-                const Text('Substitutes', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text('Substitutes',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
               ],
               ...lineup.substitutes.map((player) => ListTile(
                     dense: true,
@@ -672,8 +865,12 @@ class _TwoTeamLineupPitch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final homeBySlot = {for (final player in homeLineup.starters) player.slotIndex ?? -1: player};
-    final awayBySlot = {for (final player in awayLineup.starters) player.slotIndex ?? -1: player};
+    final homeBySlot = {
+      for (final player in homeLineup.starters) player.slotIndex ?? -1: player
+    };
+    final awayBySlot = {
+      for (final player in awayLineup.starters) player.slotIndex ?? -1: player
+    };
 
     return Card(
       child: Padding(
@@ -689,7 +886,9 @@ class _TwoTeamLineupPitch extends StatelessWidget {
               aspectRatio: 1.5,
               child: Stack(
                 children: [
-                  CustomPaint(size: Size.infinite, painter: const _FootballPitchPainter()),
+                  CustomPaint(
+                      size: Size.infinite,
+                      painter: const _FootballPitchPainter()),
                   if (fixture.homeClub.logoUrl?.isNotEmpty == true)
                     Positioned.fill(
                       child: Opacity(
@@ -719,23 +918,42 @@ class _TwoTeamLineupPitch extends StatelessWidget {
                   for (var i = 0; i < homeLineup.positions.length; i++)
                     Align(
                       alignment: Alignment(
-                        (((homeLineup.positions[i]['x'] as num?)?.toDouble() ?? 50) / 100 * 2 - 1),
-                        (((homeLineup.positions[i]['y'] as num?)?.toDouble() ?? 50) / 100 * 2 - 1),
+                        (((homeLineup.positions[i]['x'] as num?)?.toDouble() ??
+                                    50) /
+                                100 *
+                                2 -
+                            1),
+                        (((homeLineup.positions[i]['y'] as num?)?.toDouble() ??
+                                    50) /
+                                100 *
+                                2 -
+                            1),
                       ),
                       child: _MobileSlotMarker(
                         player: homeBySlot[i],
-                        label: homeLineup.positions[i]['label']?.toString() ?? 'HOME',
+                        label: homeLineup.positions[i]['label']?.toString() ??
+                            'HOME',
                       ),
                     ),
                   for (var i = 0; i < awayLineup.positions.length; i++)
                     Align(
                       alignment: Alignment(
-                        -((((awayLineup.positions[i]['x'] as num?)?.toDouble() ?? 50) / 100 * 2 - 1)),
-                        (((awayLineup.positions[i]['y'] as num?)?.toDouble() ?? 50) / 100 * 2 - 1),
+                        -((((awayLineup.positions[i]['x'] as num?)
+                                        ?.toDouble() ??
+                                    50) /
+                                100 *
+                                2 -
+                            1)),
+                        (((awayLineup.positions[i]['y'] as num?)?.toDouble() ??
+                                    50) /
+                                100 *
+                                2 -
+                            1),
                       ),
                       child: _MobileSlotMarker(
                         player: awayBySlot[i],
-                        label: awayLineup.positions[i]['label']?.toString() ?? 'AWAY',
+                        label: awayLineup.positions[i]['label']?.toString() ??
+                            'AWAY',
                       ),
                     ),
                 ],
@@ -756,13 +974,16 @@ class _MobileLineupPitch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bySlot = {for (final player in lineup.starters) player.slotIndex ?? -1: player};
+    final bySlot = {
+      for (final player in lineup.starters) player.slotIndex ?? -1: player
+    };
 
     return AspectRatio(
       aspectRatio: 1.25,
       child: Stack(
         children: [
-          CustomPaint(size: Size.infinite, painter: const _FootballPitchPainter()),
+          CustomPaint(
+              size: Size.infinite, painter: const _FootballPitchPainter()),
           if (logoUrl?.isNotEmpty == true)
             Center(
               child: Opacity(
@@ -778,8 +999,14 @@ class _MobileLineupPitch extends StatelessWidget {
           for (var index = 0; index < lineup.positions.length; index++)
             Align(
               alignment: Alignment(
-                (((lineup.positions[index]['x'] as num?)?.toDouble() ?? 50) / 100 * 2 - 1),
-                (((lineup.positions[index]['y'] as num?)?.toDouble() ?? 50) / 100 * 2 - 1),
+                (((lineup.positions[index]['x'] as num?)?.toDouble() ?? 50) /
+                        100 *
+                        2 -
+                    1),
+                (((lineup.positions[index]['y'] as num?)?.toDouble() ?? 50) /
+                        100 *
+                        2 -
+                    1),
               ),
               child: _MobileSlotMarker(
                 player: bySlot[index],
@@ -826,11 +1053,13 @@ class _FootballPitchPainter extends CustomPainter {
     final sixHeight = size.height * 0.12;
 
     canvas.drawRect(
-      Rect.fromLTWH((size.width - penaltyWidth) / 2, 0, penaltyWidth, penaltyHeight),
+      Rect.fromLTWH(
+          (size.width - penaltyWidth) / 2, 0, penaltyWidth, penaltyHeight),
       line,
     );
     canvas.drawRect(
-      Rect.fromLTWH((size.width - penaltyWidth) / 2, size.height - penaltyHeight, penaltyWidth, penaltyHeight),
+      Rect.fromLTWH((size.width - penaltyWidth) / 2,
+          size.height - penaltyHeight, penaltyWidth, penaltyHeight),
       line,
     );
     canvas.drawRect(
@@ -838,7 +1067,8 @@ class _FootballPitchPainter extends CustomPainter {
       line,
     );
     canvas.drawRect(
-      Rect.fromLTWH((size.width - sixWidth) / 2, size.height - sixHeight, sixWidth, sixHeight),
+      Rect.fromLTWH((size.width - sixWidth) / 2, size.height - sixHeight,
+          sixWidth, sixHeight),
       line,
     );
 
@@ -913,10 +1143,15 @@ class _MobileSlotMarker extends StatelessWidget {
 }
 
 class _PlayerAvatarFallback extends StatelessWidget {
-          const _PlayerAvatarFallback();
-          @override
-          Widget build(BuildContext context) => Container(width: 24, height: 24, color: const Color(0xffd7e0e8), alignment: Alignment.center, child: const Icon(Icons.person, size: 16, color: Color(0xff52606d)));
-        }
+  const _PlayerAvatarFallback();
+  @override
+  Widget build(BuildContext context) => Container(
+      width: 24,
+      height: 24,
+      color: const Color(0xffd7e0e8),
+      alignment: Alignment.center,
+      child: const Icon(Icons.person, size: 16, color: Color(0xff52606d)));
+}
 
 class _NewsList extends StatelessWidget {
   const _NewsList({required this.articles, required this.api});
@@ -995,22 +1230,9 @@ class _NewsImage extends StatelessWidget {
   }
 }
 
-class _FixtureList extends StatelessWidget {
-  const _FixtureList({required this.fixtures, required this.api});
-  final List<MobileFixture> fixtures;
-  final MobileApiService api;
-  @override
-  Widget build(BuildContext context) => ListView.builder(
-      itemCount: fixtures.length,
-      itemBuilder: (context, index) => _FixtureTile(
-          fixture: fixtures[index],
-          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-              builder: (_) => FixtureDetailScreen(
-                  fixtureId: fixtures[index].id, api: api)))));
-}
-
 class _ClubFixtureList extends StatefulWidget {
-  const _ClubFixtureList({required this.fixtures, required this.clubId, required this.api});
+  const _ClubFixtureList(
+      {required this.fixtures, required this.clubId, required this.api});
   final List<MobileFixture> fixtures;
   final String clubId;
   final MobileApiService api;
@@ -1023,9 +1245,45 @@ class _ClubFixtureListState extends State<_ClubFixtureList> {
   @override
   Widget build(BuildContext context) {
     final competitions = <String, MobileCompetition>{};
-    for (final fixture in widget.fixtures) competitions[fixture.competition.id] = fixture.competition;
-    final fixtures = widget.fixtures.where((fixture) => competitionId == null || fixture.competition.id == competitionId).toList()..sort((a, b) => (a.startsAt ?? DateTime(9999)).compareTo(b.startsAt ?? DateTime(9999)));
-    return Column(children: [Padding(padding: const EdgeInsets.fromLTRB(16, 8, 16, 4), child: DropdownButtonFormField<String?>(value: competitionId, decoration: const InputDecoration(labelText: 'Competition'), items: [const DropdownMenuItem<String?>(value: null, child: Text('All Competitions')), ...competitions.values.map((competition) => DropdownMenuItem<String?>(value: competition.id, child: Text(competition.name)))], onChanged: (value) => setState(() => competitionId = value)),), Expanded(child: ListView.builder(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), itemCount: fixtures.length, itemBuilder: (context, index) { final fixture = fixtures[index]; return _FixtureHeroCard(fixture: fixture, onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => FixtureDetailScreen(fixtureId: fixture.id, clubId: widget.clubId, api: widget.api)))); }))]);
+    for (final fixture in widget.fixtures)
+      competitions[fixture.competition.id] = fixture.competition;
+    final fixtures = widget.fixtures
+        .where((fixture) =>
+            competitionId == null || fixture.competition.id == competitionId)
+        .toList()
+      ..sort((a, b) => (a.startsAt ?? DateTime(9999))
+          .compareTo(b.startsAt ?? DateTime(9999)));
+    return Column(children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+        child: DropdownButtonFormField<String?>(
+            value: competitionId,
+            decoration: const InputDecoration(labelText: 'Competition'),
+            items: [
+              const DropdownMenuItem<String?>(
+                  value: null, child: Text('All Competitions')),
+              ...competitions.values.map((competition) =>
+                  DropdownMenuItem<String?>(
+                      value: competition.id, child: Text(competition.name)))
+            ],
+            onChanged: (value) => setState(() => competitionId = value)),
+      ),
+      Expanded(
+          child: ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              itemCount: fixtures.length,
+              itemBuilder: (context, index) {
+                final fixture = fixtures[index];
+                return _FixtureHeroCard(
+                    fixture: fixture,
+                    onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                            builder: (_) => FixtureDetailScreen(
+                                fixtureId: fixture.id,
+                                clubId: widget.clubId,
+                                api: widget.api))));
+              }))
+    ]);
   }
 }
 
@@ -1033,20 +1291,91 @@ class _FixtureHeroCard extends StatelessWidget {
   const _FixtureHeroCard({required this.fixture, this.onTap});
   final MobileFixture fixture;
   final VoidCallback? onTap;
-  String _date() => fixture.startsAt == null ? 'Date unavailable' : '${fixture.startsAt!.toLocal().day.toString().padLeft(2, '0')} ${_months[fixture.startsAt!.toLocal().month - 1]} ${fixture.startsAt!.toLocal().year}';
-  String _time() => fixture.startsAt == null ? 'Time unavailable' : '${fixture.startsAt!.toLocal().hour.toString().padLeft(2, '0')}:${fixture.startsAt!.toLocal().minute.toString().padLeft(2, '0')}';
+  String _date() => fixture.startsAt == null
+      ? 'Date unavailable'
+      : '${fixture.startsAt!.toLocal().day.toString().padLeft(2, '0')} ${_months[fixture.startsAt!.toLocal().month - 1]} ${fixture.startsAt!.toLocal().year}';
+  String _time() => fixture.startsAt == null
+      ? 'Time unavailable'
+      : '${fixture.startsAt!.toLocal().hour.toString().padLeft(2, '0')}:${fixture.startsAt!.toLocal().minute.toString().padLeft(2, '0')}';
   @override
-  Widget build(BuildContext context) => Card(margin: const EdgeInsets.symmetric(vertical: 8), clipBehavior: Clip.antiAlias, child: InkWell(onTap: onTap, child: Padding(padding: const EdgeInsets.all(14), child: Column(children: [Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [_Logo(url: fixture.competition.logoUrl, label: fixture.competition.name), Text(_date(), style: Theme.of(context).textTheme.labelLarge)]), const SizedBox(height: 12), Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, crossAxisAlignment: CrossAxisAlignment.start, children: [_HeroTeam(team: fixture.homeClub), Padding(padding: const EdgeInsets.only(top: 30), child: Text('VS', style: Theme.of(context).textTheme.titleMedium)), _HeroTeam(team: fixture.awayClub)]), const SizedBox(height: 10), Text(fixture.liveStatusLabel.isNotEmpty ? fixture.liveStatusLabel : _time(), style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)), Text('${fixture.competition.name} · ${fixture.season?.name ?? 'Season unavailable'}', style: Theme.of(context).textTheme.bodySmall), if (fixture.venue != null) Text(fixture.venue!, style: Theme.of(context).textTheme.bodySmall)]))));
+  Widget build(BuildContext context) => Card(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+          onTap: onTap,
+          child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(children: [
+                Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _Logo(
+                          url: fixture.competition.logoUrl,
+                          label: fixture.competition.name),
+                      Text(_date(),
+                          style: Theme.of(context).textTheme.labelLarge)
+                    ]),
+                const SizedBox(height: 12),
+                Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _HeroTeam(team: fixture.homeClub),
+                      Padding(
+                          padding: const EdgeInsets.only(top: 30),
+                          child: Text('VS',
+                              style: Theme.of(context).textTheme.titleMedium)),
+                      _HeroTeam(team: fixture.awayClub)
+                    ]),
+                const SizedBox(height: 10),
+                Text(
+                    fixture.liveStatusLabel.isNotEmpty
+                        ? fixture.liveStatusLabel
+                        : _time(),
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleLarge
+                        ?.copyWith(fontWeight: FontWeight.bold)),
+                Text(
+                    '${fixture.competition.name} · ${fixture.season?.name ?? 'Season unavailable'}',
+                    style: Theme.of(context).textTheme.bodySmall),
+                if (fixture.venue != null)
+                  Text(fixture.venue!,
+                      style: Theme.of(context).textTheme.bodySmall)
+              ]))));
 }
 
 class _HeroTeam extends StatelessWidget {
   const _HeroTeam({required this.team});
   final MobileClub team;
   @override
-  Widget build(BuildContext context) => SizedBox(width: 110, child: Column(children: [_Logo(url: team.logoUrl, label: team.name, radius: 34), const SizedBox(height: 6), Text(team.name, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold))]));
+  Widget build(BuildContext context) => SizedBox(
+      width: 110,
+      child: Column(children: [
+        _Logo(url: team.logoUrl, label: team.name, radius: 34),
+        const SizedBox(height: 6),
+        Text(team.name,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.bold))
+      ]));
 }
 
-const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const _months = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec'
+];
 
 class _FixtureTile extends StatelessWidget {
   const _FixtureTile({required this.fixture, this.onTap});
@@ -1068,8 +1397,26 @@ class _Logo extends StatelessWidget {
   final String label;
   final double radius;
   @override
-  Widget build(BuildContext context) => CircleAvatar(
-      radius: radius,
-      backgroundImage: url == null ? null : NetworkImage(url!),
-      child: url == null ? Text(label.isEmpty ? '?' : label[0]) : null);
+  Widget build(BuildContext context) {
+    final fallback = Text(
+      label.isEmpty ? '?' : label[0].toUpperCase(),
+      style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w900),
+    );
+    return Container(
+      width: radius * 2,
+      height: radius * 2,
+      padding: const EdgeInsets.all(6),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        shape: BoxShape.circle,
+      ),
+      child: url?.isNotEmpty == true
+          ? Image.network(
+              url!,
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => fallback,
+            )
+          : fallback,
+    );
+  }
 }

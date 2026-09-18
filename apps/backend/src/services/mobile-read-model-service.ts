@@ -60,10 +60,13 @@ function clubFromRow(row: any, fallback?: { sport?: { id: string; name: string }
   const hostCountry = host?.host_type === "country"
     ? getDatabase().prepare("SELECT id, name FROM countries WHERE id = COALESCE(?, (SELECT id FROM countries WHERE lower(name) = lower(?) AND status = 'active'))").get(host.country_id, host.name) as { id: string; name: string } | undefined
     : undefined;
+  const hostName = host?.name ?? row.hostName ?? row.host_name ?? undefined;
   return {
     id: row.id,
     name: row.name,
     sportId: row.sportId ?? row.sport_id,
+    hostId: hostId ?? undefined,
+    hostName: hostName ?? undefined,
     countryId: row.countryId ?? row.country_id ?? undefined,
     shortName: row.shortName ?? row.short_name ?? undefined,
     slug: row.slug ?? undefined,

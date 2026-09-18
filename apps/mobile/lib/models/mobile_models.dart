@@ -1,3 +1,5 @@
+import '../app_config.dart';
+
 class MobileSport {
   const MobileSport(
       {required this.id, required this.name, this.slug, this.logoUrl});
@@ -9,7 +11,7 @@ class MobileSport {
       id: '${json['id'] ?? ''}',
       name: '${json['name'] ?? ''}',
       slug: json['slug']?.toString(),
-      logoUrl: json['logoUrl']?.toString());
+    logoUrl: normalizeMediaUrl(json['logoUrl']));
 }
 
 class MobileCountry {
@@ -46,7 +48,7 @@ class MobileHost {
         type: json['type']?.toString() ?? json['hostType']?.toString(),
         countryId:
             json['countryId']?.toString() ?? json['country_id']?.toString(),
-        logoUrl: json['logoUrl']?.toString() ?? json['logo_url']?.toString(),
+        logoUrl: normalizeMediaUrl(json['logoUrl'] ?? json['logo_url']),
         status: json['status']?.toString(),
       );
 }
@@ -59,6 +61,8 @@ class MobileClub {
       this.slug,
       this.logoUrl,
       required this.sportId,
+      this.hostId,
+      this.hostName,
       this.countryId,
       required this.status,
       this.sport,
@@ -69,6 +73,8 @@ class MobileClub {
   final String? slug;
   final String? logoUrl;
   final String sportId;
+  final String? hostId;
+  final String? hostName;
   final String? countryId;
   final String status;
   final MobileSport? sport;
@@ -78,10 +84,12 @@ class MobileClub {
       name: '${json['name'] ?? ''}',
       shortName: json['shortName']?.toString(),
       slug: json['slug']?.toString(),
-      logoUrl: json['logoUrl']?.toString(),
-      sportId: '${json['sportId'] ?? json['sport']?['id'] ?? ''}',
+      logoUrl: normalizeMediaUrl(json['logoUrl'] ?? json['logo_url']),
+      sportId: '${json['sportId'] ?? json['sport_id'] ?? json['sport']?['id'] ?? ''}',
+      hostId: json['hostId']?.toString() ?? json['host_id']?.toString(),
+      hostName: json['hostName']?.toString() ?? json['host_name']?.toString(),
       countryId:
-          json['countryId']?.toString() ?? json['country']?['id']?.toString(),
+          json['countryId']?.toString() ?? json['country_id']?.toString() ?? json['country']?['id']?.toString(),
       status: '${json['status'] ?? ''}',
       sport: json['sport'] is Map
           ? MobileSport.fromJson(
@@ -99,11 +107,17 @@ class MobileCompetition {
       required this.name,
       this.slug,
       this.sportId,
+    this.hostId,
+    this.countryId,
+    this.regionId,
       this.logoUrl});
   final String id;
   final String name;
   final String? slug;
   final String? sportId;
+    final String? hostId;
+    final String? countryId;
+    final String? regionId;
   final String? logoUrl;
   factory MobileCompetition.fromJson(Map<String, dynamic> json) =>
       MobileCompetition(
@@ -111,7 +125,10 @@ class MobileCompetition {
           name: '${json['name'] ?? ''}',
           slug: json['slug']?.toString(),
           sportId: json['sportId']?.toString(),
-          logoUrl: json['logoUrl']?.toString());
+          hostId: json['hostId']?.toString(),
+          countryId: json['countryId']?.toString(),
+          regionId: json['regionId']?.toString(),
+          logoUrl: normalizeMediaUrl(json['logoUrl']));
 }
 
 class MobileSeason {
