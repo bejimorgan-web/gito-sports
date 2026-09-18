@@ -206,10 +206,13 @@ export function getClubDetailById(teamId: string): ClubDetail | undefined {
   const countryRow = team.countryId ? database.prepare("SELECT id, name, iso2_code, iso3_code, region_id, flag_url, status, created_at, updated_at FROM countries WHERE id = ?").get(team.countryId) as any : undefined;
   const sportRow = database.prepare("SELECT id, name, slug, logo_url, status, created_at, updated_at FROM sports WHERE id = ?").get(team.sportId) as any;
   const competitions = database.prepare(`
-    SELECT c.id, c.sport_id, c.country_id, c.region_id, c.name, c.slug, c.scope, c.competition_type, c.participant_type, c.logo_url, c.current_season_id, c.status, c.created_at, c.updated_at
-    FROM competitions c JOIN competition_teams ct ON ct.competition_id = c.id
-    WHERE ct.team_id = ? ORDER BY c.name
-  `).all(teamId) as any[];
+    SELECT DISTINCT c.id, c.sport_id, c.host_id, c.country_id, c.region_id, c.name, c.slug, c.scope, c.competition_type, c.participant_type, c.logo_url, c.current_season_id, c.status, c.created_at, c.updated_at
+    FROM competitions c
+    LEFT JOIN competition_teams ct ON ct.competition_id = c.id AND ct.team_id = ?
+    LEFT JOIN competition_season_teams cst ON cst.competition_id = c.id AND cst.team_id = ?
+    WHERE ct.team_id IS NOT NULL OR cst.team_id IS NOT NULL
+    ORDER BY c.name
+  `).all(teamId, teamId) as any[];
   const seasons = database.prepare(`
     SELECT DISTINCT s.id, s.competition_id, s.name, s.starts_at, s.ends_at, s.status
     FROM seasons s JOIN competition_season_teams cst ON cst.season_id = s.id
@@ -222,7 +225,7 @@ export function getClubDetailById(teamId: string): ClubDetail | undefined {
     ...(countryRow.region_id ? { regionId: countryRow.region_id } : {}), ...(countryRow.flag_url ? { flagUrl: countryRow.flag_url } : {})
   } : undefined;
   const sport: Sport | undefined = sportRow ? { id: sportRow.id, name: sportRow.name, slug: sportRow.slug, status: sportRow.status, createdAt: sportRow.created_at, updatedAt: sportRow.updated_at, ...(sportRow.logo_url ? { logoUrl: sportRow.logo_url } : {}) } : undefined;
-  const mappedCompetitions: Competition[] = competitions.map((row) => ({ id: row.id, sportId: row.sport_id, name: row.name, slug: row.slug, scope: row.scope, type: row.competition_type, participantType: row.participant_type, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at, ...(row.country_id ? { countryId: row.country_id } : {}), ...(row.region_id ? { regionId: row.region_id } : {}), ...(row.current_season_id ? { currentSeasonId: row.current_season_id } : {}), ...(row.logo_url ? { logoUrl: row.logo_url } : {}) }));
+  const mappedCompetitions: Competition[] = competitions.map((row) => ({ id: row.id, sportId: row.sport_id, name: row.name, slug: row.slug, scope: row.scope, type: row.competition_type, participantType: row.participant_type, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at, ...(row.host_id ? { hostId: row.host_id } : {}), ...(row.country_id ? { countryId: row.country_id } : {}), ...(row.region_id ? { regionId: row.region_id } : {}), ...(row.current_season_id ? { currentSeasonId: row.current_season_id } : {}), ...(row.logo_url ? { logoUrl: row.logo_url } : {}) }));
   const mappedSeasons: Season[] = seasons.map((row) => ({ id: row.id, competitionId: row.competition_id, name: row.name, status: row.status, ...(row.starts_at ? { startsAt: row.starts_at } : {}), ...(row.ends_at ? { endsAt: row.ends_at } : {}) }));
 
   return { ...team, ...(country ? { country } : {}), ...(sport ? { sport } : {}), competitions: mappedCompetitions, seasons: mappedSeasons };

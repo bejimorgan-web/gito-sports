@@ -17,7 +17,7 @@ const mobile = await import("./mobile-read-model-service.js");
 function seed() {
   const db = getDatabase();
   const now = new Date().toISOString();
-  for (const table of ["publication_delivery", "publication_artifacts", "news_article_categories", "news_articles", "scheduling_matches", "matches", "competition_season_teams", "seasons", "competitions", "teams", "countries", "sports"]) {
+  for (const table of ["publication_delivery", "publication_artifacts", "news_article_categories", "news_articles", "scheduling_matches", "matches", "competition_season_teams", "seasons", "competitions", "teams", "hosts", "countries", "sports"]) {
     db.prepare(`DELETE FROM ${table}`).run();
   }
   db.prepare("INSERT INTO sports (id, name, slug, status, created_at, updated_at) VALUES (?, ?, ?, 'active', ?, ?)").run("sport-football", "Football", "football", now, now);
@@ -50,6 +50,7 @@ function seed() {
 }
 
 test("mobile read model exposes publication delivery without IPTV stream relationships", () => {
+  const db = getDatabase();
   const { fixture, article } = seed();
   const clubs = mobile.mobileClubs({ sportId: "sport-football" });
   assert.equal(clubs.length, 3);
@@ -57,6 +58,7 @@ test("mobile read model exposes publication delivery without IPTV stream relatio
 
   const detail = mobile.mobileClubDetail("team-bayern")!;
   assert.equal(detail.club.id, "team-bayern");
+  assert.equal(detail.competitions[0]?.hostId, "host-germany");
   assert.equal(detail.seasons[0]?.id, "season-2026");
   assert.equal(detail.nextFixture?.id, fixture.id);
 

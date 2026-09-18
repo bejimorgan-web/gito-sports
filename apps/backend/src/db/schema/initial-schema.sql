@@ -419,6 +419,15 @@ CREATE INDEX IF NOT EXISTS idx_publication_artifacts_match
 CREATE INDEX IF NOT EXISTS idx_publication_artifacts_status
   ON publication_artifacts(publication_status, availability);
 
+CREATE TABLE IF NOT EXISTS publication_delivery (
+  publication_id TEXT PRIMARY KEY,
+  delivery_reference TEXT NOT NULL,
+  playback_mode TEXT NOT NULL DEFAULT 'DIRECT_SAFE',
+  playback_url TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (publication_id) REFERENCES publication_artifacts(publication_id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS entity_deletion_log (
   id TEXT PRIMARY KEY,
   entity_type TEXT NOT NULL,
