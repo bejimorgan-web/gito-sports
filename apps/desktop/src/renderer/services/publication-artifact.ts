@@ -98,16 +98,20 @@ export function validateDirectPlaybackUrl(value: string): string {
 export function validateDirectXtreamPlaybackUrl(value: string): string {
   let url: URL;
   try { url = new URL(value); } catch { throw new Error("publication_playback_url_invalid"); }
-  if (url.protocol !== "https:" || url.username || url.password) throw new Error("publication_playback_url_unsafe");
-  for (const key of ["token", "key", "password", "secret", "auth", "user"]) {
-    if (url.searchParams.has(key)) throw new Error("publication_playback_url_unsafe");
-  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("publication_playback_url_unsafe");
+  if (url.username || url.password) throw new Error("publication_playback_url_rejects_userinfo");
+
   const pathSegments = url.pathname.split("/").filter(Boolean);
   const mediaKind = pathSegments[0]?.toLowerCase();
   if (!["live", "movie", "series"].includes(mediaKind ?? "") || pathSegments.length < 4 || !pathSegments.at(-1)?.includes(".")) {
     throw new Error("publication_playback_url_unsafe");
   }
+
   return url.toString();
+}
+
+export function normalizeXtreamPublicationUrl(value: string): string {
+  return new URL(value).toString();
 }
 
 export function buildLegacyStreamAssignment(input: {

@@ -27,11 +27,12 @@ test("rejects before publication delivery receives an unsafe URL", () => {
   };
 
   assert.throws(
-    () => submitDelivery("https://provider.example/live/username/password/stream-123.m3u8"),
+    () => submitDelivery("https://synthetic.test/live/TEST_USER/TEST_PASSWORD/stream-123.m3u8"),
     /rejects_xtream_credential_path/
   );
   assert.equal(deliveryCalls, 0);
 });
+
 test("requires HTTPS before a publication can use an M3U channel", () => {
   assert.throws(
     () => validateDirectPlaybackUrl("http://provider.example/live/channel.m3u8"),
@@ -39,15 +40,17 @@ test("requires HTTPS before a publication can use an M3U channel", () => {
   );
 });
 
-test("accepts only HTTPS Xtream playback paths for direct Xtream mode", () => {
+test("accepts HTTPS Xtream playback paths for direct Xtream mode", () => {
   assert.equal(
     validateDirectXtreamPlaybackUrl("https://synthetic.test/live/TEST_USER/TEST_PASSWORD/123.m3u8"),
     "https://synthetic.test/live/TEST_USER/TEST_PASSWORD/123.m3u8"
   );
-  assert.throws(() => validateDirectXtreamPlaybackUrl("http://synthetic.test/live/TEST_USER/TEST_PASSWORD/123.m3u8"), /requires_https|unsafe/);
+  assert.equal(
+    validateDirectXtreamPlaybackUrl("http://synthetic.test/live/TEST_USER/TEST_PASSWORD/123.m3u8"),
+    "http://synthetic.test/live/TEST_USER/TEST_PASSWORD/123.m3u8"
+  );
   assert.throws(() => validateDirectXtreamPlaybackUrl("https://synthetic.test/anything/123.m3u8"), /unsafe/);
 });
-
 
 test("publication payloads contain no local IPTV credentials", () => {
   const publication = buildSafePublicationPackage({

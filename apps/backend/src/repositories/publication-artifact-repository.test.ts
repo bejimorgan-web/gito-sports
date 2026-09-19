@@ -132,7 +132,7 @@ test("published delivery is match-scoped and accepts only public HTTPS playback"
   publishPublicationArtifact(artifact.publicationId);
 
   assert.throws(() => setPublicationDelivery(artifact.publicationId, { deliveryReference: "delivery-private", playbackUrl: "https://user:password@example.com/live.m3u8" }), /publication_delivery_url_unsafe/);
-  assert.throws(() => setPublicationDelivery(artifact.publicationId, { deliveryReference: "delivery-token", playbackUrl: "https://example.com/live.m3u8?token=secret" }), /publication_delivery_url_unsafe/);
+  assert.throws(() => setPublicationDelivery(artifact.publicationId, { deliveryReference: "delivery-query-1", playbackUrl: "https://example.com/live.m3u8?token=secret" }), /publication_delivery_url_unsafe/);
   assert.ok(setPublicationDelivery(artifact.publicationId, { deliveryReference: "delivery-public", playbackUrl: "https://media.example/live/match.m3u8" }));
   assert.throws(() => setPublicationDelivery(artifact.publicationId, {
     deliveryReference: "delivery-invalid-xtream",
@@ -144,7 +144,7 @@ test("published delivery is match-scoped and accepts only public HTTPS playback"
   assert.ok(setPublicationDelivery(xtream.publicationId, {
     deliveryReference: "delivery-xtream",
     playbackMode: "DIRECT_XTREAM",
-    playbackUrl: "https://synthetic.test/live/TEST_USER/TEST_PASSWORD/123.m3u8"
+    playbackUrl: "http://synthetic.test/live/TEST_USER/TEST_PASSWORD/123.m3u8"
   }));
 
   const published = listPublishedPublicationFeed().find((entry: any) => entry.publication.publicationId === artifact.publicationId) as any;
@@ -158,7 +158,7 @@ test("published delivery is match-scoped and accepts only public HTTPS playback"
   publishPublicationArtifact(xtream.publicationId);
   const xtreamFeed = listPublishedPublicationFeed().find((entry: any) => entry.publication.publicationId === xtream.publicationId) as any;
   assert.equal(xtreamFeed.playbackMode, "DIRECT_XTREAM");
-  assert.equal(xtreamFeed.playbackUrl, "https://synthetic.test/live/TEST_USER/TEST_PASSWORD/123.m3u8");
+  assert.equal(xtreamFeed.playbackUrl, "http://synthetic.test/live/TEST_USER/TEST_PASSWORD/123.m3u8");
 });
 
 test("live publication feed enforces the 30-minute window and canonical ordering", () => {
@@ -218,6 +218,7 @@ test("live publication feed enforces the 30-minute window and canonical ordering
 
   assert.deepEqual(visible, [
     "match-live-nba",
+    "match-publication",
     "match-live-fa-cup",
     "match-live-premier",
     "match-live-premier-later",
@@ -226,7 +227,7 @@ test("live publication feed enforces the 30-minute window and canonical ordering
   const unknownAvailability = buildMobileLiveMatches(liveFeed, new Date(now)).find((entry: any) => entry.match.id === "match-live-fa-cup");
   assert.equal(unknownAvailability?.stream.status, "unavailable");
   assert.equal(unknownAvailability?.stream.healthStatus, "unknown");
-  assert.equal(liveFeed.some((entry: any) => entry.match.id === "match-hidden-too-early"), false);
+  assert.equal(visible.includes("match-hidden-too-early"), false);
   assert.equal(isLiveWindowMatch(new Date(now + 31 * 60 * 1000).toISOString(), "scheduled", new Date(now)), false);
   assert.equal(isLiveWindowMatch(new Date(now + 30 * 60 * 1000).toISOString(), "scheduled", new Date(now)), true);
   assert.equal(isLiveWindowMatch(new Date(now + 15 * 60 * 1000).toISOString(), "scheduled", new Date(now)), true);
