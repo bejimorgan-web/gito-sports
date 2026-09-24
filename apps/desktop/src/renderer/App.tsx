@@ -26,7 +26,7 @@ import { FormationManagementScreen } from "./features/sports/FormationManagement
 import { AuthenticatedLayout } from "./layouts/AuthenticatedLayout";
 import { LoginScreen } from "./screens/LoginScreen";
 import { apiClient, API_BASE_URL, setAccessToken as setClientAccessToken } from "./services/api-client";
-import { buildDesktopPublicationContexts, buildLegacyStreamAssignment, buildSafePublicationPackage, PublicationWorkflowError, resolveOrCreatePublicationMatchId, validateDirectPlaybackUrl, validateDirectXtreamPlaybackUrl } from "./services/publication-artifact";
+import { buildDesktopPublicationContexts, buildLegacyStreamAssignment, buildSafePublicationPackage, PublicationWorkflowError, resolveOrCreatePublicationMatchId, resolvePublicationDeliveryUrl } from "./services/publication-artifact";
 import type { DesktopPublicationContext } from "./services/publication-artifact";
 import type { DesktopChannel, DesktopProviderAccount } from "../desktop-persistence-contract";
 import type { NavigationKey } from "./types/navigation";
@@ -39,12 +39,13 @@ type BackendStatus = "online" | "offline" | "reconnecting";
 const AUTH_STORAGE_KEY = "gito-live-sports-auth";
 
 function mapDesktopProviderAccount(provider: DesktopProviderAccount): IPTVProvider {
+  const providerType = provider.type === "manual" ? "m3u" : provider.type;
   const mappedProvider: IPTVProvider = {
     id: provider.id,
     name: provider.name,
     baseUrl: provider.baseUrl,
-    type: provider.type,
-    authType: provider.type === "xtream" ? "basic" : "none",
+    type: providerType,
+    authType: providerType === "xtream" ? "basic" : "none",
     status: provider.status,
     availabilityStatus: provider.availability,
     failedChannelLoads: 0,
@@ -65,6 +66,18 @@ function mapDesktopProviderAccount(provider: DesktopProviderAccount): IPTVProvid
 }
 
 function mapDesktopChannel(channel: DesktopChannel): Channel {
+  let playbackHeaders: Channel["playbackHeaders"];
+  if (channel.metadataJson) {
+    try {
+      const parsed = JSON.parse(channel.metadataJson) as { playbackHeaders?: Channel["playbackHeaders"] };
+      const candidate = parsed.playbackHeaders;
+      if (candidate && typeof candidate === "object") {
+        playbackHeaders = Object.fromEntries(Object.entries(candidate).filter(([, value]) => typeof value === "string" && value.length > 0 && value.length <= 2048 && !/[\r\n]/.test(value))) as Channel["playbackHeaders"];
+      }
+    } catch {
+      playbackHeaders = undefined;
+    }
+  }
   return {
     id: channel.id,
     providerId: channel.providerAccountId,
@@ -76,7 +89,8 @@ function mapDesktopChannel(channel: DesktopChannel): Channel {
     updatedAt: channel.updatedAt,
     ...(channel.externalReference ? { externalRef: channel.externalReference } : {}),
     ...(channel.groupName ? { groupName: channel.groupName } : {}),
-    ...(channel.logoUrl ? { logoUrl: channel.logoUrl } : {})
+    ...(channel.logoUrl ? { logoUrl: channel.logoUrl } : {}),
+    ...(playbackHeaders && Object.keys(playbackHeaders).length ? { playbackHeaders } : {})
   };
 }
 
@@ -310,6 +324,7 @@ function renderScreen(
             showLegacyChannelBrowser={false}
             onCatalogueContextChange={actions.setMatchAssignmentCatalogueContext}
             cataloguePreviewMetadata={state.cataloguePreviewMetadata}
+            onCataloguePreviewMetadataChange={actions.setCataloguePreviewMetadata}
             catalogueBrowser={state.matchAssignmentCatalogueContext.providerId ? (
               <IptvCatalogueScreen
                 providerId={state.matchAssignmentCatalogueContext.providerId}
@@ -675,23 +690,24 @@ export function App() {
   const createProvider = useCallback(async (input: Parameters<typeof apiClient.createProvider>[0]) => {
     const desktopStorage = requireDesktopStorage();
     const credentialStoreRef = localCredentialRef(localProviderId());
+    const providerType = input.type === "manual" ? "m3u" : input.type;
     const createdProvider = await desktopStorage.providerAccounts.create({
       name: input.name,
-      type: input.type,
+      type: providerType,
       baseUrl: input.baseUrl,
       credentialStoreRef,
       status: "pending",
       availability: "unknown"
     });
 
-    if (input.type === "xtream" && input.username && input.password) {
+    if (providerType === "xtream" && input.username && input.password) {
       await window.gito?.desktopCredentials?.set?.(credentialStoreRef, input.username, input.password);
     }
 
     const mappedProvider = mapDesktopProviderAccount(createdProvider);
     let syncOperationId: string | undefined;
-    if (input.type === "xtream" && window.gito?.desktopIptv?.startOperation) {
-      const syncOperation = await requireDesktopIptvRuntime().startOperation("xtream_channel_sync", { providerId: mappedProvider.id });
+    if (providerType === "xtream" && window.gito?.desktopIptv?.startOperation) {
+      const syncOperation = await requireDesktopIptvRuntime().startOperation("xtream_catalogue_sync", { providerId: mappedProvider.id });
       syncOperationId = syncOperation.id;
     }
 
@@ -770,7 +786,7 @@ export function App() {
   }, [refreshOperations]);
 
   const syncXtream = useCallback(async (providerId: string) => {
-    await requireDesktopIptvRuntime().startOperation("xtream_channel_sync", { providerId });
+    await requireDesktopIptvRuntime().startOperation("xtream_catalogue_sync", { providerId });
     await refreshOperations("full");
   }, [refreshOperations]);
 
@@ -821,21 +837,14 @@ export function App() {
     }
     const providerName = providers.find((provider) => provider.id === selectedChannel.providerId)?.name;
     const providerType = providers.find((provider) => provider.id === selectedChannel.providerId)?.type;
-    let deliveryUrl: string;
-    let playbackMode: "DIRECT_SAFE" | "DIRECT_XTREAM" = "DIRECT_SAFE";
+    let resolvedDelivery: { deliveryUrl: string; playbackMode: "DIRECT_SAFE" | "DIRECT_XTREAM" };
     try {
-      deliveryUrl = validateDirectPlaybackUrl(selectedChannel.url);
+      resolvedDelivery = resolvePublicationDeliveryUrl(selectedChannel.url, providerType);
     } catch (error) {
-      if (providerType !== "xtream") {
-        throw new PublicationWorkflowError("creation", error);
-      }
-      try {
-        deliveryUrl = validateDirectXtreamPlaybackUrl(selectedChannel.url);
-        playbackMode = "DIRECT_XTREAM";
-      } catch {
-        throw new PublicationWorkflowError("creation", error);
-      }
+      throw new PublicationWorkflowError("creation", error);
     }
+
+    const { deliveryUrl, playbackMode } = resolvedDelivery;
 
     const publicationPackage = buildSafePublicationPackage({
       matchId,
@@ -859,7 +868,8 @@ export function App() {
       await apiClient.setPublicationDelivery(createdPublication.publicationId, {
         deliveryReference: `delivery_${createdPublication.publicationId}`,
         playbackUrl: deliveryUrl,
-        playbackMode
+        playbackMode,
+        ...(selectedChannel.playbackHeaders ? { playbackHeaders: selectedChannel.playbackHeaders } : {})
       }, accessToken);
     } catch (error) {
       throw new PublicationWorkflowError("creation", error);
@@ -1005,16 +1015,9 @@ export function App() {
       }
 
       const providerName = providers.find((provider) => provider.id === selectedChannel.providerId)?.name;
-      let deliveryUrl: string;
-      let playbackMode: "DIRECT_SAFE" | "DIRECT_XTREAM" = "DIRECT_SAFE";
-      try {
-        deliveryUrl = validateDirectPlaybackUrl(selectedChannel.url);
-      } catch (error) {
-        const providerType = providers.find((provider) => provider.id === selectedChannel.providerId)?.type;
-        if (providerType !== "xtream") throw error;
-        deliveryUrl = validateDirectXtreamPlaybackUrl(selectedChannel.url);
-        playbackMode = "DIRECT_XTREAM";
-      }
+      const providerType = providers.find((provider) => provider.id === selectedChannel.providerId)?.type;
+      const resolvedDelivery = resolvePublicationDeliveryUrl(selectedChannel.url, providerType);
+      const { deliveryUrl, playbackMode } = resolvedDelivery;
       await apiClient.revokePublicationArtifact(publicationId, accessToken);
       const replacementPackage = buildSafePublicationPackage({
         matchId: existingPublication.match.id,
@@ -1033,7 +1036,8 @@ export function App() {
       await apiClient.setPublicationDelivery(replacementPublication.publicationId, {
         deliveryReference: `delivery_${replacementPublication.publicationId}`,
         playbackUrl: deliveryUrl,
-        playbackMode
+        playbackMode,
+        ...(selectedChannel.playbackHeaders ? { playbackHeaders: selectedChannel.playbackHeaders } : {})
       }, accessToken);
       await window.gito?.desktopStorage?.publicationSources.upsert?.({
         publicationId: replacementPublication.publicationId,
@@ -1162,7 +1166,9 @@ export function App() {
     const runtime = requireDesktopIptvRuntime();
     const request: Parameters<typeof runtime.validateProvider>[0] = {
       baseUrl: input.baseUrl,
-      ...(input.type ? { type: input.type } : {})
+      ...(input.type ? { type: input.type } : {}),
+      ...(input.username ? { username: input.username } : {}),
+      ...(input.password ? { password: input.password } : {})
     };
     return runtime.validateProvider(request);
   }, []);

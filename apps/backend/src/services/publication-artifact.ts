@@ -64,7 +64,7 @@ export function validatePublicationDeliveryUrl(value: string, mode: PublicationP
   let url: URL;
   try { url = new URL(value); } catch { throw new Error("publication_delivery_url_invalid"); }
   if (mode === "DIRECT_SAFE" && url.protocol !== "https:") throw new Error("publication_delivery_url_unsafe");
-  if (mode === "DIRECT_XTREAM" && url.protocol !== "http:" && url.protocol !== "https:") throw new Error("publication_delivery_url_unsafe");
+  if (mode === "DIRECT_XTREAM" && url.protocol !== "https:" && url.protocol !== "http:") throw new Error("publication_delivery_url_unsafe");
   if (url.username || url.password) throw new Error("publication_delivery_url_unsafe");
   for (const key of ["token", "key", "password", "secret", "auth", "user"]) {
     if (url.searchParams.has(key)) throw new Error("publication_delivery_url_unsafe");

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { apiClient } from "../../services/api-client";
 import { Toast } from "../../components/Toast";
+import { LogoUrlField } from "../../components/LogoUrlField";
 
 type MobileFeatureKey = "navigation.liveScores" | "navigation.sports" | "navigation.live";
 
@@ -31,6 +32,9 @@ export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControl
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState("Ready");
   const [toasts, setToasts] = useState<{ id: string; message: string; type: "success" | "error" | "info" }[]>([]);
+  const [brandingUrl, setBrandingUrl] = useState("");
+  const [brandingUploading, setBrandingUploading] = useState(false);
+  const [brandingSaving, setBrandingSaving] = useState(false);
 
   const pushToast = useCallback((message: string, type: "success" | "error" | "info" = "success") => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -47,6 +51,7 @@ export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControl
 
     try {
       const response = await apiClient.getMobileFeatures();
+      const branding = await apiClient.getPlaybackBranding();
       console.log("[DESKTOP MOBILE FEATURES]", response);
       const navigation = response?.data?.navigation;
 
@@ -96,6 +101,7 @@ export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControl
 
       setFeatures(loadedFeatures);
       setOriginalFeatures(loadedFeatures);
+      setBrandingUrl(branding.playbackBrandingUrl ?? "");
     } catch (loadError) {
       const message = loadError instanceof Error ? loadError.message : String(loadError);
       setError(`Unable to load mobile navigation feature flags: ${message}`);
@@ -145,6 +151,19 @@ export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControl
       setIsSaving(false);
     }
   }, [accessToken, features, pushToast, loadFeatures]);
+
+  const saveBranding = useCallback(async () => {
+    setBrandingSaving(true);
+    try {
+      const response = await apiClient.updatePlaybackBranding(brandingUrl || null, accessToken);
+      setBrandingUrl(response.playbackBrandingUrl ?? "");
+      pushToast("Playback branding saved successfully.", "success");
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : "Playback branding save failed.", "error");
+    } finally {
+      setBrandingSaving(false);
+    }
+  }, [accessToken, brandingUrl, pushToast]);
 
   const hasChanges = useMemo(() => {
     if (features.length !== originalFeatures.length) {
@@ -203,6 +222,22 @@ export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControl
           </div>
         )}
       </div>
+
+      {!loading && !error && (
+        <div className="console-panel">
+          <h3>Playback Branding</h3>
+          <p>Configure the independent emblem shown over live video.</p>
+          <LogoUrlField
+            label="Playback emblem"
+            value={brandingUrl}
+            onChange={setBrandingUrl}
+            onUploadStateChange={setBrandingUploading}
+          />
+          <button type="button" onClick={() => void saveBranding()} disabled={brandingSaving || brandingUploading}>
+            {brandingSaving ? "Saving…" : "Save Playback Branding"}
+          </button>
+        </div>
+      )}
 
       {!loading && !error && (
         <div className="button-group" style={{ marginTop: "1.5rem", display: "flex", gap: "1rem" }}>

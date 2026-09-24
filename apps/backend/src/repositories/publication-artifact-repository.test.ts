@@ -126,7 +126,7 @@ test("unsafe source references are rejected and publication state remains provid
   assert.equal("channelId" in unsafe, false);
 });
 
-test("published delivery is match-scoped and accepts only public HTTPS playback", () => {
+test("published delivery is match-scoped and accepts safe direct or Xtream playback", () => {
   const artifact = createPublicationArtifact({ matchId: "match-publication", sourceReference: "desktop-publication-reference" });
   approvePublicationArtifact(artifact.publicationId);
   publishPublicationArtifact(artifact.publicationId);

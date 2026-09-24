@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc --noEmit",
+    "rebuild:native": "electron-rebuild -f -w better-sqlite3 -v 29.1.6",
     "build:electron": "tsc -p tsconfig.json && node ./scripts/align-electron-output.js",
     "build": "vite build && npm run build:electron",
     "electron:serve": "node ./scripts/electron-serve.cjs",

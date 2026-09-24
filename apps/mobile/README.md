@@ -10,18 +10,18 @@ GET /mobile/matches/live
 
 Default API base URL:
 
-```bash
-http://10.0.2.2:4100
+```text
+https://gito-sports.onrender.com
 ```
 
 To run locally with a custom API URL:
 
 ```bash
-flutter run --dart-define=GITO_API_BASE_URL=http://localhost:4100
+flutter run --dart-define=API_URL=http://10.0.2.2:4100
 ```
 
 For production builds point the app to the deployed Render backend:
 
 ```bash
-flutter build apk --dart-define=GITO_API_BASE_URL=https://gito-sports.onrender.com
+flutter build apk --dart-define=API_URL=https://gito-sports.onrender.com
 ```

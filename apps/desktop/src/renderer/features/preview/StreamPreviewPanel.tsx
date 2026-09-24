@@ -148,6 +148,7 @@ export const StreamPreviewPanel = memo(function StreamPreviewPanel({
     const activeVideo = video;
     const activeChannelId = channel.id;
     const activeChannelName = channel.name;
+    let previewReadyReported = false;
 
     previewTrace("preview started", `channel id=${activeChannelId} name=${activeChannelName}`);
     previewLog("COMPONENT_MOUNT", channelDetails(channel));
@@ -156,14 +157,16 @@ export const StreamPreviewPanel = memo(function StreamPreviewPanel({
     lastHealthEmitRef.current = 0;
     lastTimeRef.current = 0;
     currentStreamUrlRef.current = channel.url;
+    stateGuardRef.current.canTransition("loading", "preview:start");
     updateStatus("Loading stream...");
     onHealthChange?.("unknown", "Loading stream.");
 
-    function markActive() {
+    function markActive(confirmPreview = false) {
       const now = Date.now();
 
       // Validate state transition: * → playing
-      if (!stateGuardRef.current.canTransition("playing", "playback:active")) {
+      const canEnterPlaying = stateGuardRef.current.canTransition("playing", "playback:active");
+      if (!canEnterPlaying && !confirmPreview) {
         previewTrace("state transition rejected", "cannot transition to playing");
         return;
       }
@@ -174,6 +177,11 @@ export const StreamPreviewPanel = memo(function StreamPreviewPanel({
       setPlaybackState("playing");
       updateStatus("Preview active");
       previewTrace("player active");
+      if (confirmPreview && !previewReadyReported) {
+        previewReadyReported = true;
+        previewTrace("onPreviewReady fired", `channel id=${activeChannelId}`);
+        onPreviewReady(activeChannelId);
+      }
 
       if (now - lastHealthEmitRef.current > 5000) {
         lastHealthEmitRef.current = now;
@@ -272,8 +280,10 @@ export const StreamPreviewPanel = memo(function StreamPreviewPanel({
       video.addEventListener(eventName, handler);
     }
 
-    video.addEventListener("playing", markActive);
-    video.addEventListener("canplay", markActive);
+    const handlePlaying = () => markActive(true);
+    const handleCanPlay = () => markActive(false);
+    video.addEventListener("playing", handlePlaying);
+    video.addEventListener("canplay", handleCanPlay);
     video.addEventListener("timeupdate", handleTimeUpdate);
     video.addEventListener("waiting", handleWaiting);
     video.addEventListener("stalled", handleWaiting);
@@ -337,15 +347,27 @@ export const StreamPreviewPanel = memo(function StreamPreviewPanel({
 
     function mountStream(url: string, channelId: string) {
       window.clearTimeout(stallTimer);
+      const previewUrl = providerType === "xtream" && /^https:\/\/[^/]+\/live\//i.test(url)
+        ? url.replace(/^https:/i, "http:")
+        : url;
+      if (previewUrl !== url) {
+        previewTrace("using provider live protocol", redactPreviewUrl(previewUrl) ?? "redacted-url");
+        currentStreamUrlRef.current = previewUrl;
+      }
       const restoreTime = activeVideo.currentTime > 0 ? activeVideo.currentTime : undefined;
-      if (Hls.isSupported() && url.includes(".m3u8")) {
-        previewTrace("mounting HLS stream", redactPreviewUrl(url) ?? "redacted-url");
-        previewLog("HLS_CREATE", { channelId, url: redactPreviewUrl(url), config: { backBufferLength: 30, lowLatencyMode: true, maxBufferLength: 10 } });
+      if (Hls.isSupported() && previewUrl.includes(".m3u8")) {
+        previewTrace("mounting HLS stream", redactPreviewUrl(previewUrl) ?? "redacted-url");
+        previewLog("HLS_CREATE", { channelId, url: redactPreviewUrl(previewUrl), config: { backBufferLength: 30, lowLatencyMode: true, maxBufferLength: 10 } });
         cleanupHls("replace_stream");
         const hls = new Hls({
           backBufferLength: 30,
           lowLatencyMode: true,
-          maxBufferLength: 10
+          maxBufferLength: 10,
+          xhrSetup: (xhr) => {
+            for (const [name, value] of Object.entries(channel?.playbackHeaders ?? {})) {
+              if (value) xhr.setRequestHeader(name, value);
+            }
+          }
         });
         hlsRef.current = hls;
         const logHlsEvent = (eventName: string, data?: any) => {
@@ -378,7 +400,7 @@ export const StreamPreviewPanel = memo(function StreamPreviewPanel({
         ] as const) {
           hls.on(eventKey, (_event: string, data: any) => logHlsEvent(eventName, data));
         }
-        hls.loadSource(url);
+        hls.loadSource(previewUrl);
         hls.attachMedia(activeVideo);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           previewTrace("HLS manifest parsed");
@@ -386,8 +408,6 @@ export const StreamPreviewPanel = memo(function StreamPreviewPanel({
             activeVideo.currentTime = restoreTime;
           }
           updateStatus("Preview ready");
-          previewTrace("onPreviewReady fired", `channel id=${channelId}`);
-          onPreviewReady(channelId);
           previewLog("PLAY_REQUEST", { channelId });
           void activeVideo.play().then(() => previewLog("PLAY_RESOLVED", { channelId })).catch((error) => {
             previewLog("PLAY_REJECTED", { name: error?.name ?? null, message: error?.message ?? String(error) });
@@ -405,17 +425,15 @@ export const StreamPreviewPanel = memo(function StreamPreviewPanel({
           markDegraded(data.details ?? "HLS stream warning.");
         });
       } else {
-        previewTrace("mounting direct video src", redactPreviewUrl(url) ?? "redacted-url");
-        previewLog("NATIVE_SOURCE_ASSIGN", { channelId, url: redactPreviewUrl(url) });
+        previewTrace("mounting direct video src", redactPreviewUrl(previewUrl) ?? "redacted-url");
+        previewLog("NATIVE_SOURCE_ASSIGN", { channelId, url: redactPreviewUrl(previewUrl) });
         cleanupHls("replace_stream");
         if (restoreTime !== undefined) {
           activeVideo.currentTime = restoreTime;
         }
-        activeVideo.src = url;
+        activeVideo.src = previewUrl;
         previewTrace("video source assigned");
         updateStatus("Preview ready");
-        previewTrace("onPreviewReady fired", `channel id=${channelId}`);
-        onPreviewReady(channelId);
         previewLog("PLAY_REQUEST", { channelId });
         void activeVideo.play().then(() => previewLog("PLAY_RESOLVED", { channelId })).catch((error) => {
           previewTrace("playback start failed", String(error));
@@ -492,8 +510,8 @@ export const StreamPreviewPanel = memo(function StreamPreviewPanel({
       window.clearTimeout(stallTimer);
       window.clearTimeout(retryTimerRef.current);
       cleanupHls("component_unmount");
-      video.removeEventListener("playing", markActive);
-      video.removeEventListener("canplay", markActive);
+      video.removeEventListener("playing", handlePlaying);
+      video.removeEventListener("canplay", handleCanPlay);
       video.removeEventListener("timeupdate", handleTimeUpdate);
       video.removeEventListener("waiting", handleWaiting);
       video.removeEventListener("stalled", handleWaiting);
@@ -509,17 +527,18 @@ export const StreamPreviewPanel = memo(function StreamPreviewPanel({
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!playbackEntity || !video || !window.gito?.desktopPlayback) return undefined;
+    const secureEntity = playbackEntity;
+    if (!secureEntity || !video || !window.gito?.desktopPlayback) return undefined;
     let disposed = false;
     let cleanupMedia: (() => void) | undefined;
     let hls: Hls | undefined;
     const playback = window.gito.desktopPlayback;
-    const entityId = playbackEntity.entityId;
+    const entityId = secureEntity.entityId;
     const start = async () => {
       try {
         updateStatus("Loading secure playback...");
         onHealthChange?.("unknown", "Loading secure playback.");
-        const session = await playback.start(playbackEntity);
+        const session = await playback.start(secureEntity);
         if (disposed) {
           await playback.cancel(session.sessionId);
           return;
@@ -541,6 +560,12 @@ export const StreamPreviewPanel = memo(function StreamPreviewPanel({
           void manifestProbe;
         } catch (error) {
           if (disposed) return;
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          if (errorMessage !== "playback_not_hls") {
+            updateStatus("Playback unavailable");
+            onHealthChange?.("failed", errorMessage);
+            return;
+          }
           cleanupMedia = mountDesktopNonHlsPlayback(video, playback, session.sessionId, () => {
             if (!disposed) {
               updateStatus("Preview ready");
@@ -572,7 +597,7 @@ export const StreamPreviewPanel = memo(function StreamPreviewPanel({
       if (sessionId) void playback.cancel(sessionId);
       delete (video as HTMLVideoElement & { __gitoPlaybackSessionId?: string }).__gitoPlaybackSessionId;
     };
-  }, [onHealthChange, onPreviewReady, playbackEntity, updateStatus]);
+  }, [channel, onHealthChange, onPreviewReady, playbackEntity, updateStatus]);
 
   return (
     <section className={compact ? "preview-panel compact-preview" : "screen-stack"}>

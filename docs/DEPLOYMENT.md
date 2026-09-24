@@ -89,7 +89,7 @@ GET /mobile/matches/live
 Build with the deployed backend URL:
 
 ```bash
-flutter build apk --dart-define=GITO_API_BASE_URL=http://backend-host:4100
+flutter build apk --dart-define=API_URL=https://gito-sports.onrender.com
 ```
 
 For Android emulator development, the default is:

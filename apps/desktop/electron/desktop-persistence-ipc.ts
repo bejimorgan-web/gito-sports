@@ -33,6 +33,7 @@ function register(channel: string, handler: (...args: any[]) => unknown) {
 }
 
 export function registerDesktopPersistenceIpc() {
+  getStorage().interruptActiveOperations();
   const handlers = createDesktopPersistenceHandlers(getStorage(), getCredentials(), getIptvRuntime(), getPlayback());
   register("desktop-storage:provider-accounts:list", handlers.providerAccountsList);
   register("desktop-storage:provider-accounts:get", handlers.providerAccountsGet);
@@ -97,14 +98,17 @@ export function registerDesktopPersistenceIpc() {
   register("desktop-playback:start", handlers.playbackStart);
   register("desktop-playback:read", handlers.playbackRead);
   register("desktop-playback:cancel", handlers.playbackCancel);
+  // Do not resume large IPTV catalogue writes during app startup. The IPTV
+  // management screen can start an explicit sync after login.
   app.once("before-quit", closeDesktopPersistenceForTests);
 }
 
 export function closeDesktopPersistenceForTests() {
+  iptvRuntime?.shutdownForAppExit();
+  iptvRuntime = undefined;
   storage?.close();
   storage = undefined;
   credentials = undefined;
-  iptvRuntime = undefined;
   playback?.shutdown();
   playback = undefined;
 }

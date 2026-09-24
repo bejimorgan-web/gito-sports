@@ -1,0 +1,6 @@
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+export function IptvChannelsScreen({ providers, selectedProviderId, onProviderFilterChange, below }) {
+    const visibleProviders = providers.filter((provider) => provider.status === "active");
+    const filteredProvider = visibleProviders.find((provider) => provider.id === selectedProviderId);
+    return (_jsxs("section", { className: "console-panel", children: [_jsxs("div", { className: "panel-heading", children: [_jsx("h3", { children: "IPTV Channels" }), _jsx("span", { children: "Browse provider catalogue" })] }), _jsx("div", { className: "filters-row", children: _jsxs("label", { children: ["Provider", _jsxs("select", { value: selectedProviderId, onChange: (event) => onProviderFilterChange(event.target.value), children: [_jsx("option", { value: "", children: "All providers" }), visibleProviders.map((provider) => (_jsx("option", { value: provider.id, children: provider.name }, provider.id)))] })] }) }), _jsxs("div", { className: "provider-summary-row", children: [_jsx("span", { children: filteredProvider ? filteredProvider.name : "Select a saved provider" }), filteredProvider ? _jsx("small", { children: filteredProvider.status.toUpperCase() }) : null] }), below] }));
+}

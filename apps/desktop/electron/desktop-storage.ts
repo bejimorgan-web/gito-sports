@@ -70,7 +70,7 @@ export function validateProviderAccountPatch(input: Partial<DesktopProviderAccou
 }
 
 export function validateChannelInput(input: DesktopChannelInput) {
-  assertAllowedKeys(input, ["id", "providerAccountId", "externalReference", "name", "groupName", "logoUrl", "playbackUrl", "contentType", "status"]);
+  assertAllowedKeys(input, ["id", "providerAccountId", "externalReference", "name", "groupName", "logoUrl", "playbackUrl", "metadataJson", "contentType", "status"]);
   assertString(input.providerAccountId, "provider_account_id");
   assertString(input.name, "channel_name");
   assertString(input.playbackUrl, "channel_playback_url");
@@ -86,7 +86,7 @@ export function validateCatalogueCategoryInput(input: DesktopCatalogueCategoryIn
 }
 
 export function validateEpgChannelInput(input: DesktopEpgChannelInput) {
-  assertAllowedKeys(input, ["id", "providerAccountId", "externalReference", "channelId", "name", "logoUrl", "status"]);
+  assertAllowedKeys(input, ["id", "providerAccountId", "externalReference", "channelId", "name", "logoUrl", "metadataJson", "status"]);
   assertString(input.providerAccountId, "provider_account_id");
   assertString(input.name, "epg_channel_name");
   if (input.externalReference !== undefined && input.externalReference !== null) assertSafeRef(input.externalReference, "external_reference");
@@ -104,7 +104,7 @@ export function validateEpgProgrammeInput(input: DesktopEpgProgrammeInput) {
 }
 
 export function validateMovieInput(input: DesktopMovieInput) {
-  assertAllowedKeys(input, ["id", "providerAccountId", "externalReference", "categoryId", "name", "description", "logoUrl", "posterUrl", "contentType", "status"]);
+  assertAllowedKeys(input, ["id", "providerAccountId", "externalReference", "categoryId", "name", "description", "logoUrl", "posterUrl", "metadataJson", "contentType", "status"]);
   assertString(input.providerAccountId, "provider_account_id");
   assertString(input.name, "movie_name");
   if (input.externalReference !== undefined && input.externalReference !== null) assertSafeRef(input.externalReference, "external_reference");
@@ -113,7 +113,7 @@ export function validateMovieInput(input: DesktopMovieInput) {
 }
 
 export function validateSeriesInput(input: DesktopSeriesInput) {
-  assertAllowedKeys(input, ["id", "providerAccountId", "externalReference", "categoryId", "name", "description", "logoUrl", "posterUrl", "status"]);
+  assertAllowedKeys(input, ["id", "providerAccountId", "externalReference", "categoryId", "name", "description", "logoUrl", "posterUrl", "metadataJson", "status"]);
   assertString(input.providerAccountId, "provider_account_id");
   assertString(input.name, "series_name");
   if (input.externalReference !== undefined && input.externalReference !== null) assertSafeRef(input.externalReference, "external_reference");
@@ -121,7 +121,7 @@ export function validateSeriesInput(input: DesktopSeriesInput) {
 }
 
 export function validateSeasonInput(input: DesktopSeasonInput) {
-  assertAllowedKeys(input, ["id", "providerAccountId", "seriesId", "externalReference", "seasonNumber", "name", "status"]);
+  assertAllowedKeys(input, ["id", "providerAccountId", "seriesId", "externalReference", "seasonNumber", "name", "metadataJson", "status"]);
   assertString(input.providerAccountId, "provider_account_id");
   assertString(input.seriesId, "series_id");
   if (input.externalReference !== undefined && input.externalReference !== null) assertSafeRef(input.externalReference, "external_reference");
@@ -129,7 +129,7 @@ export function validateSeasonInput(input: DesktopSeasonInput) {
 }
 
 export function validateEpisodeInput(input: DesktopEpisodeInput) {
-  assertAllowedKeys(input, ["id", "providerAccountId", "seriesId", "seasonId", "externalReference", "episodeNumber", "name", "description", "logoUrl", "status"]);
+  assertAllowedKeys(input, ["id", "providerAccountId", "seriesId", "seasonId", "externalReference", "episodeNumber", "name", "description", "logoUrl", "metadataJson", "status"]);
   assertString(input.providerAccountId, "provider_account_id");
   assertString(input.seriesId, "series_id");
   if (input.seasonId !== undefined && input.seasonId !== null) assertSafeRef(input.seasonId, "season_id");
@@ -188,6 +188,7 @@ function mapChannel(row: Record<string, unknown>): DesktopChannel {
     groupName: (row.group_name as string | null) ?? null,
     logoUrl: (row.logo_url as string | null) ?? null,
     playbackUrl: String(row.playback_url),
+    metadataJson: (row.metadata_json as string | null) ?? null,
     contentType: row.content_type as DesktopContentType,
     status: row.status as DesktopRecordStatus,
     createdAt: String(row.created_at),
@@ -234,6 +235,7 @@ function mapEpgChannel(row: Record<string, unknown>): DesktopEpgChannel {
     channelId: (row.channel_id as string | null) ?? null,
     name: String(row.name),
     logoUrl: (row.logo_url as string | null) ?? null,
+    metadataJson: (row.metadata_json as string | null) ?? null,
     status: row.status as DesktopRecordStatus,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at)
@@ -267,6 +269,7 @@ function mapMovie(row: Record<string, unknown>): DesktopMovie {
     description: (row.description as string | null) ?? null,
     logoUrl: (row.logo_url as string | null) ?? null,
     posterUrl: (row.poster_url as string | null) ?? null,
+    metadataJson: (row.metadata_json as string | null) ?? null,
     contentType: row.content_type as DesktopContentType,
     status: row.status as DesktopRecordStatus,
     createdAt: String(row.created_at),
@@ -284,6 +287,7 @@ function mapSeries(row: Record<string, unknown>): DesktopSeries {
     description: (row.description as string | null) ?? null,
     logoUrl: (row.logo_url as string | null) ?? null,
     posterUrl: (row.poster_url as string | null) ?? null,
+    metadataJson: (row.metadata_json as string | null) ?? null,
     status: row.status as DesktopRecordStatus,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at)
@@ -298,6 +302,7 @@ function mapSeason(row: Record<string, unknown>): DesktopSeason {
     externalReference: (row.external_reference as string | null) ?? null,
     seasonNumber: row.season_number == null ? null : Number(row.season_number),
     name: (row.name as string | null) ?? null,
+    metadataJson: (row.metadata_json as string | null) ?? null,
     status: row.status as DesktopRecordStatus,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at)
@@ -315,6 +320,7 @@ function mapEpisode(row: Record<string, unknown>): DesktopEpisode {
     name: (row.name as string | null) ?? null,
     description: (row.description as string | null) ?? null,
     logoUrl: (row.logo_url as string | null) ?? null,
+    metadataJson: (row.metadata_json as string | null) ?? null,
     status: row.status as DesktopRecordStatus,
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at)
@@ -373,6 +379,7 @@ export class DesktopSqliteStore {
         group_name TEXT,
         logo_url TEXT,
         playback_url TEXT NOT NULL,
+        metadata_json TEXT,
         content_type TEXT NOT NULL DEFAULT 'live' CHECK (content_type IN ('live', 'movie', 'series')),
         status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'archived', 'stale')),
         created_at TEXT NOT NULL,
@@ -400,6 +407,7 @@ export class DesktopSqliteStore {
         channel_id TEXT,
         name TEXT NOT NULL,
         logo_url TEXT,
+        metadata_json TEXT,
         status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'archived', 'stale')),
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -433,6 +441,7 @@ export class DesktopSqliteStore {
         description TEXT,
         logo_url TEXT,
         poster_url TEXT,
+        metadata_json TEXT,
         content_type TEXT NOT NULL DEFAULT 'movie' CHECK (content_type IN ('live', 'movie', 'series')),
         status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'archived', 'stale')),
         created_at TEXT NOT NULL,
@@ -450,6 +459,7 @@ export class DesktopSqliteStore {
         description TEXT,
         logo_url TEXT,
         poster_url TEXT,
+        metadata_json TEXT,
         status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'archived', 'stale')),
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -464,6 +474,7 @@ export class DesktopSqliteStore {
         external_reference TEXT,
         season_number INTEGER,
         name TEXT,
+        metadata_json TEXT,
         status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'archived', 'stale')),
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -481,6 +492,7 @@ export class DesktopSqliteStore {
         name TEXT,
         description TEXT,
         logo_url TEXT,
+        metadata_json TEXT,
         status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'archived', 'stale')),
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -518,6 +530,10 @@ export class DesktopSqliteStore {
       );
       CREATE INDEX IF NOT EXISTS idx_desktop_operations_provider ON iptv_operations(provider_account_id, updated_at);
     `);
+    for (const [table, column] of [["channels", "metadata_json"], ["iptv_epg_channels", "metadata_json"], ["iptv_movies", "metadata_json"], ["iptv_series", "metadata_json"], ["iptv_seasons", "metadata_json"], ["iptv_series_episodes", "metadata_json"]] as const) {
+      const columns = this.database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+      if (!columns.some((entry) => entry.name === column)) this.database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
+    }
   }
 
   close() {
@@ -526,6 +542,147 @@ export class DesktopSqliteStore {
 
   transaction<T>(work: () => T) {
     return this.database.transaction(work)();
+  }
+
+  upsertMoviesBatch(inputs: DesktopMovieInput[]) {
+    inputs.forEach(validateMovieInput);
+    const statement = this.database.prepare(`
+      INSERT INTO iptv_movies (id, provider_account_id, external_reference, category_id, name, description, logo_url, poster_url, metadata_json, content_type, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        provider_account_id = excluded.provider_account_id,
+        external_reference = excluded.external_reference,
+        category_id = excluded.category_id,
+        name = excluded.name,
+        description = excluded.description,
+        logo_url = excluded.logo_url,
+        poster_url = excluded.poster_url,
+        metadata_json = excluded.metadata_json,
+        content_type = excluded.content_type,
+        status = excluded.status,
+        updated_at = excluded.updated_at
+      WHERE provider_account_id IS NOT excluded.provider_account_id OR external_reference IS NOT excluded.external_reference OR category_id IS NOT excluded.category_id OR name IS NOT excluded.name OR description IS NOT excluded.description OR logo_url IS NOT excluded.logo_url OR poster_url IS NOT excluded.poster_url OR metadata_json IS NOT excluded.metadata_json OR content_type IS NOT excluded.content_type OR status IS NOT excluded.status
+    `);
+    const timestamp = now();
+    this.transaction(() => {
+      for (const input of inputs) statement.run(input.id, input.providerAccountId, input.externalReference ?? null, input.categoryId ?? null, input.name, input.description ?? null, input.logoUrl ?? null, input.posterUrl ?? null, input.metadataJson ?? null, input.contentType ?? "movie", input.status ?? "active", timestamp, timestamp);
+    });
+  }
+
+  upsertChannelsBatch(inputs: DesktopChannelInput[]) {
+    inputs.forEach(validateChannelInput);
+    const statement = this.database.prepare(`
+      INSERT INTO channels (id, provider_account_id, external_reference, name, group_name, logo_url, playback_url, metadata_json, content_type, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        provider_account_id = excluded.provider_account_id,
+        external_reference = excluded.external_reference,
+        name = excluded.name,
+        group_name = excluded.group_name,
+        logo_url = excluded.logo_url,
+        playback_url = excluded.playback_url,
+        metadata_json = excluded.metadata_json,
+        content_type = excluded.content_type,
+        status = excluded.status,
+        updated_at = excluded.updated_at
+      WHERE provider_account_id IS NOT excluded.provider_account_id OR external_reference IS NOT excluded.external_reference OR name IS NOT excluded.name OR group_name IS NOT excluded.group_name OR logo_url IS NOT excluded.logo_url OR playback_url IS NOT excluded.playback_url OR metadata_json IS NOT excluded.metadata_json OR content_type IS NOT excluded.content_type OR status IS NOT excluded.status
+    `);
+    const timestamp = now();
+    this.transaction(() => {
+      for (const input of inputs) statement.run(input.id ?? `channel_${crypto.randomUUID()}`, input.providerAccountId, input.externalReference ?? null, input.name, input.groupName ?? null, input.logoUrl ?? null, input.playbackUrl, input.metadataJson ?? null, input.contentType ?? "live", input.status ?? "active", timestamp, timestamp);
+    });
+  }
+
+  upsertCategoriesBatch(inputs: DesktopCatalogueCategoryInput[]) {
+    inputs.forEach(validateCatalogueCategoryInput);
+    const statement = this.database.prepare(`
+      INSERT INTO iptv_categories (id, provider_account_id, external_reference, name, content_type, sort_order, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        provider_account_id = excluded.provider_account_id,
+        external_reference = excluded.external_reference,
+        name = excluded.name,
+        content_type = excluded.content_type,
+        sort_order = excluded.sort_order,
+        status = excluded.status,
+        updated_at = excluded.updated_at
+      WHERE provider_account_id IS NOT excluded.provider_account_id OR external_reference IS NOT excluded.external_reference OR name IS NOT excluded.name OR content_type IS NOT excluded.content_type OR sort_order IS NOT excluded.sort_order OR status IS NOT excluded.status
+    `);
+    const timestamp = now();
+    this.transaction(() => {
+      for (const input of inputs) statement.run(input.id, input.providerAccountId, input.externalReference ?? null, input.name, input.contentType ?? "live", input.sortOrder ?? null, input.status ?? "active", timestamp, timestamp);
+    });
+  }
+
+  upsertSeriesBatch(inputs: DesktopSeriesInput[]) {
+    inputs.forEach(validateSeriesInput);
+    const statement = this.database.prepare(`
+      INSERT INTO iptv_series (id, provider_account_id, external_reference, category_id, name, description, logo_url, poster_url, metadata_json, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        provider_account_id = excluded.provider_account_id,
+        external_reference = excluded.external_reference,
+        category_id = excluded.category_id,
+        name = excluded.name,
+        description = excluded.description,
+        logo_url = excluded.logo_url,
+        poster_url = excluded.poster_url,
+        metadata_json = excluded.metadata_json,
+        status = excluded.status,
+        updated_at = excluded.updated_at
+      WHERE provider_account_id IS NOT excluded.provider_account_id OR external_reference IS NOT excluded.external_reference OR category_id IS NOT excluded.category_id OR name IS NOT excluded.name OR description IS NOT excluded.description OR logo_url IS NOT excluded.logo_url OR poster_url IS NOT excluded.poster_url OR metadata_json IS NOT excluded.metadata_json OR status IS NOT excluded.status
+    `);
+    const timestamp = now();
+    this.transaction(() => {
+      for (const input of inputs) statement.run(input.id, input.providerAccountId, input.externalReference ?? null, input.categoryId ?? null, input.name, input.description ?? null, input.logoUrl ?? null, input.posterUrl ?? null, input.metadataJson ?? null, input.status ?? "active", timestamp, timestamp);
+    });
+  }
+
+  upsertSeasonsBatch(inputs: DesktopSeasonInput[]) {
+    inputs.forEach(validateSeasonInput);
+    const statement = this.database.prepare(`
+      INSERT INTO iptv_seasons (id, provider_account_id, series_id, external_reference, season_number, name, metadata_json, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        provider_account_id = excluded.provider_account_id,
+        series_id = excluded.series_id,
+        external_reference = excluded.external_reference,
+        season_number = excluded.season_number,
+        name = excluded.name,
+        metadata_json = excluded.metadata_json,
+        status = excluded.status,
+        updated_at = excluded.updated_at
+      WHERE provider_account_id IS NOT excluded.provider_account_id OR series_id IS NOT excluded.series_id OR external_reference IS NOT excluded.external_reference OR season_number IS NOT excluded.season_number OR name IS NOT excluded.name OR metadata_json IS NOT excluded.metadata_json OR status IS NOT excluded.status
+    `);
+    const timestamp = now();
+    this.transaction(() => {
+      for (const input of inputs) statement.run(input.id, input.providerAccountId, input.seriesId, input.externalReference ?? null, input.seasonNumber ?? null, input.name ?? null, input.metadataJson ?? null, input.status ?? "active", timestamp, timestamp);
+    });
+  }
+
+  upsertEpisodesBatch(inputs: DesktopEpisodeInput[]) {
+    inputs.forEach(validateEpisodeInput);
+    const statement = this.database.prepare(`
+      INSERT INTO iptv_series_episodes (id, provider_account_id, series_id, season_id, external_reference, episode_number, name, description, logo_url, metadata_json, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        provider_account_id = excluded.provider_account_id,
+        series_id = excluded.series_id,
+        season_id = excluded.season_id,
+        external_reference = excluded.external_reference,
+        episode_number = excluded.episode_number,
+        name = excluded.name,
+        description = excluded.description,
+        logo_url = excluded.logo_url,
+        metadata_json = excluded.metadata_json,
+        status = excluded.status,
+        updated_at = excluded.updated_at
+      WHERE provider_account_id IS NOT excluded.provider_account_id OR series_id IS NOT excluded.series_id OR season_id IS NOT excluded.season_id OR external_reference IS NOT excluded.external_reference OR episode_number IS NOT excluded.episode_number OR name IS NOT excluded.name OR description IS NOT excluded.description OR logo_url IS NOT excluded.logo_url OR metadata_json IS NOT excluded.metadata_json OR status IS NOT excluded.status
+    `);
+    const timestamp = now();
+    this.transaction(() => {
+      for (const input of inputs) statement.run(input.id, input.providerAccountId, input.seriesId, input.seasonId ?? null, input.externalReference ?? null, input.episodeNumber ?? null, input.name ?? null, input.description ?? null, input.logoUrl ?? null, input.metadataJson ?? null, input.status ?? "active", timestamp, timestamp);
+    });
   }
 
   listProviderAccounts() {
@@ -587,11 +744,13 @@ export class DesktopSqliteStore {
     validateChannelInput(input);
     const timestamp = now();
     const id = input.id ?? `channel_${crypto.randomUUID()}`;
+    const existing = this.getChannel(id);
+    if (existing && existing.providerAccountId === input.providerAccountId && existing.externalReference === (input.externalReference ?? null) && existing.name === input.name && existing.groupName === (input.groupName ?? null) && existing.logoUrl === (input.logoUrl ?? null) && existing.playbackUrl === input.playbackUrl && existing.metadataJson === (input.metadataJson ?? null) && existing.contentType === (input.contentType ?? "live") && existing.status === (input.status ?? "active")) return existing;
     this.database.prepare(`
-      INSERT INTO channels (id, provider_account_id, external_reference, name, group_name, logo_url, playback_url, content_type, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET provider_account_id = excluded.provider_account_id, external_reference = excluded.external_reference, name = excluded.name, group_name = excluded.group_name, logo_url = excluded.logo_url, playback_url = excluded.playback_url, content_type = excluded.content_type, status = excluded.status, updated_at = excluded.updated_at
-    `).run(id, input.providerAccountId, input.externalReference ?? null, input.name, input.groupName ?? null, input.logoUrl ?? null, input.playbackUrl, input.contentType ?? "live", input.status ?? "active", timestamp, timestamp);
+      INSERT INTO channels (id, provider_account_id, external_reference, name, group_name, logo_url, playback_url, metadata_json, content_type, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET provider_account_id = excluded.provider_account_id, external_reference = excluded.external_reference, name = excluded.name, group_name = excluded.group_name, logo_url = excluded.logo_url, playback_url = excluded.playback_url, metadata_json = excluded.metadata_json, content_type = excluded.content_type, status = excluded.status, updated_at = excluded.updated_at
+    `).run(id, input.providerAccountId, input.externalReference ?? null, input.name, input.groupName ?? null, input.logoUrl ?? null, input.playbackUrl, input.metadataJson ?? null, input.contentType ?? "live", input.status ?? "active", timestamp, timestamp);
     return this.getChannel(id)!;
   }
 
@@ -624,6 +783,7 @@ export class DesktopSqliteStore {
     const id = input.id ?? `category_${crypto.randomUUID()}`;
     const contentType = input.contentType ?? "live";
     const existing = this.getCategory(id);
+    if (existing && existing.providerAccountId === input.providerAccountId && existing.externalReference === (input.externalReference ?? null) && existing.name === input.name && existing.contentType === contentType && existing.sortOrder === (input.sortOrder ?? null) && existing.status === (input.status ?? existing.status)) return existing;
     this.database.prepare(`
       INSERT INTO iptv_categories (id, provider_account_id, external_reference, name, content_type, sort_order, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -672,17 +832,18 @@ export class DesktopSqliteStore {
     const id = input.id ?? `epg_channel_${crypto.randomUUID()}`;
     const existing = this.getEpgChannel(id);
     this.database.prepare(`
-      INSERT INTO iptv_epg_channels (id, provider_account_id, external_reference, channel_id, name, logo_url, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO iptv_epg_channels (id, provider_account_id, external_reference, channel_id, name, logo_url, metadata_json, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         provider_account_id = excluded.provider_account_id,
         external_reference = excluded.external_reference,
         channel_id = excluded.channel_id,
         name = excluded.name,
         logo_url = excluded.logo_url,
+        metadata_json = excluded.metadata_json,
         status = excluded.status,
         updated_at = excluded.updated_at
-    `).run(id, input.providerAccountId, input.externalReference ?? null, input.channelId ?? null, input.name, input.logoUrl ?? null, input.status ?? (existing?.status ?? "active"), existing?.createdAt ?? timestamp, timestamp);
+    `).run(id, input.providerAccountId, input.externalReference ?? null, input.channelId ?? null, input.name, input.logoUrl ?? null, input.metadataJson ?? null, input.status ?? (existing?.status ?? "active"), existing?.createdAt ?? timestamp, timestamp);
     return this.getEpgChannel(id)!;
   }
 
@@ -766,9 +927,10 @@ export class DesktopSqliteStore {
     const timestamp = now();
     const id = input.id ?? `movie_${crypto.randomUUID()}`;
     const existing = this.getMovie(id);
+    if (existing && existing.providerAccountId === input.providerAccountId && existing.externalReference === (input.externalReference ?? null) && existing.categoryId === (input.categoryId ?? null) && existing.name === input.name && existing.description === (input.description ?? null) && existing.logoUrl === (input.logoUrl ?? null) && existing.posterUrl === (input.posterUrl ?? null) && existing.metadataJson === (input.metadataJson ?? null) && existing.contentType === (input.contentType ?? "movie") && existing.status === (input.status ?? existing.status)) return existing;
     this.database.prepare(`
-      INSERT INTO iptv_movies (id, provider_account_id, external_reference, category_id, name, description, logo_url, poster_url, content_type, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO iptv_movies (id, provider_account_id, external_reference, category_id, name, description, logo_url, poster_url, metadata_json, content_type, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         provider_account_id = excluded.provider_account_id,
         external_reference = excluded.external_reference,
@@ -777,10 +939,11 @@ export class DesktopSqliteStore {
         description = excluded.description,
         logo_url = excluded.logo_url,
         poster_url = excluded.poster_url,
+        metadata_json = excluded.metadata_json,
         content_type = excluded.content_type,
         status = excluded.status,
         updated_at = excluded.updated_at
-    `).run(id, input.providerAccountId, input.externalReference ?? null, input.categoryId ?? null, input.name, input.description ?? null, input.logoUrl ?? null, input.posterUrl ?? null, input.contentType ?? "movie", input.status ?? (existing?.status ?? "active"), existing?.createdAt ?? timestamp, timestamp);
+    `).run(id, input.providerAccountId, input.externalReference ?? null, input.categoryId ?? null, input.name, input.description ?? null, input.logoUrl ?? null, input.posterUrl ?? null, input.metadataJson ?? null, input.contentType ?? "movie", input.status ?? (existing?.status ?? "active"), existing?.createdAt ?? timestamp, timestamp);
     return this.getMovie(id)!;
   }
 
@@ -812,9 +975,10 @@ export class DesktopSqliteStore {
     const timestamp = now();
     const id = input.id ?? `series_${crypto.randomUUID()}`;
     const existing = this.getSeries(id);
+    if (existing && existing.providerAccountId === input.providerAccountId && existing.externalReference === (input.externalReference ?? null) && existing.categoryId === (input.categoryId ?? null) && existing.name === input.name && existing.description === (input.description ?? null) && existing.logoUrl === (input.logoUrl ?? null) && existing.posterUrl === (input.posterUrl ?? null) && existing.metadataJson === (input.metadataJson ?? null) && existing.status === (input.status ?? existing.status)) return existing;
     this.database.prepare(`
-      INSERT INTO iptv_series (id, provider_account_id, external_reference, category_id, name, description, logo_url, poster_url, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO iptv_series (id, provider_account_id, external_reference, category_id, name, description, logo_url, poster_url, metadata_json, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         provider_account_id = excluded.provider_account_id,
         external_reference = excluded.external_reference,
@@ -823,9 +987,10 @@ export class DesktopSqliteStore {
         description = excluded.description,
         logo_url = excluded.logo_url,
         poster_url = excluded.poster_url,
+        metadata_json = excluded.metadata_json,
         status = excluded.status,
         updated_at = excluded.updated_at
-    `).run(id, input.providerAccountId, input.externalReference ?? null, input.categoryId ?? null, input.name, input.description ?? null, input.logoUrl ?? null, input.posterUrl ?? null, input.status ?? (existing?.status ?? "active"), existing?.createdAt ?? timestamp, timestamp);
+    `).run(id, input.providerAccountId, input.externalReference ?? null, input.categoryId ?? null, input.name, input.description ?? null, input.logoUrl ?? null, input.posterUrl ?? null, input.metadataJson ?? null, input.status ?? (existing?.status ?? "active"), existing?.createdAt ?? timestamp, timestamp);
     return this.getSeries(id)!;
   }
 
@@ -861,18 +1026,20 @@ export class DesktopSqliteStore {
     const timestamp = now();
     const id = input.id ?? `season_${crypto.randomUUID()}`;
     const existing = this.getSeason(id);
+    if (existing && existing.providerAccountId === input.providerAccountId && existing.seriesId === input.seriesId && existing.externalReference === (input.externalReference ?? null) && existing.seasonNumber === (input.seasonNumber ?? null) && existing.name === (input.name ?? null) && existing.metadataJson === (input.metadataJson ?? null) && existing.status === (input.status ?? existing.status)) return existing;
     this.database.prepare(`
-      INSERT INTO iptv_seasons (id, provider_account_id, series_id, external_reference, season_number, name, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO iptv_seasons (id, provider_account_id, series_id, external_reference, season_number, name, metadata_json, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         provider_account_id = excluded.provider_account_id,
         series_id = excluded.series_id,
         external_reference = excluded.external_reference,
         season_number = excluded.season_number,
         name = excluded.name,
+        metadata_json = excluded.metadata_json,
         status = excluded.status,
         updated_at = excluded.updated_at
-    `).run(id, input.providerAccountId, input.seriesId, input.externalReference ?? null, input.seasonNumber ?? null, input.name ?? null, input.status ?? (existing?.status ?? "active"), existing?.createdAt ?? timestamp, timestamp);
+    `).run(id, input.providerAccountId, input.seriesId, input.externalReference ?? null, input.seasonNumber ?? null, input.name ?? null, input.metadataJson ?? null, input.status ?? (existing?.status ?? "active"), existing?.createdAt ?? timestamp, timestamp);
     return this.getSeason(id)!;
   }
 
@@ -912,9 +1079,10 @@ export class DesktopSqliteStore {
     const timestamp = now();
     const id = input.id ?? `episode_${crypto.randomUUID()}`;
     const existing = this.getEpisode(id);
+    if (existing && existing.providerAccountId === input.providerAccountId && existing.seriesId === input.seriesId && existing.seasonId === (input.seasonId ?? null) && existing.externalReference === (input.externalReference ?? null) && existing.episodeNumber === (input.episodeNumber ?? null) && existing.name === (input.name ?? null) && existing.description === (input.description ?? null) && existing.logoUrl === (input.logoUrl ?? null) && existing.metadataJson === (input.metadataJson ?? null) && existing.status === (input.status ?? existing.status)) return existing;
     this.database.prepare(`
-      INSERT INTO iptv_series_episodes (id, provider_account_id, series_id, season_id, external_reference, episode_number, name, description, logo_url, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO iptv_series_episodes (id, provider_account_id, series_id, season_id, external_reference, episode_number, name, description, logo_url, metadata_json, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         provider_account_id = excluded.provider_account_id,
         series_id = excluded.series_id,
@@ -924,9 +1092,10 @@ export class DesktopSqliteStore {
         name = excluded.name,
         description = excluded.description,
         logo_url = excluded.logo_url,
+        metadata_json = excluded.metadata_json,
         status = excluded.status,
         updated_at = excluded.updated_at
-    `).run(id, input.providerAccountId, input.seriesId, input.seasonId ?? null, input.externalReference ?? null, input.episodeNumber ?? null, input.name ?? null, input.description ?? null, input.logoUrl ?? null, input.status ?? (existing?.status ?? "active"), existing?.createdAt ?? timestamp, timestamp);
+    `).run(id, input.providerAccountId, input.seriesId, input.seasonId ?? null, input.externalReference ?? null, input.episodeNumber ?? null, input.name ?? null, input.description ?? null, input.logoUrl ?? null, input.metadataJson ?? null, input.status ?? (existing?.status ?? "active"), existing?.createdAt ?? timestamp, timestamp);
     return this.getEpisode(id)!;
   }
 
@@ -946,6 +1115,18 @@ export class DesktopSqliteStore {
       ? this.database.prepare("SELECT * FROM iptv_operations WHERE provider_account_id = ? ORDER BY updated_at DESC, id").all(providerAccountId)
       : this.database.prepare("SELECT * FROM iptv_operations ORDER BY updated_at DESC, id").all();
     return rows.map((row) => mapOperation(row as Record<string, unknown>));
+  }
+
+  interruptActiveOperations() {
+    const timestamp = now();
+    return this.database.prepare(`
+      UPDATE iptv_operations
+      SET status = 'interrupted',
+          checkpoint = 'startup_reconciliation',
+          error = 'Operation paused during desktop startup; resume explicitly from IPTV Management.',
+          updated_at = ?
+      WHERE status IN ('queued', 'running')
+    `).run(timestamp).changes;
   }
 
   getOperation(id: string) {

@@ -35,6 +35,24 @@ function loadErrorScreen(window: BrowserWindow) {
   void window.loadURL(errorHtml);
 }
 
+function redactDiagnosticUrl(value: string) {
+  try {
+    const url = new URL(value);
+    url.username = "";
+    url.password = "";
+    for (const key of ["username", "password", "token", "user", "pass", "auth", "key", "secret"]) url.searchParams.delete(key);
+    const segments = url.pathname.split("/");
+    const mediaIndex = segments.findIndex((segment) => ["live", "movie", "series"].includes(segment.toLowerCase()));
+    if (mediaIndex >= 0) {
+      for (let index = mediaIndex + 1; index < segments.length - 1; index += 1) segments[index] = "[REDACTED]";
+      url.pathname = segments.join("/");
+    }
+    return url.toString();
+  } catch {
+    return "[REDACTED-URL]";
+  }
+}
+
 function sendNavigationSelection(screenKey: string, window: BrowserWindow | null | undefined) {
   if (!window) {
     return;
@@ -158,11 +176,11 @@ function createMainWindow() {
     const ses = mainWindow.webContents.session;
     const allUrlsFilter = { urls: ["*://*/*"] };
     ses.webRequest.onErrorOccurred(allUrlsFilter, (details) => {
-      console.error(`[NETWORK ERROR] ${details.url} - ${details.error}`);
+      console.error(`[NETWORK ERROR] ${redactDiagnosticUrl(details.url)} - ${details.error}`);
     });
     ses.webRequest.onCompleted(allUrlsFilter, (details) => {
       if (details.statusCode >= 400) {
-        console.error(`[NETWORK STATUS ${details.statusCode}] ${details.url}`);
+        console.error(`[NETWORK STATUS ${details.statusCode}] ${redactDiagnosticUrl(details.url)}`);
       }
     });
   } catch (e) {

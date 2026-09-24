@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { MemoryCredentialStore } from "./credential-store.js";
-import { DesktopIptvRuntime } from "./desktop-iptv-runtime.js";
+import { DesktopIptvRuntime, mapWithConcurrency, normalizeXtreamPlaybackUrl } from "./desktop-iptv-runtime.js";
 import { DesktopSqliteStore } from "./desktop-storage.js";
 
 function temporaryDatabasePath() {
@@ -29,6 +29,13 @@ function response(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } });
 }
 
+test("preserves Xtream provider protocol for preview playback", () => {
+  assert.equal(
+    normalizeXtreamPlaybackUrl("http://provider.example/live/user/password/1.m3u8"),
+    "http://provider.example/live/user/password/1.m3u8"
+  );
+});
+
 function installXtreamMock(options: { failAction?: string; blockAction?: string } = {}) {
   const originalFetch = globalThis.fetch;
   let releaseBlocked: (() => void) | undefined;
@@ -46,6 +53,12 @@ function installXtreamMock(options: { failAction?: string; blockAction?: string 
     if (options.failAction === action) throw new Error("synthetic provider failure");
     switch (action) {
       case "get_live_categories": return response([{ category_id: "1", category_name: "Live" }]);
+      case "get_live_streams": return response([
+        { stream_id: "direct", name: "Direct Live", direct_source: "https://provider.example/direct.mp4", container_extension: "m3u8" },
+        { stream_id: "alternate", name: "Alternate Live", stream_url: "https://provider.example/alternate.ts", container_extension: "ts" },
+        { stream_id: "fallback", name: "Fallback Live", container_extension: "m3u8" },
+        { stream_id: "complete", name: "Complete Live", container_extension: "m3u8" }
+      ]);
       case "get_vod_categories": return response([{ category_id: "1", category_name: "Movies" }]);
       case "get_vod_streams": return response([{ stream_id: "123", name: "Synthetic Movie", category_id: "1", stream_icon: "https://images.example/movie.png", stream_url: "https://provider.example/movie/secret-value" }]);
       case "get_series": return response([{ series_id: "100", name: "Synthetic Series", category_id: "1", cover: "https://images.example/series.png" }]);
@@ -91,11 +104,47 @@ function installM3uMock(getPlaylist: () => string, options: { fail?: boolean; bl
 async function waitForOperation(runtime: DesktopIptvRuntime, operationId: string) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const operation = await runtime.getOperation(operationId);
-    if (operation && ["completed", "failed", "cancelled", "timeout"].includes(operation.status)) return operation;
+    if (operation && ["completed", "partial", "failed", "cancelled", "timeout"].includes(operation.status)) return operation;
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   throw new Error("operation did not finish");
 }
+
+test("bounded catalogue workers never exceed configured concurrency", async () => {
+  let active = 0;
+  let maximum = 0;
+  const values = await mapWithConcurrency([1, 2, 3, 4, 5, 6], 2, async (value) => {
+    active += 1;
+    maximum = Math.max(maximum, active);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    active -= 1;
+    return value * 2;
+  });
+
+  assert.deepEqual(values, [2, 4, 6, 8, 10, 12]);
+  assert.equal(maximum, 2);
+});
+
+test("Xtream validation accepts transient credentials before the provider is saved", async () => {
+  const databasePath = temporaryDatabasePath();
+  const store = new DesktopSqliteStore(databasePath);
+  const credentials = new MemoryCredentialStore();
+  const mock = installXtreamMock();
+  try {
+    const runtime = new DesktopIptvRuntime(store, credentials);
+    const result = await runtime.validateProvider({
+      type: "xtream",
+      baseUrl: "https://xtream.example",
+      username: "new-user",
+      password: "new-password"
+    });
+    assert.equal(result.ok, true);
+  } finally {
+    mock.release();
+    store.close();
+    cleanup(databasePath);
+  }
+});
 
 test("Xtream catalogue sync isolates providers, is idempotent, and discards playback URLs", async () => {
   const databasePath = temporaryDatabasePath();
@@ -121,6 +170,11 @@ test("Xtream catalogue sync isolates providers, is idempotent, and discards play
     assert.notEqual(store.listMovies(providerA.id)[0]?.id, store.listMovies(providerB.id)[0]?.id);
     assert.equal(store.listCategories(providerA.id, "live").length, 1);
     assert.equal(store.listCategories(providerA.id, "movie").length, 1);
+    const liveChannels = store.listChannels(providerA.id);
+    assert.equal(liveChannels.length, 4);
+    assert.equal(liveChannels.find((channel) => channel.externalReference === "direct")?.playbackUrl, "https://provider.example/direct.mp4");
+    assert.equal(liveChannels.find((channel) => channel.externalReference === "alternate")?.playbackUrl, "https://provider.example/alternate.ts");
+    assert.equal(liveChannels.find((channel) => channel.externalReference === "fallback")?.playbackUrl, "https://xtream.example/live/synthetic-user-a/synthetic-password-a/fallback.m3u8");
     assert.equal(store.listSeries(providerA.id).length, 1);
     assert.equal(store.listSeasons(providerA.id).length, 1);
     assert.equal(store.listEpisodes(providerA.id).length, 1);
@@ -130,6 +184,37 @@ test("Xtream catalogue sync isolates providers, is idempotent, and discards play
     assert.equal(JSON.stringify(store.listEpisodes(providerA.id)).includes("secret-value"), false);
     assert.equal(JSON.stringify(store.listOperations(providerA.id)).includes("synthetic-password"), false);
     assert.equal(mock.requests.some((request) => request.includes("synthetic-password")), true);
+  } finally {
+    mock.release();
+    store.close();
+    cleanup(databasePath);
+  }
+});
+
+test("Xtream catalogue sync preserves successful records when one season persistence fails", async () => {
+  const databasePath = temporaryDatabasePath();
+  const store = new DesktopSqliteStore(databasePath);
+  const credentials = new MemoryCredentialStore();
+  const mock = installXtreamMock();
+  try {
+    const savedProvider = provider(store, "Provider", "partial-credential");
+    credentials.set("partial-credential", "user", "password");
+    const originalUpsertSeason = store.upsertSeason.bind(store);
+    let attempts = 0;
+    store.upsertSeason = ((input) => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("synthetic season persistence failure");
+      return originalUpsertSeason(input);
+    }) as DesktopSqliteStore["upsertSeason"];
+    const runtime = new DesktopIptvRuntime(store, credentials);
+
+    const operation = await runtime.startXtreamCatalogueSync(savedProvider.id);
+    const result = await waitForOperation(runtime, operation.id);
+
+    assert.equal(result.status, "partial");
+    assert.equal(result.failed, 1);
+    assert.equal(store.listSeries(savedProvider.id).length, 1);
+    assert.equal(store.listSeasons(savedProvider.id).length, 0);
   } finally {
     mock.release();
     store.close();
@@ -291,6 +376,91 @@ https://provider.example/live/ambiguous`;
     assert.equal(catalogueJson.includes("provider.example"), false);
     assert.equal(catalogueJson.includes("secret"), false);
     assert.equal(catalogueJson.includes("user:password"), false);
+  } finally {
+    mock.release();
+    store.close();
+    cleanup(databasePath);
+  }
+});
+
+test("custom pasted M3U import resumes after restart using the stored playlist payload", async () => {
+  const databasePath = temporaryDatabasePath();
+  const store = new DesktopSqliteStore(databasePath);
+  const credentials = new MemoryCredentialStore();
+  const playlist = `#EXTM3U
+#EXTINF:-1 tvg-id="live-1" tvg-name="News" group-title="Live",News
+https://provider.example/live/one
+#EXTINF:-1 tvg-id="movie-1" tvg-name="Film One" group-title="Movies" tvg-type="movie",Film One
+https://provider.example/movie/one?user=secret`;
+  const provider = store.createProviderAccount({
+    name: "Manual M3U",
+    type: "m3u",
+    baseUrl: "https://manual.example/playlist.m3u",
+    credentialStoreRef: "manual-m3u"
+  });
+
+  const runtime = new DesktopIptvRuntime(store, credentials);
+  const operation = await runtime.startOperation("m3u_import", { providerId: provider.id, playlist });
+  const persistedOperation = await runtime.getOperation(operation.id);
+  assert.equal(persistedOperation?.type, "m3u_import");
+  assert.equal((persistedOperation as any)?.playlist, playlist);
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error("resume should use the stored playlist content instead of re-fetching the provider URL");
+  }) as typeof fetch;
+
+  try {
+    const restartedStore = new DesktopSqliteStore(databasePath);
+    const restartedRuntime = new DesktopIptvRuntime(restartedStore, credentials);
+    restartedRuntime.resumePendingOperations();
+    const completed = await waitForOperation(restartedRuntime, operation.id);
+
+    assert.equal(completed.status, "completed");
+    assert.equal(restartedStore.listChannels(provider.id).length, 1);
+    assert.equal(restartedStore.listMovies(provider.id).length, 1);
+    restartedStore.close();
+  } finally {
+    globalThis.fetch = originalFetch;
+    store.close();
+    cleanup(databasePath);
+  }
+});
+
+test("M3U zero-channel import fails without activating a new provider", async () => {
+  const databasePath = temporaryDatabasePath();
+  const store = new DesktopSqliteStore(databasePath);
+  const credentials = new MemoryCredentialStore();
+  const mock = installM3uMock(() => "#EXTM3U\n");
+  try {
+    const provider = store.createProviderAccount({ name: "Empty M3U", type: "m3u", baseUrl: "https://playlist.example/empty.m3u", credentialStoreRef: "empty-m3u" });
+    const runtime = new DesktopIptvRuntime(store, credentials);
+    const operation = await runtime.startOperation("m3u_import", { providerId: provider.id });
+    const result = await waitForOperation(runtime, operation.id);
+    assert.equal(result.status, "failed");
+    assert.equal(store.getProviderAccount(provider.id)?.status, "pending");
+    assert.equal(store.listChannels(provider.id).length, 0);
+  } finally {
+    mock.release();
+    store.close();
+    cleanup(databasePath);
+  }
+});
+
+test("failed M3U refresh preserves an existing provider and catalogue", async () => {
+  const databasePath = temporaryDatabasePath();
+  const store = new DesktopSqliteStore(databasePath);
+  const credentials = new MemoryCredentialStore();
+  const mock = installM3uMock(() => "#EXTM3U\n");
+  try {
+    const provider = store.createProviderAccount({ name: "Existing M3U", type: "m3u", baseUrl: "https://playlist.example/existing.m3u", credentialStoreRef: "existing-m3u", status: "active", availability: "online" });
+    store.upsertChannel({ providerAccountId: provider.id, externalReference: "known-channel", name: "Known Channel", playbackUrl: "https://media.example/known.mp4" });
+    const runtime = new DesktopIptvRuntime(store, credentials);
+    const operation = await runtime.startOperation("m3u_import", { providerId: provider.id });
+    const result = await waitForOperation(runtime, operation.id);
+    assert.equal(result.status, "failed");
+    assert.equal(store.getProviderAccount(provider.id)?.status, "active");
+    assert.deepEqual(store.listChannels(provider.id).map((channel) => channel.externalReference), ["known-channel"]);
   } finally {
     mock.release();
     store.close();

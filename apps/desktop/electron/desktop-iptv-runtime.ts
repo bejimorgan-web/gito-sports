@@ -11,21 +11,61 @@ import type {
   DesktopIptvOperationInput,
   DesktopMovieInput,
   DesktopSeasonInput,
+  DesktopSeries,
   DesktopSeriesInput
 } from "../src/desktop-persistence-contract.js";
 import type { DesktopSqliteStore } from "./desktop-storage.js";
 
-type DesktopRuntimeOperation = IptvOperation & { providerAccountId?: string | null };
+type DesktopRuntimeOperation = IptvOperation & { providerAccountId?: string | null; playlist?: string | null };
+type CatalogueSection = "categories" | "live" | "movies" | "series" | "seasons" | "episodes";
+type CatalogueSectionProgress = { status: "pending" | "running" | "completed" | "partial" | "failed"; processed: number; succeeded: number; failed: number; failures: Array<{ entityType: string; id: string; error: string }> };
+type CatalogueSyncSummary = { partial: boolean };
+type WorkloadMetrics = { startedAt: string; sectionStartedAt: Partial<Record<CatalogueSection, string>>; sectionDurationMs: Partial<Record<CatalogueSection, number>>; providerRequestCount: number; providerRequestDurationMs: number; persistenceDurationMs: number; persistenceRecords: number };
+
+const CATALOGUE_BATCH_SIZE = 500;
+const SERIES_DETAIL_CONCURRENCY = 4;
+
+function yieldToEventLoop() {
+  return new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+export async function mapWithConcurrency<T, R>(items: T[], concurrency: number, worker: (item: T, index: number) => Promise<R>) {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const runWorker = async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await worker(items[index]!, index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => runWorker()));
+  return results;
+}
 
 type RuntimeProviderRequest = {
   providerId?: string;
   baseUrl?: string;
   type?: string;
   playlist?: string;
+  username?: string;
+  password?: string;
 };
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function safePersistenceError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message
+    .replace(/https?:\/\/[^\s)]+/gi, "[URL]")
+    .replace(/(?:password|token|secret|authorization|cookie)\s*[=:]\s*[^\s,;]+/gi, "$1=[REDACTED]");
+}
+
+function isFatalPersistenceError(error: unknown) {
+  const code = String((error as { code?: unknown })?.code ?? "").toUpperCase();
+  return ["SQLITE_BUSY", "SQLITE_FULL", "SQLITE_IOERR", "SQLITE_CORRUPT", "SQLITE_NOTADB", "SQLITE_MISUSE"].some((fatalCode) => code.includes(fatalCode));
 }
 
 function normalizePlaylistUrl(value: string) {
@@ -220,6 +260,11 @@ function normalizeXtreamUrl(baseUrl: string): { url: string; error?: string } {
   }
 }
 
+export function normalizeXtreamPlaybackUrl(value: string): string {
+  const url = new URL(value);
+  return url.toString();
+}
+
 function buildXtreamEndpointCandidates(baseUrl: string) {
   const trimmed = baseUrl.trim().replace(/\/$/, "");
   if (!trimmed) {
@@ -318,7 +363,12 @@ async function testXtreamConnection(baseUrl: string, username: string, password:
 
   for (const candidate of endpointCandidates) {
     try {
-      const response = await fetch(buildXtreamUrl(candidate, { username, password }), buildRequestInit(signal, { headers: { accept: "application/json" } }));
+      const result = await fetchTextWithTimeout(
+        buildXtreamUrl(candidate, { username, password }),
+        buildRequestInit(signal, { headers: { accept: "application/json" } }),
+        60_000
+      );
+      const response = result.response;
       lastStatusCode = response.status;
       if (!response.ok) {
         if (response.status === 401 || response.status === 403) {
@@ -327,7 +377,7 @@ async function testXtreamConnection(baseUrl: string, username: string, password:
         continue;
       }
 
-      const text = await response.text();
+      const text = result.text;
       if (!text.trim()) {
         malformedResponse = true;
         continue;
@@ -339,11 +389,21 @@ async function testXtreamConnection(baseUrl: string, username: string, password:
         continue;
       }
 
+      const expiresAt = readXtreamExpiry(payload);
+      if (expiresAt && Date.parse(expiresAt) <= Date.now()) {
+        return {
+          ok: false,
+          statusCode: 401,
+          expiresAt,
+          message: "The Xtream account has expired."
+        };
+      }
+
       if (payload && typeof payload === "object") {
         return {
           ok: true,
           statusCode: response.status,
-          expiresAt: readXtreamExpiry(payload),
+          ...(expiresAt ? { expiresAt } : {}),
           message: "Connected — credentials accepted."
         };
       }
@@ -395,7 +455,7 @@ async function testXtreamConnection(baseUrl: string, username: string, password:
   };
 }
 
-async function fetchXtreamLiveChannels(baseUrl: string, username: string, password: string, signal?: AbortSignal) {
+async function fetchXtreamLiveChannels(baseUrl: string, username: string, password: string, signal?: AbortSignal): Promise<Array<{ name: string; url: string; externalRef?: string; groupName?: string; metadataJson?: string | null }>> {
   const normalized = normalizeXtreamUrl(baseUrl);
   if (normalized.error) {
     throw new Error(normalized.error);
@@ -411,11 +471,11 @@ async function fetchXtreamLiveChannels(baseUrl: string, username: string, passwo
 
   const text = await response.text();
   if (!text.trim()) {
-    return [] as Array<{ name: string; url: string; externalRef?: string }>; 
+    return [];
   }
 
   const payload = JSON.parse(text);
-  const records = unwrapXtreamArray<{ stream_id?: string | number; name?: string; stream_name?: string; category_id?: string | number; stream_icon?: string; stream_url?: string; container_extension?: string }>(payload, "streams") ?? [];
+  const records = unwrapXtreamArray<{ stream_id?: string | number; name?: string; stream_name?: string; category_id?: string | number; stream_icon?: string; direct_source?: string; stream_url?: string; container_extension?: string }>(payload, "streams") ?? [];
 
   return records.flatMap((entry) => {
     const id = entry.stream_id === undefined ? "" : String(entry.stream_id);
@@ -424,25 +484,31 @@ async function fetchXtreamLiveChannels(baseUrl: string, username: string, passwo
       return [];
     }
 
-    const streamUrl = entry.stream_url && /^https?:\/\//i.test(entry.stream_url)
-      ? entry.stream_url
-      : `${normalized.url.replace(/\/$/, "")}/live/${encodeURIComponent(username)}/${encodeURIComponent(password)}/${encodeURIComponent(id)}.${entry.container_extension ? String(entry.container_extension).replace(/^\./, "") : "m3u8"}`;
+    const directSource = typeof entry.direct_source === "string" && /^https?:\/\//i.test(entry.direct_source) ? entry.direct_source : undefined;
+    const streamUrlValue = typeof entry.stream_url === "string" && /^https?:\/\//i.test(entry.stream_url) ? entry.stream_url : undefined;
+    const directUrlValue = typeof (entry as Record<string, unknown>).direct_url === "string" ? String((entry as Record<string, unknown>).direct_url) : undefined;
+    const urlValue = typeof (entry as Record<string, unknown>).url === "string" ? String((entry as Record<string, unknown>).url) : undefined;
+    const extension = entry.container_extension ? String(entry.container_extension).replace(/^\./, "") : "m3u8";
+    const fallbackUrl = `${normalized.url.replace(/\/$/, "")}/live/${encodeURIComponent(username)}/${encodeURIComponent(password)}/${encodeURIComponent(id)}.${extension}`;
+    const selectedSource = directSource ? "direct_source" : streamUrlValue ? "stream_url" : "fallback";
+    const selectedUrl = normalizeXtreamPlaybackUrl(directSource ?? streamUrlValue ?? fallbackUrl);
 
     return [{
       name,
-      url: streamUrl,
+      url: selectedUrl,
       externalRef: id,
-      groupName: entry.category_id ? String(entry.category_id) : undefined
+      ...(entry.category_id ? { groupName: String(entry.category_id) } : {}),
+      metadataJson: safeMetadataJson(entry)
     }];
   });
 }
 
-type XtreamCategory = { category_id?: string | number; category_name?: string; name?: string; parent_id?: string | number; }
-type XtreamMovie = { stream_id?: string | number; name?: string; stream_name?: string; category_id?: string | number; stream_icon?: string; poster?: string; cover?: string; plot?: string; description?: string; }
-type XtreamSeries = { series_id?: string | number; name?: string; category_id?: string | number; cover?: string; cover_big?: string; plot?: string; description?: string; }
-type XtreamEpisode = { id?: string | number; episode_id?: string | number; episode_num?: string | number; title?: string; name?: string; info?: { plot?: string; description?: string; movie_image?: string; cover_big?: string; }; movie_image?: string; cover_big?: string; }
-type XtreamEpgChannel = { id?: string | number; epg_channel_id?: string | number; channel_id?: string | number; name?: string; epg_name?: string; logo?: string; logo_url?: string; stream_id?: string | number; }
-type XtreamEpgProgramme = { id?: string | number; epg_id?: string | number; programme_id?: string | number; title?: string; name?: string; description?: string; plot?: string; start?: string | number; start_time?: string | number; end?: string | number; end_time?: string | number; start_timestamp?: string | number; stop_timestamp?: string | number; }
+type XtreamCategory = Record<string, unknown> & { category_id?: string | number; category_name?: string; name?: string; parent_id?: string | number; }
+type XtreamMovie = Record<string, unknown> & { stream_id?: string | number; name?: string; stream_name?: string; category_id?: string | number; stream_icon?: string; poster?: string; cover?: string; plot?: string; description?: string; }
+type XtreamSeries = Record<string, unknown> & { series_id?: string | number; name?: string; category_id?: string | number; cover?: string; cover_big?: string; plot?: string; description?: string; }
+type XtreamEpisode = Record<string, unknown> & { id?: string | number; episode_id?: string | number; episode_num?: string | number; title?: string; name?: string; info?: { plot?: string; description?: string; movie_image?: string; cover_big?: string; }; movie_image?: string; cover_big?: string; }
+type XtreamEpgChannel = Record<string, unknown> & { id?: string | number; epg_channel_id?: string | number; channel_id?: string | number; name?: string; epg_name?: string; logo?: string; logo_url?: string; stream_id?: string | number; }
+type XtreamEpgProgramme = Record<string, unknown> & { id?: string | number; epg_id?: string | number; programme_id?: string | number; title?: string; name?: string; description?: string; plot?: string; start?: string | number; start_time?: string | number; end?: string | number; end_time?: string | number; start_timestamp?: string | number; stop_timestamp?: string | number; }
 
 function safeExternalReference(value: unknown, fallback: string) {
   const candidate = String(value ?? "").trim();
@@ -462,7 +528,7 @@ async function fetchXtreamJson(baseUrl: string, username: string, password: stri
   const normalized = normalizeXtreamUrl(baseUrl);
   if (normalized.error) throw new Error("Xtream base URL is invalid.");
   const response = await fetch(buildXtreamUrl(normalized.url, { username, password, action, ...extra }), buildRequestInit(signal, { headers: { accept: "application/json" } }));
-  if (!response.ok) throw new Error(`Xtream request failed with status ${response.status}.`);
+  if (!response.ok) throw new Error(`Xtream request failed for ${action} with status ${response.status}.`);
   const text = await response.text();
   if (!text.trim()) throw new Error("Xtream returned an empty response.");
   try {
@@ -472,7 +538,7 @@ async function fetchXtreamJson(baseUrl: string, username: string, password: stri
   }
 }
 
-function categoryInput(providerId: string, category: XtreamCategory, contentType: "live" | "movie") {
+function categoryInput(providerId: string, category: XtreamCategory, contentType: "live" | "movie" | "series") {
   const externalReference = safeExternalReference(category.category_id, `${contentType}:${category.category_name ?? category.name ?? ""}`);
   return {
     id: localCatalogueId("category", providerId, `${contentType}:${externalReference}`),
@@ -496,6 +562,7 @@ function movieInput(providerId: string, movie: XtreamMovie, categoryId: string |
     description: movie.plot ?? movie.description ?? null,
     logoUrl: movie.stream_icon ?? null,
     posterUrl: movie.poster ?? movie.cover ?? null,
+    metadataJson: safeMetadataJson(movie),
     contentType: "movie",
     status: "active"
   };
@@ -512,6 +579,7 @@ function seriesInput(providerId: string, series: XtreamSeries, categoryId: strin
     description: series.plot ?? series.description ?? null,
     logoUrl: series.cover ?? null,
     posterUrl: series.cover_big ?? series.cover ?? null,
+    metadataJson: safeMetadataJson(series),
     status: "active"
   };
 }
@@ -540,6 +608,7 @@ function epgChannelInput(providerId: string, channel: XtreamEpgChannel, linkedCh
     channelId: linkedChannelId,
     name: String(channel.name ?? channel.epg_name ?? "Unnamed EPG channel").trim(),
     logoUrl: channel.logo ?? channel.logo_url ?? null,
+    metadataJson: safeMetadataJson(channel),
     status: "active"
   };
 }
@@ -560,12 +629,12 @@ function epgProgrammeInput(providerId: string, epgChannelId: string, channelExte
     description: programme.description ?? programme.plot ?? null,
     startAt,
     endAt,
-    metadataJson: null,
+    metadataJson: safeMetadataJson(programme),
     status: "active"
   };
 }
 
-function makeChannelInput(providerId: string, channel: { name: string; url: string; externalRef?: string; groupName?: string }): DesktopChannelInput {
+function makeChannelInput(providerId: string, channel: { name: string; url: string; externalRef?: string; groupName?: string; metadataJson?: string | null }): DesktopChannelInput {
   return {
     providerAccountId: providerId,
     externalReference: channel.externalRef ?? null,
@@ -573,14 +642,28 @@ function makeChannelInput(providerId: string, channel: { name: string; url: stri
     groupName: channel.groupName ?? null,
     logoUrl: null,
     playbackUrl: channel.url,
+    metadataJson: channel.metadataJson ?? null,
     contentType: "live",
     status: "active"
   };
 }
 
+function safeMetadataJson(value: unknown) {
+  if (!value || typeof value !== "object") return null;
+  const redact = (entry: unknown): unknown => {
+    if (Array.isArray(entry)) return entry.map(redact);
+    if (!entry || typeof entry !== "object") return entry;
+    return Object.fromEntries(Object.entries(entry)
+      .filter(([key]) => !/(username|password|token|auth|credential|stream_url|movie_url|episode_url)/i.test(key))
+      .map(([key, item]) => [key, redact(item)]));
+  };
+  try { return JSON.stringify(redact(value)); } catch { return null; }
+}
+
 export class DesktopIptvRuntime {
   private readonly operationSnapshots = new Map<string, DesktopRuntimeOperation>();
   private readonly operationControllers = new Map<string, AbortController>();
+  private readonly shutdownOperationIds = new Set<string>();
 
   constructor(
     private readonly storage: DesktopSqliteStore,
@@ -608,16 +691,14 @@ export class DesktopIptvRuntime {
     }
 
     if (resolvedType === "xtream") {
-      if (!provider) {
-        return { ok: false, message: "provider_not_found" };
-      }
-
-      const providerCredentials = this.credentials.get(provider.credentialStoreRef);
-      if (!providerCredentials?.username || !providerCredentials.password) {
+      const providerCredentials = provider ? this.credentials.get(provider.credentialStoreRef) : null;
+      const username = input.username?.trim() || providerCredentials?.username;
+      const password = input.password || providerCredentials?.password;
+      if (!username || !password) {
         return { ok: false, message: "Xtream providers require both username and password." };
       }
 
-      return testXtreamConnection(baseUrl, providerCredentials.username, providerCredentials.password);
+      return testXtreamConnection(baseUrl, username, password);
     }
 
     const playlistSource = input.playlist ?? baseUrl;
@@ -663,6 +744,14 @@ export class DesktopIptvRuntime {
 
   async startOperation(type: IptvOperationType, input: RuntimeProviderRequest = {}): Promise<IptvOperation> {
     const providerAccountId = input.providerId ?? null;
+    const activeOperation = providerAccountId
+      ? this.storage.listOperations(providerAccountId).find((candidate) =>
+        candidate.status === "queued" || candidate.status === "running"
+      )
+      : undefined;
+    if (activeOperation) {
+      throw new Error(`iptv_operation_in_progress:${activeOperation.id}`);
+    }
     const operation: DesktopRuntimeOperation = {
       id: `iptv_${crypto.randomUUID()}`,
       type,
@@ -676,18 +765,46 @@ export class DesktopIptvRuntime {
       currentStage: "queued",
       currentMessage: "Operation queued.",
       cancelled: false,
-      providerAccountId
+      providerAccountId,
+      playlist: type === "m3u_import" ? (input.playlist ?? null) : null
     };
 
     this.operationSnapshots.set(operation.id, operation);
     this.persistSnapshot(operation);
 
-    const controller = new AbortController();
-    this.operationControllers.set(operation.id, controller);
-
-    void this.runOperation(operation.id, type, input, controller.signal);
+    this.launchOperation(operation.id, type, input);
 
     return { ...operation };
+  }
+
+  async resumePendingOperations() {
+    // Catalogue sync is intentionally operator-controlled. Resuming a large
+    // IPTV import while Electron is booting blocks the main process and can
+    // make the login window appear frozen.
+    return;
+  }
+
+  shutdownForAppExit() {
+    for (const [operationId, controller] of this.operationControllers) {
+      const current = this.operationSnapshots.get(operationId);
+      if (!current || ["completed", "failed", "partial", "cancelled", "timeout", "interrupted"].includes(current.status)) continue;
+      this.shutdownOperationIds.add(operationId);
+      const interrupted: DesktopRuntimeOperation = {
+        ...current,
+        status: "interrupted",
+        currentStage: "interrupted",
+        currentMessage: "Operation interrupted by application shutdown."
+      };
+      this.operationSnapshots.set(operationId, interrupted);
+      this.persistSnapshot(interrupted);
+      controller.abort();
+    }
+  }
+
+  private launchOperation(operationId: string, type: IptvOperationType, input: RuntimeProviderRequest) {
+    const controller = new AbortController();
+    this.operationControllers.set(operationId, controller);
+    void this.runOperation(operationId, type, input, controller.signal);
   }
 
   async getOperation(operationId: string): Promise<IptvOperation | null> {
@@ -714,7 +831,7 @@ export class DesktopIptvRuntime {
         return null;
       }
       const operation = this.buildOperationResponse(stored);
-      if (["completed", "failed", "timeout", "cancelled", "interrupted"].includes(operation.status)) {
+      if (["completed", "partial", "failed", "timeout", "cancelled", "interrupted"].includes(operation.status)) {
         return operation;
       }
       const cancelled: DesktopRuntimeOperation = {
@@ -729,7 +846,7 @@ export class DesktopIptvRuntime {
       return cancelled;
     }
 
-    if (["completed", "failed", "timeout", "cancelled", "interrupted"].includes(snapshot.status)) {
+    if (["completed", "partial", "failed", "timeout", "cancelled", "interrupted"].includes(snapshot.status)) {
       return { ...snapshot };
     }
 
@@ -822,11 +939,22 @@ export class DesktopIptvRuntime {
             throw new Error("M3U import produced zero usable channels.");
           }
 
-          for (const channel of valid) {
-            if (signal.aborted) {
-              break;
+          const channelInputs = valid.map((channel) => makeChannelInput(providerId, channel));
+          for (let offset = 0; offset < channelInputs.length; offset += CATALOGUE_BATCH_SIZE) {
+            if (signal.aborted) break;
+            const batch = channelInputs.slice(offset, offset + CATALOGUE_BATCH_SIZE);
+            try {
+              this.storage.upsertChannelsBatch(batch);
+            } catch (error) {
+              if (isFatalPersistenceError(error)) throw error;
+              for (const channelInput of batch) this.storage.upsertChannel(channelInput);
             }
-            this.storage.upsertChannel(makeChannelInput(providerId, channel));
+            await yieldToEventLoop();
+          }
+
+          await this.syncM3uCatalogue(operationId, providerId, valid, valid.length === parsed.length, signal);
+          if (signal.aborted) {
+            throw new Error("operation_cancelled");
           }
 
           this.storage.updateProviderAccount(providerId, {
@@ -835,11 +963,6 @@ export class DesktopIptvRuntime {
             lastValidatedAt: nowIso(),
             healthReason: null
           });
-
-          await this.syncM3uCatalogue(operationId, providerId, valid, valid.length === parsed.length, signal);
-          if (signal.aborted) {
-            throw new Error("operation_cancelled");
-          }
 
           this.updateOperation(operationId, {
             status: "completed",
@@ -855,7 +978,7 @@ export class DesktopIptvRuntime {
           if (!providerId) throw new Error("provider_id_required");
           const provider = this.storage.getProviderAccount(providerId);
           if (!provider) throw new Error("provider_not_found");
-          if (provider.type !== "m3u") throw new Error("m3u_provider_required");
+          if (provider.type !== "m3u" && provider.type !== "manual") throw new Error("m3u_provider_required");
 
           const response = await fetchTextWithTimeout(normalizePlaylistUrl(provider.baseUrl), { method: "GET", signal }, 60_000);
           if (!response.response.ok) throw new Error(`Provider returned HTTP ${response.response.status}.`);
@@ -951,12 +1074,12 @@ export class DesktopIptvRuntime {
           const providerCredentials = this.credentials.get(provider.credentialStoreRef);
           if (!providerCredentials) throw new Error("stored_xtream_credentials_required");
 
-          await this.syncXtreamCatalogue(operationId, providerId, provider.baseUrl, providerCredentials.username, providerCredentials.password, signal);
+          const summary = await this.syncXtreamCatalogue(operationId, providerId, provider.baseUrl, providerCredentials.username, providerCredentials.password, signal);
           if (signal.aborted) throw new Error("operation_cancelled");
           this.updateOperation(operationId, {
-            status: "completed",
+            status: summary.partial ? "partial" : "completed",
             currentStage: "completed",
-            currentMessage: "Xtream catalogue synchronized."
+            currentMessage: summary.partial ? "Xtream catalogue synchronized with record-level failures." : "Xtream catalogue synchronized."
           });
           break;
         }
@@ -982,80 +1105,323 @@ export class DesktopIptvRuntime {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const interrupted = this.shutdownOperationIds.has(operationId);
+      if (interrupted) return;
+      const failedProviderId = input.providerId;
+      if (!signal.aborted && failedProviderId) {
+        this.storage.updateProviderAccount(failedProviderId, {
+          status: "failed",
+          availability: "offline",
+          healthReason: message
+        });
+      }
       this.updateOperation(operationId, {
         status: signal.aborted ? "cancelled" : "failed",
         currentStage: signal.aborted ? "cancelled" : "failed",
         currentMessage: signal.aborted ? "Operation cancelled." : message,
-        ...(signal.aborted ? {} : { error: message }),
+        ...(!signal.aborted ? { error: message } : {}),
         cancelled: signal.aborted
       });
     } finally {
       this.operationControllers.delete(operationId);
       this.operationSnapshots.delete(operationId);
+      this.shutdownOperationIds.delete(operationId);
     }
   }
 
-  private async syncXtreamCatalogue(operationId: string, providerId: string, baseUrl: string, username: string, password: string, signal: AbortSignal) {
+  private async syncXtreamCatalogue(operationId: string, providerId: string, baseUrl: string, username: string, password: string, signal: AbortSignal): Promise<CatalogueSyncSummary> {
     const assertActive = () => {
       if (signal.aborted) throw new Error("operation_cancelled");
     };
-    const increment = (message: string) => {
+    const connection = await testXtreamConnection(baseUrl, username, password, signal);
+    if (!connection.ok) throw new Error(connection.message);
+    this.storage.updateProviderAccount(providerId, {
+      status: "active",
+      availability: "online",
+      ...(connection.expiresAt ? { expiresAt: connection.expiresAt } : {}),
+      lastValidatedAt: nowIso(),
+      healthReason: null
+    });
+    assertActive();
+    const sections = new Map<CatalogueSection, CatalogueSectionProgress>([
+      ["categories", { status: "pending", processed: 0, succeeded: 0, failed: 0, failures: [] }],
+      ["live", { status: "pending", processed: 0, succeeded: 0, failed: 0, failures: [] }],
+      ["movies", { status: "pending", processed: 0, succeeded: 0, failed: 0, failures: [] }],
+      ["series", { status: "pending", processed: 0, succeeded: 0, failed: 0, failures: [] }],
+      ["seasons", { status: "pending", processed: 0, succeeded: 0, failed: 0, failures: [] }],
+      ["episodes", { status: "pending", processed: 0, succeeded: 0, failed: 0, failures: [] }]
+    ]);
+    const workload: WorkloadMetrics = {
+      startedAt: nowIso(),
+      sectionStartedAt: {},
+      sectionDurationMs: {},
+      providerRequestCount: 0,
+      providerRequestDurationMs: 0,
+      persistenceDurationMs: 0,
+      persistenceRecords: 0
+    };
+    const writeCheckpoint = () => {
       const current = this.operationSnapshots.get(operationId);
       if (!current) return;
-      this.updateOperation(operationId, {
-        processed: current.processed + 1,
-        succeeded: current.succeeded + 1,
-        currentStage: "persisting_catalogue",
-        currentMessage: message
-      });
+      this.persistSnapshot(current, { sections: Object.fromEntries(sections), workload });
     };
-
+    const setSectionStatus = (section: CatalogueSection, status: CatalogueSectionProgress["status"]) => {
+      const progress = sections.get(section)!;
+      if (status === "running" && !workload.sectionStartedAt[section]) workload.sectionStartedAt[section] = nowIso();
+      if (["completed", "partial", "failed"].includes(status) && workload.sectionStartedAt[section]) {
+        workload.sectionDurationMs[section] = Date.now() - Date.parse(workload.sectionStartedAt[section]!);
+      }
+      progress.status = status;
+      writeCheckpoint();
+    };
+    const recordSuccess = (section: CatalogueSection, message: string) => {
+      const progress = sections.get(section)!;
+      progress.processed += 1;
+      progress.succeeded += 1;
+      const current = this.operationSnapshots.get(operationId);
+      if (!current) return;
+      const next = { ...current, processed: current.processed + 1, succeeded: current.succeeded + 1, currentStage: "persisting_catalogue", currentMessage: message };
+      this.operationSnapshots.set(operationId, next);
+      if (next.processed % 100 === 0) writeCheckpoint();
+    };
+    const recordFailure = (section: CatalogueSection, entityType: string, id: string, error: unknown) => {
+      const progress = sections.get(section)!;
+      progress.processed += 1;
+      progress.failed += 1;
+      progress.failures.push({ entityType, id, error: safePersistenceError(error) });
+      const current = this.operationSnapshots.get(operationId);
+      if (!current) return;
+      const next = { ...current, processed: current.processed + 1, failed: current.failed + 1, currentStage: "persisting_catalogue", currentMessage: `${entityType} persistence failed; continuing.` };
+      this.operationSnapshots.set(operationId, next);
+      writeCheckpoint();
+    };
+    const persistRecord = <T>(section: CatalogueSection, entityType: string, id: string, callback: () => T) => {
+      const startedAt = Date.now();
+      try {
+        const result = callback();
+        workload.persistenceDurationMs += Date.now() - startedAt;
+        workload.persistenceRecords += 1;
+        recordSuccess(section, `${entityType} persisted.`);
+        return result;
+      } catch (error) {
+        workload.persistenceDurationMs += Date.now() - startedAt;
+        workload.persistenceRecords += 1;
+        if (isFatalPersistenceError(error)) throw error;
+        recordFailure(section, entityType, id, error);
+        return null;
+      }
+    };
+    const persistBatch = (records: number, callback: () => void) => {
+      const startedAt = Date.now();
+      try {
+        callback();
+      } finally {
+        workload.persistenceDurationMs += Date.now() - startedAt;
+        workload.persistenceRecords += records;
+      }
+    };
+    const fetchCatalogueJson = async (action: string, extra: Record<string, string> = {}) => {
+      const startedAt = Date.now();
+      try {
+        return await fetchXtreamJson(baseUrl, username, password, action, signal, extra);
+      } finally {
+        workload.providerRequestCount += 1;
+        workload.providerRequestDurationMs += Date.now() - startedAt;
+      }
+    };
+    const fetchOptionalCatalogueJson = async (section: CatalogueSection, action: string) => {
+      try {
+        return await fetchCatalogueJson(action);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/Xtream request failed for .* with status 5\d\d\./.test(message)) throw error;
+        recordFailure(section, action, action, error);
+        return null;
+      }
+    };
+    setSectionStatus("categories", "running");
     this.updateOperation(operationId, { currentStage: "fetching_categories", currentMessage: "Fetching Xtream categories." });
-    const liveCategories = readObjectArray<XtreamCategory>(await fetchXtreamJson(baseUrl, username, password, "get_live_categories", signal), "categories");
-    assertActive();
-    const vodCategories = readObjectArray<XtreamCategory>(await fetchXtreamJson(baseUrl, username, password, "get_vod_categories", signal), "categories");
+    const liveCategories = readObjectArray<XtreamCategory>(await fetchOptionalCatalogueJson("categories", "get_live_categories"), "categories");
     assertActive();
 
     const categoryIds = new Map<string, string>();
     const seenCategoryIds = new Set<string>();
-    for (const category of [...liveCategories.map((item) => ({ item, type: "live" as const })), ...vodCategories.map((item) => ({ item, type: "movie" as const }))]) {
-      if (!category.item.category_id && !category.item.category_name && !category.item.name) throw new Error("Xtream category missing identity.");
+    const categoryCandidates: Array<{ type: "live" | "movie" | "series"; input: DesktopCatalogueCategoryInput }> = [];
+    for (const category of liveCategories.map((item) => ({ item, type: "live" as const }))) {
+      if (!category.item.category_id && !category.item.category_name && !category.item.name) {
+        recordFailure("categories", "category", "unknown", new Error("Xtream category missing identity."));
+        continue;
+      }
       const input = categoryInput(providerId, category.item, category.type);
-      const persisted = this.storage.upsertCategory(input);
-      categoryIds.set(`${category.type}:${input.externalReference}`, persisted.id);
-      seenCategoryIds.add(persisted.id);
-      increment("Xtream category persisted.");
+      categoryCandidates.push({ type: category.type, input });
     }
+    try {
+      persistBatch(categoryCandidates.length, () => this.storage.upsertCategoriesBatch(categoryCandidates.map((candidate) => candidate.input)));
+      for (const candidate of categoryCandidates) {
+        categoryIds.set(`${candidate.type}:${candidate.input.externalReference}`, candidate.input.id!);
+        seenCategoryIds.add(candidate.input.id!);
+        recordSuccess("categories", "Xtream category persisted.");
+      }
+    } catch (error) {
+      if (isFatalPersistenceError(error)) throw error;
+      for (const candidate of categoryCandidates) {
+        const persisted = persistRecord("categories", "category", candidate.input.id!, () => this.storage.upsertCategory(candidate.input));
+        if (!persisted) continue;
+        categoryIds.set(`${candidate.type}:${candidate.input.externalReference}`, persisted.id);
+        seenCategoryIds.add(persisted.id);
+      }
+    }
+    setSectionStatus("categories", sections.get("categories")!.failed ? "partial" : "completed");
 
+    setSectionStatus("live", "running");
+    this.updateOperation(operationId, { currentStage: "fetching_channels", currentMessage: "Fetching Xtream live channels." });
+    const liveRequestStartedAt = Date.now();
+    let liveChannels: Array<{ name: string; url: string; externalRef?: string; groupName?: string; metadataJson?: string | null }>;
+    try {
+      liveChannels = await fetchXtreamLiveChannels(baseUrl, username, password, signal);
+    } finally {
+      workload.providerRequestCount += 1;
+      workload.providerRequestDurationMs += Date.now() - liveRequestStartedAt;
+    }
+    assertActive();
+    const channelInputs = liveChannels.map((channel) => {
+      const category = liveCategories.find((item) => String(item.category_id ?? "") === String(channel.groupName ?? ""));
+      const categoryName = category?.category_name ?? category?.name ?? channel.groupName;
+      return makeChannelInput(providerId, {
+        ...channel,
+        ...(categoryName ? { groupName: categoryName } : {})
+      });
+    });
+    for (let offset = 0; offset < channelInputs.length; offset += CATALOGUE_BATCH_SIZE) {
+      const batch = channelInputs.slice(offset, offset + CATALOGUE_BATCH_SIZE);
+      try {
+        persistBatch(batch.length, () => this.storage.upsertChannelsBatch(batch));
+        batch.forEach(() => recordSuccess("live", "Xtream channel persisted."));
+      } catch (error) {
+        if (isFatalPersistenceError(error)) throw error;
+        batch.forEach((input) => persistRecord("live", "channel", input.id ?? input.externalReference ?? input.name, () => this.storage.upsertChannel(input)));
+      }
+      await yieldToEventLoop();
+    }
+    setSectionStatus("live", sections.get("live")!.failed ? "partial" : "completed");
+
+    // The desktop IPTV workflow is intentionally live-only. Keep old VOD data
+    // intact for recovery, but remove it from the active catalogue.
+    setSectionStatus("movies", "completed");
+    setSectionStatus("series", "completed");
+    setSectionStatus("seasons", "completed");
+    setSectionStatus("episodes", "completed");
+    for (const category of this.storage.listCategories(providerId)) {
+      if (category.contentType !== "live") this.storage.archiveCategory(category.id);
+    }
+    for (const movie of this.storage.listMovies(providerId)) this.storage.archiveMovie(movie.id);
+    for (const series of this.storage.listSeries(providerId)) this.storage.archiveSeries(series.id);
+    for (const season of this.storage.listSeasons(providerId)) this.storage.archiveSeason(season.id);
+    for (const episode of this.storage.listEpisodes(providerId)) this.storage.archiveEpisode(episode.id);
+    this.storage.updateProviderAccount(providerId, {
+      status: "active",
+      availability: "online",
+      lastValidatedAt: nowIso(),
+      healthReason: null
+    });
+    this.persistSnapshot(this.operationSnapshots.get(operationId)!, { sections: Object.fromEntries(sections), workload });
+    return { partial: Array.from(sections.values()).some((section) => section.failed > 0) };
+
+    setSectionStatus("movies", "running");
     this.updateOperation(operationId, { currentStage: "fetching_movies", currentMessage: "Fetching Xtream movies." });
-    const movies = readObjectArray<XtreamMovie>(await fetchXtreamJson(baseUrl, username, password, "get_vod_streams", signal), "streams");
+    const movies = readObjectArray<XtreamMovie>(await fetchCatalogueJson("get_vod_streams"), "streams");
     assertActive();
     const seenMovieIds = new Set<string>();
-    for (const movie of movies) {
-      if (movie.stream_id === undefined && !movie.name && !movie.stream_name) throw new Error("Xtream movie missing identity.");
-      const externalReference = safeExternalReference(movie.stream_id, `movie:${movie.name ?? movie.stream_name ?? ""}`);
-      const categoryId = movie.category_id === undefined ? null : categoryIds.get(`movie:${safeExternalReference(movie.category_id, `movie-category:${movie.category_id}`)}`) ?? null;
-      const persisted = this.storage.upsertMovie(movieInput(providerId, movie, categoryId));
-      seenMovieIds.add(persisted.id);
-      increment("Xtream movie persisted.");
+    for (let offset = 0; offset < movies.length; offset += CATALOGUE_BATCH_SIZE) {
+      const batch = movies.slice(offset, offset + CATALOGUE_BATCH_SIZE);
+      const inputs = batch.map((movie) => movie.stream_id === undefined && !movie.name && !movie.stream_name
+        ? null
+        : movieInput(providerId, movie, movie.category_id === undefined ? null : categoryIds.get(`movie:${safeExternalReference(movie.category_id, `movie-category:${movie.category_id}`)}`) ?? null));
+      try {
+        if (inputs.some((input) => !input)) throw new Error("Xtream movie missing identity.");
+        persistBatch(inputs.length, () => this.storage.upsertMoviesBatch(inputs as DesktopMovieInput[]));
+        for (const input of inputs) {
+          if (!input) {
+            recordFailure("movies", "movie", "unknown", new Error("Xtream movie missing identity."));
+            continue;
+          }
+          seenMovieIds.add((input as DesktopMovieInput).id!);
+          recordSuccess("movies", "Xtream movie persisted.");
+        }
+      } catch (error) {
+        if (isFatalPersistenceError(error)) throw error;
+        for (const input of inputs) {
+          if (!input) {
+            recordFailure("movies", "movie", "unknown", new Error("Xtream movie missing identity."));
+            continue;
+          }
+          const movieInputValue = input as DesktopMovieInput;
+          const persisted = persistRecord("movies", "movie", movieInputValue.id!, () => this.storage.upsertMovie(movieInputValue));
+          if (persisted) seenMovieIds.add(persisted!.id);
+        }
+      }
+      await yieldToEventLoop();
     }
+    setSectionStatus("movies", sections.get("movies")!.failed ? "partial" : "completed");
 
+    setSectionStatus("series", "running");
     this.updateOperation(operationId, { currentStage: "fetching_series", currentMessage: "Fetching Xtream series." });
-    const seriesRecords = readObjectArray<XtreamSeries>(await fetchXtreamJson(baseUrl, username, password, "get_series", signal), "series");
+    const seriesRecords = readObjectArray<XtreamSeries>(await fetchCatalogueJson("get_series"), "series");
     assertActive();
     const seenSeriesIds = new Set<string>();
     const seenSeasonIds = new Set<string>();
     const seenEpisodeIds = new Set<string>();
+    setSectionStatus("seasons", "running");
+    setSectionStatus("episodes", "running");
+    const seriesCandidates: Array<{ series: XtreamSeries; input: DesktopSeriesInput; externalReference: string }> = [];
     for (const seriesRecord of seriesRecords) {
-      if (seriesRecord.series_id === undefined && !seriesRecord.name) throw new Error("Xtream series missing identity.");
+      if (seriesRecord.series_id === undefined && !seriesRecord.name) {
+        recordFailure("series", "series", "unknown", new Error("Xtream series missing identity."));
+        continue;
+      }
       const seriesExternalReference = safeExternalReference(seriesRecord.series_id, `series:${seriesRecord.name ?? ""}`);
-      const categoryId = seriesRecord.category_id === undefined ? null : categoryIds.get(`movie:${safeExternalReference(seriesRecord.category_id, `series-category:${seriesRecord.category_id}`)}`) ?? null;
-      const persistedSeries = this.storage.upsertSeries(seriesInput(providerId, seriesRecord, categoryId));
-      seenSeriesIds.add(persistedSeries.id);
-      increment("Xtream series persisted.");
+      const categoryId = seriesRecord.category_id === undefined ? null : categoryIds.get(`series:${safeExternalReference(seriesRecord.category_id, `series-category:${seriesRecord.category_id}`)}`) ?? null;
+      const seriesInputValue = seriesInput(providerId, seriesRecord, categoryId);
+      seriesCandidates.push({ series: seriesRecord, input: seriesInputValue, externalReference: seriesExternalReference });
+    }
+    const seriesWork: Array<{ series: XtreamSeries; persisted: DesktopSeries; externalReference: string }> = [];
+    for (let offset = 0; offset < seriesCandidates.length; offset += CATALOGUE_BATCH_SIZE) {
+      const batch = seriesCandidates.slice(offset, offset + CATALOGUE_BATCH_SIZE);
+      try {
+        persistBatch(batch.length, () => this.storage.upsertSeriesBatch(batch.map((candidate) => candidate.input)));
+        for (const candidate of batch) {
+          const persistedSeries = { ...candidate.input, id: candidate.input.id! } as DesktopSeries;
+          seenSeriesIds.add(persistedSeries!.id);
+          seriesWork.push({ series: candidate.series, persisted: persistedSeries!, externalReference: candidate.externalReference });
+          recordSuccess("series", "Xtream series persisted.");
+        }
+      } catch (error) {
+        if (isFatalPersistenceError(error)) throw error;
+        for (const candidate of batch) {
+          const persistedSeries = persistRecord("series", "series", candidate.input.id!, () => this.storage.upsertSeries(candidate.input));
+          if (!persistedSeries) continue;
+          seenSeriesIds.add(persistedSeries!.id);
+          seriesWork.push({ series: candidate.series, persisted: persistedSeries!, externalReference: candidate.externalReference });
+        }
+      }
+      await yieldToEventLoop();
+    }
 
+    const seriesDetails = await mapWithConcurrency(seriesWork, SERIES_DETAIL_CONCURRENCY, async (work) => {
       assertActive();
-      const detail = await fetchXtreamJson(baseUrl, username, password, "get_series_info", signal, { series_id: seriesExternalReference });
+      try {
+        return { work, detail: await fetchCatalogueJson("get_series_info", { series_id: work.externalReference }) };
+      } catch (error) {
+        return { work, error };
+      }
+    });
+    for (const result of seriesDetails) {
+      const { work } = result;
+      if ("error" in result) {
+        recordFailure("series", "series_info", work.persisted.id, result.error);
+        continue;
+      }
+      const detail = result.detail;
       const detailRecord = detail && typeof detail === "object" ? detail as Record<string, unknown> : {};
       const rawEpisodes = detailRecord.episodes;
       const episodeGroups = rawEpisodes && typeof rawEpisodes === "object" && !Array.isArray(rawEpisodes)
@@ -1065,51 +1431,74 @@ export class DesktopIptvRuntime {
       const seasonNumbers = new Set<string>([...episodeGroups.map((group) => group.seasonNumber), ...rawSeasons.map((season) => String(season.season_num ?? "0"))]);
       for (const seasonNumber of seasonNumbers) {
         const seasonRecord = rawSeasons.find((season) => String(season.season_num ?? "0") === seasonNumber);
-        const seasonExternalReference = safeExternalReference(seasonRecord?.id ?? seasonRecord?.season_id, `${seriesExternalReference}:season:${seasonNumber}`);
+        const seasonExternalReference = safeExternalReference(seasonRecord?.id ?? seasonRecord?.season_id, `${work.externalReference}:season:${seasonNumber}`);
         const seasonInput: DesktopSeasonInput = {
-          id: localCatalogueId("season", providerId, `${seriesExternalReference}:${seasonExternalReference}`),
+          id: localCatalogueId("season", providerId, `${work.externalReference}:${seasonExternalReference}`),
           providerAccountId: providerId,
-          seriesId: persistedSeries.id,
+          seriesId: work.persisted.id,
           externalReference: seasonExternalReference,
           seasonNumber: Number.isFinite(Number(seasonNumber)) ? Number(seasonNumber) : null,
           name: seasonRecord?.name ?? null,
+          metadataJson: safeMetadataJson(seasonRecord),
           status: "active"
         };
-        const persistedSeason = this.storage.upsertSeason(seasonInput);
-        seenSeasonIds.add(persistedSeason.id);
-        increment("Xtream season persisted.");
+        const persistedSeason = persistRecord("seasons", "season", seasonInput.id!, () => this.storage.upsertSeason(seasonInput));
+        if (!persistedSeason) continue;
+        seenSeasonIds.add(persistedSeason!.id);
         const group = episodeGroups.find((candidate) => candidate.seasonNumber === seasonNumber);
+        let episodesSinceYield = 0;
         for (const episode of group?.entries ?? []) {
-          const episodeExternalReference = safeExternalReference(episode.id ?? episode.episode_id, `${seriesExternalReference}:${seasonNumber}:${episode.episode_num ?? episode.name ?? ""}`);
+          const episodeExternalReference = safeExternalReference(episode.id ?? episode.episode_id, `${work.externalReference}:${seasonNumber}:${episode.episode_num ?? episode.name ?? ""}`);
           const episodeInput: DesktopEpisodeInput = {
-            id: localCatalogueId("episode", providerId, `${seriesExternalReference}:${episodeExternalReference}`),
+            id: localCatalogueId("episode", providerId, `${work.externalReference}:${episodeExternalReference}`),
             providerAccountId: providerId,
-            seriesId: persistedSeries.id,
-            seasonId: persistedSeason.id,
+            seriesId: work.persisted.id,
+            seasonId: persistedSeason!.id,
             externalReference: episodeExternalReference,
             episodeNumber: episode.episode_num == null ? null : Number(episode.episode_num),
             name: episode.title ?? episode.name ?? null,
             description: episode.info?.plot ?? episode.info?.description ?? null,
             logoUrl: episode.info?.movie_image ?? episode.info?.cover_big ?? episode.movie_image ?? episode.cover_big ?? null,
+            metadataJson: safeMetadataJson(episode),
             status: "active"
           };
-          const persistedEpisode = this.storage.upsertEpisode(episodeInput);
-          seenEpisodeIds.add(persistedEpisode.id);
-          increment("Xtream episode persisted.");
+          const persistedEpisode = persistRecord("episodes", "episode", episodeInput.id!, () => this.storage.upsertEpisode(episodeInput));
+          if (!persistedEpisode) continue;
+          seenEpisodeIds.add(persistedEpisode!.id);
+          episodesSinceYield += 1;
+          if (episodesSinceYield >= 100) {
+            episodesSinceYield = 0;
+            await yieldToEventLoop();
+          }
         }
       }
+      await yieldToEventLoop();
     }
+    setSectionStatus("series", sections.get("series")!.failed ? "partial" : "completed");
+    setSectionStatus("seasons", sections.get("seasons")!.failed ? "partial" : "completed");
+    setSectionStatus("episodes", sections.get("episodes")!.failed ? "partial" : "completed");
 
     assertActive();
     this.updateOperation(operationId, { currentStage: "archiving_stale", currentMessage: "Archiving stale Xtream catalogue records." });
-    for (const category of this.storage.listCategories(providerId)) if (!seenCategoryIds.has(category.id)) this.storage.archiveCategory(category.id);
-    for (const movie of this.storage.listMovies(providerId)) if (!seenMovieIds.has(movie.id)) this.storage.archiveMovie(movie.id);
-    for (const series of this.storage.listSeries(providerId)) if (!seenSeriesIds.has(series.id)) this.storage.archiveSeries(series.id);
-    for (const season of this.storage.listSeasons(providerId)) if (!seenSeasonIds.has(season.id)) this.storage.archiveSeason(season.id);
-    for (const episode of this.storage.listEpisodes(providerId)) if (!seenEpisodeIds.has(episode.id)) this.storage.archiveEpisode(episode.id);
+    if (!sections.get("categories")!.failed) for (const category of this.storage.listCategories(providerId)) if (!seenCategoryIds.has(category.id)) this.storage.archiveCategory(category.id);
+    if (!sections.get("movies")!.failed) for (const movie of this.storage.listMovies(providerId)) if (!seenMovieIds.has(movie.id)) this.storage.archiveMovie(movie.id);
+    if (!sections.get("series")!.failed) for (const series of this.storage.listSeries(providerId)) if (!seenSeriesIds.has(series.id)) this.storage.archiveSeries(series.id);
+    if (!sections.get("seasons")!.failed) for (const season of this.storage.listSeasons(providerId)) if (!seenSeasonIds.has(season.id)) this.storage.archiveSeason(season.id);
+    if (!sections.get("episodes")!.failed) for (const episode of this.storage.listEpisodes(providerId)) if (!seenEpisodeIds.has(episode.id)) this.storage.archiveEpisode(episode.id);
+    this.storage.updateProviderAccount(providerId, {
+      status: "active",
+      availability: "online",
+      lastValidatedAt: nowIso(),
+      healthReason: null
+    });
+    const current = this.operationSnapshots.get(operationId);
+    if (current) this.persistSnapshot(current!);
+    writeCheckpoint();
+    return { partial: Array.from(sections.values()).some((section) => section.failed > 0) };
   }
 
   private async syncM3uCatalogue(operationId: string, providerId: string, entries: M3uEntry[], complete: boolean, signal: AbortSignal) {
+    const liveEntries = entries.filter((entry) => classifyM3uEntry(entry).contentType === "live");
     const seenCategories = new Set<string>();
     const seenMovies = new Set<string>();
     const seenSeries = new Set<string>();
@@ -1119,12 +1508,12 @@ export class DesktopIptvRuntime {
     let skipped = 0;
 
     this.updateOperation(operationId, {
-      total: entries.length,
+      total: liveEntries.length,
       currentStage: "persisting_m3u_catalogue",
       currentMessage: "Classifying M3U catalogue entries."
     });
 
-    for (const entry of entries) {
+    for (const entry of liveEntries) {
       if (signal.aborted) throw new Error("operation_cancelled");
       const classification = classifyM3uEntry(entry);
       const categoryName = normalizedMetadata(entry.groupName);
@@ -1205,22 +1594,25 @@ export class DesktopIptvRuntime {
       }
 
       processed += 1;
-      this.updateOperation(operationId, {
-        processed,
-        succeeded: processed - skipped,
-        skipped,
-        currentStage: "persisting_m3u_catalogue",
-        currentMessage: `${processed} M3U entries processed.`
-      });
+      if (processed % CATALOGUE_BATCH_SIZE === 0 || processed === liveEntries.length) {
+        this.updateOperation(operationId, {
+          processed,
+          succeeded: processed - skipped,
+          skipped,
+          currentStage: "persisting_m3u_catalogue",
+          currentMessage: `${processed} M3U entries processed.`
+        });
+        await yieldToEventLoop();
+      }
     }
 
     if (!complete || skipped > 0) return;
     this.updateOperation(operationId, { currentStage: "archiving_stale_m3u_catalogue", currentMessage: "Archiving stale M3U catalogue records." });
     for (const category of this.storage.listCategories(providerId)) if (!seenCategories.has(category.id)) this.storage.archiveCategory(category.id);
-    for (const movie of this.storage.listMovies(providerId)) if (!seenMovies.has(movie.id)) this.storage.archiveMovie(movie.id);
-    for (const series of this.storage.listSeries(providerId)) if (!seenSeries.has(series.id)) this.storage.archiveSeries(series.id);
-    for (const season of this.storage.listSeasons(providerId)) if (!seenSeasons.has(season.id)) this.storage.archiveSeason(season.id);
-    for (const episode of this.storage.listEpisodes(providerId)) if (!seenEpisodes.has(episode.id)) this.storage.archiveEpisode(episode.id);
+    for (const movie of this.storage.listMovies(providerId)) this.storage.archiveMovie(movie.id);
+    for (const series of this.storage.listSeries(providerId)) this.storage.archiveSeries(series.id);
+    for (const season of this.storage.listSeasons(providerId)) this.storage.archiveSeason(season.id);
+    for (const episode of this.storage.listEpisodes(providerId)) this.storage.archiveEpisode(episode.id);
   }
 
   private async syncXtreamEpg(operationId: string, providerId: string, baseUrl: string, username: string, password: string, signal: AbortSignal) {
@@ -1299,7 +1691,29 @@ export class DesktopIptvRuntime {
     this.persistSnapshot(next);
   }
 
-  private persistSnapshot(operation: DesktopRuntimeOperation) {
+  private persistSnapshot(operation: DesktopRuntimeOperation, details?: Record<string, unknown>) {
+    const checkpoint = (() => {
+      const current = this.storage.getOperation(operation.id)?.checkpoint ?? null;
+      if (!current) return {};
+      try {
+        const parsed = JSON.parse(current);
+        return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : {};
+      } catch {
+        return {};
+      }
+    })();
+
+    const nextCheckpoint: Record<string, unknown> = {
+      ...checkpoint,
+      currentStage: operation.currentStage,
+      currentMessage: operation.currentMessage,
+      ...(details ?? {})
+    };
+
+    if (typeof operation.playlist === "string" && operation.playlist.trim()) {
+      nextCheckpoint.playlist = operation.playlist;
+    }
+
     const persisted: DesktopIptvOperationInput = {
       id: operation.id,
       providerAccountId: operation.providerAccountId ?? null,
@@ -1308,7 +1722,7 @@ export class DesktopIptvRuntime {
       processed: operation.processed,
       succeeded: operation.succeeded,
       failed: operation.failed,
-      checkpoint: JSON.stringify({ currentStage: operation.currentStage, currentMessage: operation.currentMessage }),
+      checkpoint: JSON.stringify(nextCheckpoint),
       cancellationRequested: operation.cancelled,
       error: operation.error ?? null
     };
@@ -1319,7 +1733,7 @@ export class DesktopIptvRuntime {
   private buildOperationResponse(operation: DesktopIptvOperation | undefined): DesktopRuntimeOperation {
     const jsonCheckpoint = operation?.checkpoint ? (() => {
       try {
-        return JSON.parse(operation.checkpoint) as { currentStage?: string; currentMessage?: string };
+        return JSON.parse(operation.checkpoint) as { currentStage?: string; currentMessage?: string; playlist?: string };
       } catch {
         return undefined;
       }
@@ -1338,7 +1752,8 @@ export class DesktopIptvRuntime {
       currentStage: jsonCheckpoint?.currentStage ?? "queued",
       currentMessage: jsonCheckpoint?.currentMessage ?? operation?.error ?? "Operation queued.",
       cancelled: operation?.cancellationRequested ?? false,
-      providerAccountId: operation?.providerAccountId ?? null
+      providerAccountId: operation?.providerAccountId ?? null,
+      playlist: typeof jsonCheckpoint?.playlist === "string" ? jsonCheckpoint.playlist : null
     };
 
     if (operation?.error) {

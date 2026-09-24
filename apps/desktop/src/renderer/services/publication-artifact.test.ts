@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildDesktopPublicationContexts, buildLegacyStreamAssignment, buildSafePublicationPackage, validateDirectPlaybackUrl, validateDirectXtreamPlaybackUrl } from "./publication-artifact";
+import { buildDesktopPublicationContexts, buildLegacyStreamAssignment, buildSafePublicationPackage, normalizeXtreamPublicationUrl, resolvePublicationDeliveryUrl, validateDirectPlaybackUrl, validateDirectXtreamPlaybackUrl } from "./publication-artifact";
 
 test("accepts only credential-free HTTPS direct playback URLs", () => {
   assert.equal(validateDirectPlaybackUrl("https://media.example/live.m3u8"), "https://media.example/live.m3u8");
@@ -50,6 +50,27 @@ test("accepts HTTPS Xtream playback paths for direct Xtream mode", () => {
     "http://synthetic.test/live/TEST_USER/TEST_PASSWORD/123.m3u8"
   );
   assert.throws(() => validateDirectXtreamPlaybackUrl("https://synthetic.test/anything/123.m3u8"), /unsafe/);
+});
+
+test("preserves the provider protocol for Xtream publication playback", () => {
+  assert.equal(
+    normalizeXtreamPublicationUrl("http://synthetic.test/live/TEST_USER/TEST_PASSWORD/123.m3u8"),
+    "http://synthetic.test/live/TEST_USER/TEST_PASSWORD/123.m3u8"
+  );
+});
+
+test("publication assignment resolves a secure delivery URL without touching preview URLs", () => {
+  const direct = resolvePublicationDeliveryUrl("https://media.example/live/channel-123.m3u8");
+  assert.deepEqual(direct, {
+    deliveryUrl: "https://media.example/live/channel-123.m3u8",
+    playbackMode: "DIRECT_SAFE"
+  });
+
+  const xtream = resolvePublicationDeliveryUrl("http://provider.example/live/USER/PASSWORD/123.m3u8", "xtream");
+  assert.equal(xtream.deliveryUrl, "http://provider.example/live/USER/PASSWORD/123.m3u8");
+  assert.equal(xtream.playbackMode, "DIRECT_XTREAM");
+
+  assert.throws(() => resolvePublicationDeliveryUrl("http://provider.example/live/channel.m3u8"), /requires_https/);
 });
 
 test("publication payloads contain no local IPTV credentials", () => {

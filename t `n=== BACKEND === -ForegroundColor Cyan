@@ -1,0 +1,37 @@
+warning: in the working copy of 'apps/backend/src/routes/publication-artifacts.ts', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/apps/backend/src/routes/publication-artifacts.ts b/apps/backend/src/routes/publication-artifacts.ts[m
+[1mindex e0a7894..073605c 100644[m
+[1m--- a/apps/backend/src/routes/publication-artifacts.ts[m
+[1m+++ b/apps/backend/src/routes/publication-artifacts.ts[m
+[36m@@ -5,7 +5,8 @@[m [mimport {[m
+   approvePublicationArtifact,[m
+   bindPublicationArtifact,[m
+   createPublicationArtifact,[m
+[31m-  getPublicationArtifactById[m
+[32m+[m[32m  getPublicationArtifactById,[m
+[32m+[m[32m  setPublicationDelivery[m
+   , listPublishedPublicationFeed[m
+ } from "../repositories/publication-artifact-repository.js";[m
+ import { revokePublicationArtifact, publishPublicationArtifact, updatePublicationArtifact } from "../repositories/publication-artifact-repository.js";[m
+[36m@@ -129,6 +130,21 @@[m [mpublicationArtifactsRouter.post("/:publicationId/bind", protectedRoute, (request[m
+   }[m
+ });[m
+ [m
+[32m+[m[32mpublicationArtifactsRouter.post("/:publicationId/delivery", protectedRoute, (request, response) => {[m
+[32m+[m[32m  const publicationId = request.params.publicationId;[m
+[32m+[m[32m  const body = request.body as Record<string, unknown>;[m
+[32m+[m[32m  if (!publicationId) { response.status(400).json({ error: "publication_id_required" }); return; }[m
+[32m+[m[32m  if (Object.keys(body ?? {}).some((key) => key !== "deliveryReference" && key !== "playbackUrl")) { response.status(400).json({ error: "publication_delivery_field_not_allowed" }); return; }[m
+[32m+[m[32m  if (typeof body.deliveryReference !== "string" || typeof body.playbackUrl !== "string") { response.status(400).json({ error: "publication_delivery_fields_required" }); return; }[m
+[32m+[m[32m  try {[m
+[32m+[m[32m    const artifact = setPublicationDelivery(publicationId, { deliveryReference: body.deliveryReference, playbackUrl: body.playbackUrl });[m
+[32m+[m[32m    if (!artifact) { response.status(404).json({ error: "publication_artifact_not_found" }); return; }[m
+[32m+[m[32m    response.json({ data: artifact });[m
+[32m+[m[32m  } catch (error) {[m
+[32m+[m[32m    response.status(400).json({ error: error instanceof Error ? error.message : String(error) });[m
+[32m+[m[32m  }[m
+[32m+[m[32m});[m
+[32m+[m
+ publicationArtifactsRouter.post("/:publicationId/publish", protectedRoute, (request, response) => {[m
+   const publicationId = request.params.publicationId;[m
+   if (!publicationId) {[m

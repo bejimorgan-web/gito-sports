@@ -160,7 +160,7 @@ test("failed M3U validation does not trigger the existing M3U catalogue sync ope
   cleanup();
 });
 
-test("Xtream provider creation continues to use the existing Xtream sync path without invoking M3U sync", async () => {
+test("Xtream provider creation starts the full Xtream catalogue sync", async () => {
   const startCalls: Array<{ type: string; input?: { providerId?: string } }> = [];
   const getCalls: string[] = [];
   const props: any = {
@@ -203,7 +203,7 @@ test("Xtream provider creation continues to use the existing Xtream sync path wi
       getCalls.push(operationId);
       return {
         id: operationId,
-        type: "xtream_channel_sync",
+        type: "xtream_catalogue_sync",
         status: "queued",
         startedAt: new Date().toISOString(),
         processed: 0,

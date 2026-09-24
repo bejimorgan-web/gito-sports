@@ -23,7 +23,7 @@ export function IptvOperationProgress({ operation, onCancel }: IptvOperationProg
   const percentage = operation.total && operation.total > 0
     ? Math.min(100, Math.round((operation.processed / operation.total) * 100))
     : undefined;
-  const tone = operation.status === "failed" ? "error" : operation.status === "completed" ? "success" : operation.status === "cancelled" ? "warning" : "";
+  const tone = operation.status === "failed" ? "error" : operation.status === "partial" ? "warning" : operation.status === "completed" ? "success" : operation.status === "cancelled" ? "warning" : "";
 
   return (
     <section className={`console-panel iptv-operation-progress ${tone}`}>

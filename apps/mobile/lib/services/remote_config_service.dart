@@ -15,24 +15,24 @@ class MobileNavigationConfig {
   });
 
   factory MobileNavigationConfig.fromJson(Map<String, dynamic> json) {
-    bool readEnabled(String key) {
+    bool readEnabled(String key, {required bool defaultValue}) {
       final value = json[key];
       if (value is bool) {
         return value;
       }
       if (value is Map<String, dynamic>) {
-        return value['enabled'] as bool? ?? true;
+        return value['enabled'] as bool? ?? defaultValue;
       }
       if (value is Map) {
-        return (value['enabled'] as bool?) ?? true;
+        return (value['enabled'] as bool?) ?? defaultValue;
       }
-      return true;
+      return defaultValue;
     }
 
     return MobileNavigationConfig(
-      liveScores: readEnabled('liveScores'),
-      sports: readEnabled('sports'),
-      live: readEnabled('live'),
+      liveScores: readEnabled('liveScores', defaultValue: true),
+      sports: readEnabled('sports', defaultValue: true),
+      live: readEnabled('live', defaultValue: false),
     );
   }
 
@@ -106,18 +106,18 @@ class RemoteConfigService {
     } catch (e) {
       print('[RemoteConfig] Failed to fetch config: $e');
       
-      // Fall back to cached data even if expired
+      // A stale enabled Live flag must never authorize playback.
       if (cached != null) {
         print('[RemoteConfig] Falling back to stale cached config');
-        return cached;
+        return cached.copyWith(live: false);
       }
       
-      // Fall back to all enabled if no cache available
-      print('[RemoteConfig] No cache available, returning defaults (all enabled)');
+      // Keep catalog navigation available while failing closed for Live.
+      print('[RemoteConfig] No cache available, returning fail-closed defaults');
       return MobileNavigationConfig(
         liveScores: true,
         sports: true,
-        live: true,
+        live: false,
       );
     }
   }

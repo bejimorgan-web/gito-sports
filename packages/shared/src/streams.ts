@@ -49,6 +49,7 @@ export interface Channel {
   categoryId?: string;
   groupName?: string;
   logoUrl?: string;
+  playbackHeaders?: { "user-agent"?: string; referer?: string };
   url: string;
   contentType?: "live" | "movie" | "series";
   status: EntityStatus;

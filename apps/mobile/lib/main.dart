@@ -183,6 +183,7 @@ class GitoPersonalizeScreen extends StatefulWidget {
 
 class _GitoPersonalizeScreenState extends State<GitoPersonalizeScreen> {
   final Set<String> _selectedSports = <String>{};
+  final Set<String> _selectedHosts = <String>{};
   final Set<String> _selectedCompetitions = <String>{};
   final Set<String> _selectedTeams = <String>{};
   int _step = 0;
@@ -196,10 +197,29 @@ class _GitoPersonalizeScreenState extends State<GitoPersonalizeScreen> {
   }
 
   Future<_FollowCatalog> _loadCatalog() async {
+    final sports = await widget.api.getSports();
+    final hosts = (await Future.wait(
+      sports.map((sport) => widget.api.getHosts(sportId: sport.id)),
+    ))
+        .expand((items) => items)
+        .toList();
+    final competitions = await widget.api.getCompetitions();
+    final teamsByCompetition = <String, List<MobileClub>>{};
+    await Future.wait(competitions.map((competition) async {
+      final seasons = await widget.api.getCompetitionSeasons(competition.id);
+      final teamsById = <String, MobileClub>{};
+      for (final season in seasons) {
+        for (final team in await widget.api.getSeasonTeams(season.id)) {
+          teamsById[team.id] = team;
+        }
+      }
+      teamsByCompetition[competition.id] = teamsById.values.toList();
+    }));
     final catalog = _FollowCatalog(
-      sports: await widget.api.getSports(),
-      competitions: await widget.api.getCompetitions(),
-      teams: await widget.api.getClubs(),
+      sports: sports,
+      hosts: hosts,
+      competitions: competitions,
+      teamsByCompetition: teamsByCompetition,
     );
     if (mounted) setState(() => _catalog = catalog);
     return catalog;
@@ -222,24 +242,34 @@ class _GitoPersonalizeScreenState extends State<GitoPersonalizeScreen> {
             _selectedSports.contains(_normalizeCatalogValue(sport.slug)))
         .map((sport) => sport.id)
         .toSet();
+    final hosts = (_catalog?.hosts ?? const <MobileHost>[])
+        .where((host) =>
+            _selectedHosts.contains(_normalizeCatalogValue(host.name)))
+        .map((host) => host.id)
+        .toSet();
     return (_catalog?.competitions ?? const <MobileCompetition>[])
         .where((competition) =>
-            sports.isEmpty || sports.contains(competition.sportId))
+            (sports.isEmpty || sports.contains(competition.sportId)) &&
+            (hosts.isEmpty || hosts.contains(competition.hostId)))
         .map((competition) => competition.name)
         .toList();
   }
 
   List<String> _recommendedTeamsForCurrentSports() {
-    final sports = (_catalog?.sports ?? const <MobileSport>[])
-        .where((sport) =>
-            _selectedSports.contains(_normalizeCatalogValue(sport.name)) ||
-            _selectedSports.contains(_normalizeCatalogValue(sport.slug)))
-        .map((sport) => sport.id)
-        .toSet();
-    return (_catalog?.teams ?? const <MobileClub>[])
-        .where((team) => sports.isEmpty || sports.contains(team.sportId))
-        .map((team) => team.name)
-        .toList();
+    final competitionIds =
+        (_catalog?.competitions ?? const <MobileCompetition>[])
+            .where((competition) => _selectedCompetitions
+                .contains(_normalizeCatalogValue(competition.name)))
+            .map((competition) => competition.id)
+            .toSet();
+    final teams = <String, MobileClub>{};
+    for (final competitionId in competitionIds) {
+      for (final team
+          in _catalog?.teamsByCompetition[competitionId] ?? const []) {
+        teams[team.id] = team;
+      }
+    }
+    return teams.values.map((team) => team.name).toList();
   }
 
   Future<void> _saveAndClose() async {
@@ -253,7 +283,7 @@ class _GitoPersonalizeScreenState extends State<GitoPersonalizeScreen> {
   }
 
   Widget _buildChipList(List<String> values, Set<String> selection,
-      {required String title}) {
+      {required String title, required String emptyText}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -265,29 +295,32 @@ class _GitoPersonalizeScreenState extends State<GitoPersonalizeScreen> {
                   .titleMedium
                   ?.copyWith(fontWeight: FontWeight.w800)),
         ),
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: values.map((value) {
-            final rawValue = _normalizeCatalogValue(value);
-            final selected = selection.contains(rawValue);
-            return FilterChip(
-              selected: selected,
-              selectedColor: GiTOBrandColors.primary.withAlpha(90),
-              backgroundColor: GiTOBrandColors.surfaceAlt,
-              label: Text(GitoFollowStore.displayName(value)),
-              onSelected: (_) {
-                setState(() {
-                  if (selected) {
-                    selection.remove(rawValue);
-                  } else {
-                    selection.add(rawValue);
-                  }
-                });
-              },
-            );
-          }).toList(),
-        ),
+        if (values.isEmpty)
+          Text(emptyText)
+        else
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: values.map((value) {
+              final rawValue = _normalizeCatalogValue(value);
+              final selected = selection.contains(rawValue);
+              return FilterChip(
+                selected: selected,
+                selectedColor: GiTOBrandColors.primary.withAlpha(90),
+                backgroundColor: GiTOBrandColors.surfaceAlt,
+                label: Text(GitoFollowStore.displayName(value)),
+                onSelected: (_) {
+                  setState(() {
+                    if (selected) {
+                      selection.remove(rawValue);
+                    } else {
+                      selection.add(rawValue);
+                    }
+                  });
+                },
+              );
+            }).toList(),
+          ),
       ],
     );
   }
@@ -296,7 +329,8 @@ class _GitoPersonalizeScreenState extends State<GitoPersonalizeScreen> {
   Widget build(BuildContext context) {
     final stepTitle = <String>[
       'What sports do you follow?',
-      'Recommended competitions',
+      'Choose hosts to follow',
+      'Choose competitions to follow',
       'Recommended clubs and teams',
     ];
 
@@ -304,6 +338,17 @@ class _GitoPersonalizeScreenState extends State<GitoPersonalizeScreen> {
         .map((sport) => sport.name)
         .toList();
 
+    final hostRecommendations = (_catalog?.hosts ?? const <MobileHost>[])
+        .where((host) {
+          final sportIds = (_catalog?.sports ?? const <MobileSport>[])
+              .where((sport) =>
+                  _selectedSports.contains(_normalizeCatalogValue(sport.name)))
+              .map((sport) => sport.id)
+              .toSet();
+          return sportIds.isEmpty || sportIds.contains(host.sportId);
+        })
+        .map((host) => host.name)
+        .toList();
     final recommendations = _recommendedCompetitionsForCurrentSports();
     final teamRecommendations = _recommendedTeamsForCurrentSports();
 
@@ -342,13 +387,21 @@ class _GitoPersonalizeScreenState extends State<GitoPersonalizeScreen> {
                 child: SingleChildScrollView(
                   child: _step == 0
                       ? _buildChipList(sportOptions, _selectedSports,
-                          title: 'Select the sports you care about')
+                          title: 'Select the sports you care about',
+                          emptyText: 'No sports available')
                       : _step == 1
-                          ? _buildChipList(
-                              recommendations, _selectedCompetitions,
-                              title: 'Choose competitions to follow')
-                          : _buildChipList(teamRecommendations, _selectedTeams,
-                              title: 'Choose clubs or teams to follow'),
+                          ? _buildChipList(hostRecommendations, _selectedHosts,
+                              title: 'Choose hosts to follow',
+                              emptyText: 'No hosts available')
+                          : _step == 2
+                              ? _buildChipList(
+                                  recommendations, _selectedCompetitions,
+                                  title: 'Choose competitions to follow',
+                                  emptyText: 'No competitions available')
+                              : _buildChipList(
+                                  teamRecommendations, _selectedTeams,
+                                  title: 'Choose clubs or teams to follow',
+                                  emptyText: 'No clubs available'),
                 ),
               ),
               const SizedBox(height: 16),
@@ -357,17 +410,17 @@ class _GitoPersonalizeScreenState extends State<GitoPersonalizeScreen> {
                   TextButton.icon(
                     onPressed: _step == 0
                         ? () => _saveAndClose()
-                        : () => setState(() => _step = (_step - 1).clamp(0, 2)),
+                        : () => setState(() => _step = (_step - 1).clamp(0, 3)),
                     icon: const Icon(Icons.skip_next_rounded),
                     label: Text(_step == 0 ? 'Skip' : 'Back'),
                   ),
                   const Spacer(),
                   FilledButton.icon(
-                    onPressed: _step == 2
+                    onPressed: _step == 3
                         ? _saveAndClose
-                        : () => setState(() => _step = (_step + 1).clamp(0, 2)),
+                        : () => setState(() => _step = (_step + 1).clamp(0, 3)),
                     icon: const Icon(Icons.arrow_forward_rounded),
-                    label: Text(_step == 2 ? 'Done' : 'Next'),
+                    label: Text(_step == 3 ? 'Done' : 'Next'),
                   ),
                 ],
               ),
@@ -381,10 +434,14 @@ class _GitoPersonalizeScreenState extends State<GitoPersonalizeScreen> {
 
 class _FollowCatalog {
   const _FollowCatalog(
-      {required this.sports, required this.competitions, required this.teams});
+      {required this.sports,
+      required this.hosts,
+      required this.competitions,
+      required this.teamsByCompetition});
   final List<MobileSport> sports;
+  final List<MobileHost> hosts;
   final List<MobileCompetition> competitions;
-  final List<MobileClub> teams;
+  final Map<String, List<MobileClub>> teamsByCompetition;
 }
 
 String _normalizeCatalogValue(String? value) => (value ?? '')
@@ -488,8 +545,6 @@ class _GitoFollowingScreenState extends State<GitoFollowingScreen> {
                         ),
                       ),
                       Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
                         children: entry.value.map((value) {
                           return InputChip(
                             label: Text(value),
@@ -498,7 +553,7 @@ class _GitoFollowingScreenState extends State<GitoFollowingScreen> {
                             backgroundColor: GiTOBrandColors.surfaceAlt,
                           );
                         }).toList(),
-                      )
+                      ),
                     ],
                   ),
                 );
@@ -554,6 +609,76 @@ enum FeedConnectionState { online, reconnecting, offline }
 
 enum ViewerMatchState { live, startingSoon, ended, streamIssue, offline }
 
+class LiveEligibility {
+  static const Duration preKickoffWindow = Duration(minutes: 30);
+
+  static bool isLiveWindow(
+    DateTime kickoff,
+    String? matchStatus,
+    DateTime now,
+  ) {
+    final normalizedStatus = (matchStatus ?? '').toLowerCase();
+    final ineligible = <String>{
+      'ended',
+      'cancelled',
+      'postponed',
+      'completed',
+      'aborted',
+      'suspended',
+      'finished',
+      'declined',
+    };
+
+    if (ineligible.contains(normalizedStatus)) {
+      return false;
+    }
+
+    if (kickoff.year == 0 || kickoff.month == 0 || kickoff.day == 0) {
+      return false;
+    }
+
+    final windowStart = kickoff.subtract(preKickoffWindow);
+    if (now.isBefore(windowStart) && kickoff.isAfter(now)) {
+      return false;
+    }
+
+    if (now.isBefore(kickoff)) {
+      return !now.isBefore(windowStart);
+    }
+
+    return true;
+  }
+
+  static bool isWatchNowAllowed(
+    LiveMatch match, {
+    required bool liveEnabled,
+    DateTime? now,
+  }) {
+    if (!liveEnabled) {
+      return false;
+    }
+
+    if (!match.hasPlayableStream) {
+      return false;
+    }
+
+    return isLiveWindow(
+        match.startsAt, match.matchStatus, now ?? DateTime.now());
+  }
+}
+
+bool _isLiveFeedAllowed(
+  LiveMatch match, {
+  required bool liveEnabled,
+  DateTime? now,
+}) {
+  if (!liveEnabled) {
+    return false;
+  }
+
+  return LiveEligibility.isWatchNowAllowed(match, liveEnabled: true, now: now);
+}
+
 class WatermarkedPage extends StatelessWidget {
   const WatermarkedPage({
     required this.child,
@@ -597,6 +722,65 @@ class WatermarkedPage extends StatelessWidget {
         ),
         child,
       ],
+    );
+  }
+}
+
+class PlayerBrandOverlay extends StatelessWidget {
+  const PlayerBrandOverlay({
+    required this.videoSize,
+    required this.landscapeWidthRatio,
+    super.key,
+  });
+
+  final Size videoSize;
+  final double landscapeWidthRatio;
+
+  static const double landscapeBackingWidth = 160;
+  static const double landscapeBackingHeight = 58;
+  static const double portraitScale = 0.6;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final landscape = videoSize.width > videoSize.height;
+          final backingWidth = landscape
+              ? PlayerBrandOverlay.landscapeBackingWidth
+              : videoSize.width * landscapeWidthRatio * portraitScale;
+          final backingHeight = landscape
+              ? PlayerBrandOverlay.landscapeBackingHeight
+              : backingWidth * (landscapeBackingHeight / landscapeBackingWidth);
+          final emblemWidth = landscape ? 108.0 : backingWidth * (108 / 160);
+          final emblemHeight = landscape ? 46.0 : backingHeight * (46 / 58);
+
+          return Align(
+            alignment: Alignment.topRight,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 10, right: 10),
+              child: IgnorePointer(
+                child: Container(
+                  width: backingWidth,
+                  height: backingHeight,
+                  decoration: BoxDecoration(
+                    color: Colors.black,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Center(
+                    child: Image.asset(
+                      'assets/playback_emblem.png',
+                      width: emblemWidth,
+                      height: emblemHeight,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }
@@ -700,8 +884,6 @@ class AppBrandHero extends StatelessWidget {
 
 enum PlaybackState { loading, connecting, playing, buffering, failure }
 
-enum PlaybackScaleMode { fit, fill, zoom }
-
 class LiveMatch {
   const LiveMatch({
     required this.id,
@@ -710,13 +892,20 @@ class LiveMatch {
     required this.competition,
     required this.startsAt,
     required this.matchStatus,
+    required this.publicationStatus,
+    required this.publicationAvailability,
     required this.streamStatus,
     required this.streamHealth,
     required this.playbackUrl,
     this.playbackMode = 'DIRECT_SAFE',
+    this.playbackHeaders = const <String, String>{},
     this.sportName,
     this.countryName,
+    this.hostName,
+    this.regionName,
     this.sportLogoUrl,
+    this.hostLogoUrl,
+    this.regionLogoUrl,
     this.countryLogoUrl,
     this.homeTeamLogoUrl,
     this.awayTeamLogoUrl,
@@ -729,20 +918,30 @@ class LiveMatch {
   final String competition;
   final String? sportName;
   final String? countryName;
+  final String? hostName;
+  final String? regionName;
   final DateTime startsAt;
   final String matchStatus;
+  final String publicationStatus;
+  final String publicationAvailability;
   final String streamStatus;
   final String streamHealth;
-  final String playbackMode;
   final String playbackUrl;
+  final String playbackMode;
+  final Map<String, String> playbackHeaders;
   final String? sportLogoUrl;
+  final String? hostLogoUrl;
+  final String? regionLogoUrl;
   final String? countryLogoUrl;
   final String? homeTeamLogoUrl;
   final String? awayTeamLogoUrl;
   final String? competitionLogoUrl;
 
   bool get hasPlayableStream =>
-      matchStatus == 'published' &&
+      publicationStatus == 'published' &&
+      (publicationAvailability == 'ready' ||
+          publicationAvailability == 'online' ||
+          publicationAvailability == 'degraded') &&
       streamStatus == 'active' &&
       streamHealth != 'failed' &&
       playbackUrl.isNotEmpty;
@@ -757,16 +956,17 @@ class LiveMatch {
     }
 
     final now = DateTime.now();
-
-    if (startsAt.isAfter(now) && startsAt.difference(now).inMinutes <= 30) {
-      return ViewerMatchState.startingSoon;
+    if (LiveEligibility.isLiveWindow(startsAt, matchStatus, now)) {
+      return startsAt.isAfter(now)
+          ? ViewerMatchState.startingSoon
+          : ViewerMatchState.live;
     }
 
     if (matchStatus == 'ended' || matchStatus == 'cancelled') {
       return ViewerMatchState.ended;
     }
 
-    return ViewerMatchState.live;
+    return ViewerMatchState.streamIssue;
   }
 
   factory LiveMatch.fromJson(Map<String, Object?> json) {
@@ -776,12 +976,20 @@ class LiveMatch {
 
     final homeTeamName = json['homeTeamName'] ?? match['homeTeamName'];
     final awayTeamName = json['awayTeamName'] ?? match['awayTeamName'];
-    final playbackMode = '${json['playbackMode'] ?? 'DIRECT_SAFE'}';
     final competitionName = json['competitionName'] ?? match['competitionName'];
-    final playbackUrl = _normalizeMediaUrl(json['playbackUrl']);
+    final playbackMode = '${json['playbackMode'] ?? 'DIRECT_SAFE'}';
+    final playbackHeaders = (json['playbackHeaders'] as Map?)?.map((key, value) => MapEntry(key.toString(), value.toString())) ?? <String, String>{};
+    final playbackUrl = playbackMode == 'DIRECT_XTREAM'
+      ? normalizeXtreamPlaybackUrl(json['playbackUrl'])
+      : normalizeMediaUrl(json['playbackUrl']);
+    final publication = json['publication'] as Map<String, Object?>? ?? {};
     final startsAtSource = match['startsAt'] ?? json['startsAt'];
     final matchStatusSource =
         match['status'] ?? json['status'] ?? json['matchStatus'];
+    final publicationStatusSource =
+        publication['publicationStatus'] ?? json['publicationStatus'];
+    final publicationAvailabilitySource =
+        publication['availability'] ?? json['publicationAvailability'];
     final streamStatusSource = stream['status'] ?? json['streamStatus'];
     final streamHealthSource = stream['healthStatus'] ?? json['streamHealth'];
 
@@ -796,29 +1004,39 @@ class LiveMatch {
           .toString(),
       startsAt:
           DateTime.tryParse(startsAtSource?.toString() ?? '') ?? DateTime.now(),
-      matchStatus: (matchStatusSource ?? 'published').toString(),
-      playbackMode: playbackMode,
+      matchStatus: (matchStatusSource ?? 'unknown').toString(),
+      publicationStatus: (publicationStatusSource ?? 'unknown').toString(),
+      publicationAvailability:
+          (publicationAvailabilitySource ?? 'unknown').toString(),
       streamStatus: (streamStatusSource ?? 'active').toString(),
       streamHealth: (streamHealthSource ?? 'unknown').toString(),
       playbackUrl: playbackUrl ?? '',
+      playbackMode: playbackMode,
+      playbackHeaders: playbackHeaders,
       sportName: (json['sportName'] ??
               match['sportName'] ??
               _displayLabel('Sport', match['sportId']))
           .toString(),
+      hostName: (json['hostName'] ?? match['hostName'])?.toString(),
+      regionName: (json['regionName'] ?? match['regionName'])?.toString(),
       countryName: (json['countryName'] ??
               match['countryName'] ??
               _displayLabel('Country', match['countryId']))
           .toString(),
-      homeTeamLogoUrl: _normalizeMediaUrl(
+      homeTeamLogoUrl: normalizeMediaUrl(
           json['homeTeamLogoUrl'] ?? match['homeTeamLogoUrl']),
-      awayTeamLogoUrl: _normalizeMediaUrl(
+      awayTeamLogoUrl: normalizeMediaUrl(
           json['awayTeamLogoUrl'] ?? match['awayTeamLogoUrl']),
-      competitionLogoUrl: _normalizeMediaUrl(
+      competitionLogoUrl: normalizeMediaUrl(
           json['competitionLogoUrl'] ?? match['competitionLogoUrl']),
       sportLogoUrl:
-          _normalizeMediaUrl(json['sportLogoUrl'] ?? match['sportLogoUrl']),
+          normalizeMediaUrl(json['sportLogoUrl'] ?? match['sportLogoUrl']),
+      hostLogoUrl:
+          normalizeMediaUrl(json['hostLogoUrl'] ?? match['hostLogoUrl']),
+      regionLogoUrl:
+          normalizeMediaUrl(json['regionLogoUrl'] ?? match['regionLogoUrl']),
       countryLogoUrl:
-          _normalizeMediaUrl(json['countryLogoUrl'] ?? match['countryLogoUrl']),
+          normalizeMediaUrl(json['countryLogoUrl'] ?? match['countryLogoUrl']),
     );
   }
 }
@@ -833,19 +1051,6 @@ String _displayLabel(String prefix, Object? value) {
   final short =
       raw.length > 8 ? raw.substring(0, 8).toUpperCase() : raw.toUpperCase();
   return '$prefix $short';
-}
-
-String? _normalizeMediaUrl(Object? value) {
-  final raw = value?.toString().trim();
-  if (raw == null || raw.isEmpty) {
-    return null;
-  }
-
-  if (raw.startsWith('/')) {
-    return '$apiBaseUrl$raw';
-  }
-
-  return raw;
 }
 
 class NotificationService {
@@ -1099,9 +1304,9 @@ class ScoreMatch {
       homeScore: _jsonInt(score['home']),
       awayScore: _jsonInt(score['away']),
       utcDate: DateTime.tryParse(json['utcDate']?.toString() ?? ''),
-      competitionLogoUrl: _normalizeMediaUrl(competition['logoUrl']),
-      homeTeamLogoUrl: _normalizeMediaUrl(homeTeam['logoUrl']),
-      awayTeamLogoUrl: _normalizeMediaUrl(awayTeam['logoUrl']),
+      competitionLogoUrl: normalizeMediaUrl(competition['logoUrl']),
+      homeTeamLogoUrl: normalizeMediaUrl(homeTeam['logoUrl']),
+      awayTeamLogoUrl: normalizeMediaUrl(awayTeam['logoUrl']),
     );
   }
 }
@@ -1198,7 +1403,8 @@ class LiveHomeScreen extends StatefulWidget {
   State<LiveHomeScreen> createState() => _LiveHomeScreenState();
 }
 
-class _LiveHomeScreenState extends State<LiveHomeScreen> {
+class _LiveHomeScreenState extends State<LiveHomeScreen>
+    with WidgetsBindingObserver {
   final _feedService = const MobileFeedService();
   final _analyticsService = const MobileAnalyticsService();
   final _matches = <LiveMatch>[];
@@ -1215,6 +1421,7 @@ class _LiveHomeScreenState extends State<LiveHomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(AdManager.initialize());
     unawaited(NotificationService.instance.initialize());
     unawaited(_analyticsService.trackEvent(eventType: 'app_open'));
@@ -1234,6 +1441,7 @@ class _LiveHomeScreenState extends State<LiveHomeScreen> {
 
       final config = await configService.getNavigationConfig();
 
+      if (!mounted) return;
       setState(() {
         _navConfig = config;
         _configLoaded = true;
@@ -1256,11 +1464,12 @@ class _LiveHomeScreenState extends State<LiveHomeScreen> {
     } catch (e) {
       print('[Mobile] Failed to load remote config: $e');
 
+      if (!mounted) return;
       setState(() {
         _navConfig = MobileNavigationConfig(
           liveScores: true,
           sports: true,
-          live: true,
+          live: false,
         );
         _configLoaded = true;
       });
@@ -1269,8 +1478,16 @@ class _LiveHomeScreenState extends State<LiveHomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _refreshTimer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_loadRemoteConfig());
+    }
   }
 
   Future<void> _refreshFeed() async {
@@ -1360,7 +1577,7 @@ class _LiveHomeScreenState extends State<LiveHomeScreen> {
         MobileNavigationConfig(
           liveScores: true,
           sports: true,
-          live: true,
+          live: false,
         );
 
     // Build available screens based on config
@@ -2349,34 +2566,445 @@ class CompetitionFixturesScreen extends StatelessWidget {
   final MobileApiService api;
 
   @override
+  Widget build(BuildContext context) => CompetitionHubScreen(
+        sport: sport,
+        host: host,
+        competition: competition,
+        api: api,
+      );
+}
+
+enum CompetitionSection { today, upcoming, results, table, teams, statistics }
+
+bool _sameLocalDate(DateTime? value, DateTime date) {
+  if (value == null) return false;
+  final local = value.toLocal();
+  return local.year == date.year &&
+      local.month == date.month &&
+      local.day == date.day;
+}
+
+bool _completedFixture(MobileFixture fixture) {
+  const completedStatuses = {
+    'ended',
+    'completed',
+    'finished',
+    'final',
+  };
+  return completedStatuses.contains(fixture.status.toLowerCase());
+}
+
+List<MobileFixture> competitionFixturesForSection(
+  List<MobileFixture> fixtures,
+  CompetitionSection section, {
+  DateTime? now,
+}) {
+  final reference = (now ?? DateTime.now()).toLocal();
+  final tomorrow = DateTime(reference.year, reference.month, reference.day + 1);
+  final today = fixtures.where((fixture) {
+    return _sameLocalDate(fixture.startsAt, reference);
+  }).toList();
+
+  switch (section) {
+    case CompetitionSection.today:
+      return today;
+    case CompetitionSection.upcoming:
+      return fixtures.where((fixture) {
+        final startsAt = fixture.startsAt?.toLocal();
+        return startsAt != null &&
+            !startsAt.isBefore(tomorrow) &&
+            !_completedFixture(fixture) &&
+            fixture.status.toLowerCase() != 'cancelled';
+      }).toList();
+    case CompetitionSection.results:
+      return fixtures.where(_completedFixture).toList()
+        ..sort((a, b) => (b.startsAt ?? DateTime.fromMillisecondsSinceEpoch(0))
+            .compareTo(a.startsAt ?? DateTime.fromMillisecondsSinceEpoch(0)));
+    case CompetitionSection.table:
+    case CompetitionSection.teams:
+    case CompetitionSection.statistics:
+      return const <MobileFixture>[];
+  }
+}
+
+class CompetitionHubScreen extends StatefulWidget {
+  const CompetitionHubScreen({
+    required this.sport,
+    required this.host,
+    required this.competition,
+    required this.api,
+    super.key,
+  });
+
+  final MobileSport sport;
+  final MobileHost host;
+  final MobileCompetition competition;
+  final MobileApiService api;
+
+  @override
+  State<CompetitionHubScreen> createState() => _CompetitionHubScreenState();
+}
+
+class _CompetitionHubScreenState extends State<CompetitionHubScreen> {
+  late Future<List<MobileSeason>> _seasons;
+  MobileSeason? _selectedSeason;
+
+  @override
+  void initState() {
+    super.initState();
+    _seasons = widget.api.getCompetitionSeasons(widget.competition.id);
+  }
+
+  void _selectSeason(List<MobileSeason> seasons, MobileSeason season) {
+    if (_selectedSeason?.id == season.id) return;
+    setState(() => _selectedSeason = season);
+  }
+
+  @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: Text(competition.name)),
-        body: MobileStateView<List<MobileFixture>>(
-          future: api.getCompetitionFixtures(competition.id),
-          emptyText: 'No fixtures available for this competition.',
-          builder: (context, fixtures) => ListView.separated(
-            padding: const EdgeInsets.all(18),
-            itemCount: fixtures.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
-            itemBuilder: (context, index) {
-              final fixture = fixtures[index];
-              return Card(
-                child: ListTile(
-                  title: Text(
-                      '${fixture.homeClub.name} vs ${fixture.awayClub.name}'),
-                  subtitle: Text(fixture.competition.name),
-                  trailing: Text(fixture.scoreLabel),
-                  onTap: () =>
-                      Navigator.of(context).push(MaterialPageRoute<void>(
-                    builder: (_) =>
-                        FixtureDetailScreen(fixtureId: fixture.id, api: api),
-                  )),
+        appBar: AppBar(title: Text(widget.competition.name)),
+        body: MobileStateView<List<MobileSeason>>(
+          future: _seasons,
+          emptyText: 'No seasons available for this competition.',
+          builder: (context, seasons) {
+            final selected = _selectedSeason ??
+                seasons.firstWhere(
+                  (season) => season.status.toLowerCase() == 'active',
+                  orElse: () => seasons.first,
+                );
+            if (_selectedSeason == null) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) setState(() => _selectedSeason = selected);
+              });
+            }
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 16, 18, 8),
+                  child: Column(
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              key: const ValueKey('competition-identity'),
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _CompetitionIdentityBlock(
+                                  logoUrl: widget.competition.logoUrl,
+                                  name: widget.competition.name,
+                                  alignment: CrossAxisAlignment.start,
+                                ),
+                                const SizedBox(height: 4),
+                                DropdownButton<MobileSeason>(
+                                  key: const ValueKey('competition-season'),
+                                  value: selected,
+                                  underline: const SizedBox.shrink(),
+                                  items: seasons
+                                      .map((season) =>
+                                          DropdownMenuItem<MobileSeason>(
+                                            value: season,
+                                            child: Text(season.name),
+                                          ))
+                                      .toList(),
+                                  onChanged: (season) {
+                                    if (season != null) {
+                                      _selectSeason(seasons, season);
+                                    }
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 18),
+                          Expanded(
+                            child: Align(
+                              alignment: Alignment.topRight,
+                              child: _CompetitionIdentityBlock(
+                                key: const ValueKey('host-identity'),
+                                logoUrl: widget.host.logoUrl,
+                                name: widget.host.name,
+                                alignment: CrossAxisAlignment.end,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-              );
-            },
+                Expanded(
+                  child: DefaultTabController(
+                    length: CompetitionSection.values.length,
+                    child: Column(
+                      children: [
+                        TabBar(
+                          isScrollable: true,
+                          tabs: const [
+                            Tab(text: 'Today'),
+                            Tab(text: 'Upcoming'),
+                            Tab(text: 'Results'),
+                            Tab(text: 'Table'),
+                            Tab(text: 'Teams'),
+                            Tab(text: 'Stats'),
+                          ],
+                        ),
+                        Expanded(
+                          child: SeasonCompetitionContent(
+                            season: selected,
+                            api: widget.api,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+}
+
+class _CompetitionIdentityBlock extends StatelessWidget {
+  const _CompetitionIdentityBlock({
+    required this.logoUrl,
+    required this.name,
+    required this.alignment,
+    super.key,
+  });
+
+  final String? logoUrl;
+  final String name;
+  final CrossAxisAlignment alignment;
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: alignment,
+        children: [
+          _CatalogLogo(url: logoUrl, label: name),
+          const SizedBox(height: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 150),
+            child: Text(
+              name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: alignment == CrossAxisAlignment.end
+                  ? TextAlign.right
+                  : TextAlign.left,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+          ),
+        ],
+      );
+}
+
+class SeasonCompetitionContent extends StatelessWidget {
+  const SeasonCompetitionContent(
+      {required this.season, required this.api, super.key});
+
+  final MobileSeason season;
+  final MobileApiService api;
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<List<dynamic>>(
+        future: Future.wait<dynamic>([
+          api.getSeasonFixtures(season.id),
+          api.getSeasonTeams(season.id),
+        ]),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return Center(
+              child: Text('Unable to load season data.\n${snapshot.error}',
+                  textAlign: TextAlign.center),
+            );
+          }
+          final fixtures = snapshot.data![0] as List<MobileFixture>;
+          final teams = snapshot.data![1] as List<MobileClub>;
+          return TabBarView(
+            children: [
+              _FixtureSection(
+                fixtures: competitionFixturesForSection(
+                    fixtures, CompetitionSection.today),
+                emptyText: 'No matches scheduled for today.',
+                api: api,
+              ),
+              _FixtureSection(
+                fixtures: competitionFixturesForSection(
+                    fixtures, CompetitionSection.upcoming),
+                emptyText: 'No upcoming matches available.',
+                api: api,
+              ),
+              _FixtureSection(
+                fixtures: competitionFixturesForSection(
+                    fixtures, CompetitionSection.results),
+                emptyText: 'No results available.',
+                api: api,
+              ),
+              const _UnavailableSection(
+                  message: 'Standings are not available for this competition.'),
+              _TeamsSection(teams: teams),
+              const _UnavailableSection(
+                  message: 'Statistics are not available yet.'),
+            ],
+          );
+        },
+      );
+}
+
+class _FixtureSection extends StatelessWidget {
+  const _FixtureSection(
+      {required this.fixtures, required this.emptyText, required this.api});
+
+  final List<MobileFixture> fixtures;
+  final String emptyText;
+  final MobileApiService api;
+
+  @override
+  Widget build(BuildContext context) {
+    if (fixtures.isEmpty) return Center(child: Text(emptyText));
+    return ListView.separated(
+      padding: const EdgeInsets.all(18),
+      itemCount: fixtures.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 12),
+      itemBuilder: (context, index) => _CompetitionFixtureCard(
+        fixture: fixtures[index],
+        api: api,
+      ),
+    );
+  }
+}
+
+class _CompetitionFixtureCard extends StatelessWidget {
+  const _CompetitionFixtureCard({required this.fixture, required this.api});
+
+  final MobileFixture fixture;
+  final MobileApiService api;
+
+  @override
+  Widget build(BuildContext context) => Card(
+        child: InkWell(
+          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+            builder: (_) =>
+                FixtureDetailScreen(fixtureId: fixture.id, api: api),
+          )),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  fixture.startsAt == null
+                      ? 'Date unavailable'
+                      : _formatCompetitionDate(fixture.startsAt!),
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(child: _TeamLabel(club: fixture.homeClub)),
+                    Text(fixture.scoreLabel,
+                        style: Theme.of(context).textTheme.titleMedium),
+                    Expanded(
+                        child: _TeamLabel(club: fixture.awayClub, right: true)),
+                  ],
+                ),
+                if (fixture.live || fixture.streams.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    fixture.live
+                        ? 'LIVE · Watch Live available'
+                        : 'Watch Live available',
+                    style:
+                        TextStyle(color: Theme.of(context).colorScheme.primary),
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
       );
+}
+
+class _TeamLabel extends StatelessWidget {
+  const _TeamLabel({required this.club, this.right = false});
+
+  final MobileClub club;
+  final bool right;
+
+  @override
+  Widget build(BuildContext context) => Row(
+        mainAxisAlignment:
+            right ? MainAxisAlignment.end : MainAxisAlignment.start,
+        children: [
+          if (!right) _CatalogLogo(url: club.logoUrl, label: club.name),
+          if (!right) const SizedBox(width: 8),
+          Flexible(
+            child: Text(club.name,
+                textAlign: right ? TextAlign.right : TextAlign.left),
+          ),
+          if (right) const SizedBox(width: 8),
+          if (right) _CatalogLogo(url: club.logoUrl, label: club.name),
+        ],
+      );
+}
+
+class _TeamsSection extends StatelessWidget {
+  const _TeamsSection({required this.teams});
+
+  final List<MobileClub> teams;
+
+  @override
+  Widget build(BuildContext context) {
+    if (teams.isEmpty) {
+      return const Center(child: Text('No teams available for this season.'));
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.all(18),
+      itemCount: teams.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemBuilder: (context, index) {
+        final team = teams[index];
+        return Card(
+          child: ListTile(
+            leading: _CatalogLogo(url: team.logoUrl, label: team.name),
+            title: Text(team.name),
+            subtitle: team.shortName == null ? null : Text(team.shortName!),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _UnavailableSection extends StatelessWidget {
+  const _UnavailableSection({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(message, textAlign: TextAlign.center),
+        ),
+      );
+}
+
+String _formatCompetitionDate(DateTime value) {
+  final local = value.toLocal();
+  final month = local.month.toString().padLeft(2, '0');
+  final day = local.day.toString().padLeft(2, '0');
+  final hour = local.hour.toString().padLeft(2, '0');
+  final minute = local.minute.toString().padLeft(2, '0');
+  return '${local.year}-$month-$day · $hour:$minute';
 }
 
 class _CatalogLogo extends StatelessWidget {
@@ -2385,12 +3013,8 @@ class _CatalogLogo extends StatelessWidget {
   final String label;
 
   @override
-  Widget build(BuildContext context) => CircleAvatar(
-        backgroundImage: url?.isNotEmpty == true ? NetworkImage(url!) : null,
-        child: url?.isNotEmpty == true
-            ? null
-            : Text(label.isEmpty ? '?' : label[0].toUpperCase()),
-      );
+  Widget build(BuildContext context) =>
+      WhiteLogoBox(url: url, label: label, size: 54);
 }
 
 class SportCountriesScreen extends StatelessWidget {
@@ -2714,6 +3338,85 @@ class CompetitionMatchesScreen extends StatelessWidget {
   }
 }
 
+List<LiveMatch> liveMatchesForHierarchy(
+  List<LiveMatch> matches, {
+  bool liveEnabled = true,
+  DateTime? now,
+}) {
+  final current = now ?? DateTime.now();
+  if (!liveEnabled) return const <LiveMatch>[];
+  return matches
+      .where((match) =>
+          match.hasPlayableStream &&
+          LiveEligibility.isLiveWindow(
+              match.startsAt, match.matchStatus, current))
+      .toList(growable: false);
+}
+
+String _liveSportName(LiveMatch match) =>
+    match.sportName?.trim().isNotEmpty == true
+        ? match.sportName!.trim()
+        : 'Live';
+
+String _liveHostName(LiveMatch match) =>
+    match.hostName?.trim().isNotEmpty == true
+        ? match.hostName!.trim()
+        : match.regionName?.trim().isNotEmpty == true
+            ? match.regionName!.trim()
+            : match.countryName?.trim().isNotEmpty == true
+                ? match.countryName!.trim()
+                : 'Global';
+
+String _liveCompetitionName(LiveMatch match) =>
+    match.competition.trim().isNotEmpty
+        ? match.competition.trim()
+        : 'Competition';
+
+Map<String, List<LiveMatch>> _sortedLiveGroups(
+    Iterable<LiveMatch> matches, String Function(LiveMatch) keyOf) {
+  final groups = <String, List<LiveMatch>>{};
+  for (final match in matches) {
+    groups.putIfAbsent(keyOf(match), () => <LiveMatch>[]).add(match);
+  }
+  final entries = groups.entries.toList()
+    ..sort((a, b) => a.key.toLowerCase().compareTo(b.key.toLowerCase()));
+  return Map<String, List<LiveMatch>>.fromEntries(entries);
+}
+
+Map<String, List<LiveMatch>> groupLiveMatchesBySport(List<LiveMatch> matches,
+        {bool liveEnabled = true, DateTime? now}) =>
+    _sortedLiveGroups(
+        liveMatchesForHierarchy(matches, liveEnabled: liveEnabled, now: now),
+        _liveSportName);
+
+Map<String, List<LiveMatch>> groupLiveMatchesByHost(
+        List<LiveMatch> matches, String sportName,
+        {bool liveEnabled = true, DateTime? now}) =>
+    _sortedLiveGroups(
+        liveMatchesForHierarchy(matches, liveEnabled: liveEnabled, now: now)
+            .where((match) => _liveSportName(match) == sportName),
+        _liveHostName);
+
+Map<String, List<LiveMatch>> groupLiveMatchesByCompetition(
+        List<LiveMatch> matches, String sportName, String hostName,
+        {bool liveEnabled = true, DateTime? now}) =>
+    _sortedLiveGroups(
+        liveMatchesForHierarchy(matches, liveEnabled: liveEnabled, now: now)
+            .where((match) =>
+                _liveSportName(match) == sportName &&
+                _liveHostName(match) == hostName),
+        _liveCompetitionName);
+
+List<LiveMatch> filterLiveMatches(List<LiveMatch> matches, String sportName,
+        String hostName, String competitionName,
+        {bool liveEnabled = true, DateTime? now}) =>
+    liveMatchesForHierarchy(matches, liveEnabled: liveEnabled, now: now)
+        .where((match) =>
+            _liveSportName(match) == sportName &&
+            _liveHostName(match) == hostName &&
+            _liveCompetitionName(match) == competitionName)
+        .toList(growable: false);
+
 class LiveTab extends StatelessWidget {
   const LiveTab({
     required this.connectionState,
@@ -2730,24 +3433,7 @@ class LiveTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // The server returns only fully published, active stream assignments. Keep
-    // the imminent fixtures visible as well, rather than making a valid stream
-    // disappear during the 30 minutes immediately before kickoff.
-    final liveMatches = matches
-        .where((match) {
-          final state = match.viewerState(connectionState);
-          return state == ViewerMatchState.live ||
-              state == ViewerMatchState.startingSoon;
-        })
-        .toList(growable: false);
-    final sports = <String, List<LiveMatch>>{};
-
-    for (final match in liveMatches) {
-      final sportName =
-          match.sportName?.isNotEmpty == true ? match.sportName! : 'Live';
-      sports.putIfAbsent(sportName, () => []).add(match);
-    }
-
+    final liveMatches = liveMatchesForHierarchy(matches);
     return WatermarkedPage(
       logoAsset: appLogoAsset,
       child: SafeArea(
@@ -2785,38 +3471,35 @@ class LiveTab extends StatelessWidget {
                   const SliverFillRemaining(
                     hasScrollBody: false,
                     child: Center(
-                      child:
-                          EmptyPanel(text: 'No matches have kicked off yet.'),
-                    ),
+                        child: EmptyPanel(text: 'No live matches available.')),
                   )
                 else
-                  ...sports.entries.expand((entry) => [
-                        SliverToBoxAdapter(
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(18, 18, 18, 8),
-                            child: Text(entry.key,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleLarge
-                                    ?.copyWith(fontWeight: FontWeight.w900)),
-                          ),
-                        ),
-                        SliverList.separated(
-                          itemCount: entry.value.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 10),
-                          itemBuilder: (context, index) {
-                            final match = entry.value[index];
-                            return Padding(
-                              padding: const EdgeInsets.fromLTRB(18, 0, 18, 0),
-                              child: LiveMatchCard(
-                                match: match,
-                                state: match.viewerState(connectionState),
-                              ),
-                            );
-                          },
-                        ),
-                      ]),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(18, 4, 18, 18),
+                    sliver: SliverList.separated(
+                      itemCount: groupLiveMatchesBySport(liveMatches).length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 12),
+                      itemBuilder: (context, index) {
+                        final entry = groupLiveMatchesBySport(liveMatches)
+                            .entries
+                            .elementAt(index);
+                        final match = entry.value.first;
+                        return LiveHeroCard(
+                          name: entry.key,
+                          logoUrl: match.sportLogoUrl,
+                          count: entry.value.length,
+                          onTap: () => Navigator.of(context)
+                              .push(MaterialPageRoute<void>(
+                            builder: (_) => LiveHostPage(
+                              sportName: entry.key,
+                              sportLogoUrl: match.sportLogoUrl,
+                              matches: liveMatches,
+                            ),
+                          )),
+                        );
+                      },
+                    ),
+                  ),
               ],
             ],
           ),
@@ -2824,6 +3507,258 @@ class LiveTab extends StatelessWidget {
       ),
     );
   }
+}
+
+class LiveHeroCard extends StatelessWidget {
+  const LiveHeroCard(
+      {required this.name,
+      required this.logoUrl,
+      required this.count,
+      required this.onTap,
+      super.key});
+  final String name;
+  final String? logoUrl;
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Card(
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(children: [
+              WhiteLogoBox(url: logoUrl, label: name, size: 96),
+              const SizedBox(width: 16),
+              Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    Text(name,
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleLarge
+                            ?.copyWith(fontWeight: FontWeight.w900)),
+                    const SizedBox(height: 6),
+                    Text('$count Live Match${count == 1 ? '' : 'es'}',
+                        style: const TextStyle(color: Color(0xFFAAB4AE))),
+                  ])),
+              const Icon(Icons.chevron_right_rounded, color: Color(0xFF20D37B)),
+            ]),
+          ),
+        ),
+      );
+}
+
+class WhiteLogoBox extends StatelessWidget {
+  const WhiteLogoBox(
+      {required this.url, required this.label, this.size = 56, super.key});
+  final String? url;
+  final String label;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: size,
+        height: size,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          shape: BoxShape.circle,
+        ),
+        alignment: Alignment.center,
+        padding: const EdgeInsets.all(6),
+        child: url?.isNotEmpty == true
+            ? Image.network(url!,
+                fit: BoxFit.contain, errorBuilder: (_, __, ___) => _fallback())
+            : _fallback(),
+      );
+
+  Widget _fallback() => Text(
+        label.isEmpty ? '?' : label.substring(0, 1).toUpperCase(),
+        style:
+            const TextStyle(color: Colors.black, fontWeight: FontWeight.w900),
+      );
+}
+
+class LiveHostPage extends StatelessWidget {
+  const LiveHostPage(
+      {required this.sportName,
+      required this.sportLogoUrl,
+      required this.matches,
+      super.key});
+  final String sportName;
+  final String? sportLogoUrl;
+  final List<LiveMatch> matches;
+
+  @override
+  Widget build(BuildContext context) {
+    final hosts = groupLiveMatchesByHost(matches, sportName);
+    return _LiveSelectionPage(
+      title: sportName,
+      entries: hosts,
+      logoFor: (entry) =>
+          entry.value.first.hostLogoUrl ?? entry.value.first.countryLogoUrl,
+      onTap: (entry) => Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => LiveCompetitionPage(
+            sportName: sportName, hostName: entry.key, matches: matches),
+      )),
+    );
+  }
+}
+
+class LiveCompetitionPage extends StatelessWidget {
+  const LiveCompetitionPage(
+      {required this.sportName,
+      required this.hostName,
+      required this.matches,
+      super.key});
+  final String sportName;
+  final String hostName;
+  final List<LiveMatch> matches;
+
+  @override
+  Widget build(BuildContext context) {
+    final competitions =
+        groupLiveMatchesByCompetition(matches, sportName, hostName);
+    return _LiveSelectionPage(
+      title: hostName,
+      entries: competitions,
+      logoFor: (entry) => entry.value.first.competitionLogoUrl,
+      onTap: (entry) => Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => LiveMatchesPage(
+          sportName: sportName,
+          hostName: hostName,
+          competitionName: entry.key,
+          matches: matches,
+        ),
+      )),
+    );
+  }
+}
+
+class _LiveSelectionPage extends StatelessWidget {
+  const _LiveSelectionPage(
+      {required this.title,
+      required this.entries,
+      required this.logoFor,
+      required this.onTap});
+  final String title;
+  final Map<String, List<LiveMatch>> entries;
+  final String? Function(MapEntry<String, List<LiveMatch>>) logoFor;
+  final void Function(MapEntry<String, List<LiveMatch>>) onTap;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: Text(title)),
+        body: ListView.separated(
+          padding: const EdgeInsets.all(18),
+          itemCount: entries.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 12),
+          itemBuilder: (context, index) {
+            final entry = entries.entries.elementAt(index);
+            return LiveHeroCard(
+                name: entry.key,
+                logoUrl: logoFor(entry),
+                count: entry.value.length,
+                onTap: () => onTap(entry));
+          },
+        ),
+      );
+}
+
+class LiveMatchesPage extends StatelessWidget {
+  const LiveMatchesPage(
+      {required this.sportName,
+      required this.hostName,
+      required this.competitionName,
+      required this.matches,
+      super.key});
+  final String sportName;
+  final String hostName;
+  final String competitionName;
+  final List<LiveMatch> matches;
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered =
+        filterLiveMatches(matches, sportName, hostName, competitionName)
+          ..sort((a, b) => a.startsAt == b.startsAt
+              ? a.id.compareTo(b.id)
+              : a.startsAt.compareTo(b.startsAt));
+    return Scaffold(
+      appBar: AppBar(title: Text(competitionName)),
+      body: ListView.separated(
+        padding: const EdgeInsets.all(18),
+        itemCount: filtered.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (context, index) {
+          final match = filtered[index];
+          return Card(
+            child: InkWell(
+              onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                builder: (_) => MatchDetailsScreen(
+                    match: match,
+                    state: match.viewerState(FeedConnectionState.online)),
+              )),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                child: Row(children: [
+                  Expanded(
+                      child: _LiveTeamRow(
+                          name: match.homeTeam,
+                          logoUrl: match.homeTeamLogoUrl)),
+                  const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 10),
+                      child: Text('VS',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w900,
+                              color: Color(0xFFAAB4AE)))),
+                  Expanded(
+                      child: _LiveTeamRow(
+                          name: match.awayTeam,
+                          logoUrl: match.awayTeamLogoUrl,
+                          trailing: true)),
+                ]),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _LiveTeamRow extends StatelessWidget {
+  const _LiveTeamRow(
+      {required this.name, required this.logoUrl, this.trailing = false});
+  final String name;
+  final String? logoUrl;
+  final bool trailing;
+
+  @override
+  Widget build(BuildContext context) => Row(
+        mainAxisAlignment:
+            trailing ? MainAxisAlignment.end : MainAxisAlignment.start,
+        children: [
+          if (trailing) ...[
+            Flexible(
+                child: Text(name,
+                    textAlign: TextAlign.right,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis)),
+            const SizedBox(width: 8),
+          ],
+          WhiteLogoBox(url: logoUrl, label: name, size: 54),
+          if (!trailing) ...[
+            const SizedBox(width: 8),
+            Flexible(
+                child:
+                    Text(name, maxLines: 2, overflow: TextOverflow.ellipsis)),
+          ],
+        ],
+      );
 }
 
 class HeaderHero extends StatelessWidget {
@@ -3251,7 +4186,7 @@ class TeamLogo extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: const Color(0xFF1A2228),
+        color: Colors.white,
         shape: BoxShape.circle,
         border: Border.all(color: const Color(0xFF2B343B)),
       ),
@@ -3281,7 +4216,7 @@ class TeamLogoFallback extends StatelessWidget {
       child: Text(
         initial,
         style: const TextStyle(
-          color: Colors.white,
+          color: Colors.black,
           fontWeight: FontWeight.w900,
         ),
       ),
@@ -3289,7 +4224,7 @@ class TeamLogoFallback extends StatelessWidget {
   }
 }
 
-class MatchDetailsScreen extends StatelessWidget {
+class MatchDetailsScreen extends StatefulWidget {
   const MatchDetailsScreen(
       {required this.match, required this.state, super.key});
 
@@ -3297,14 +4232,53 @@ class MatchDetailsScreen extends StatelessWidget {
   final ViewerMatchState state;
 
   @override
+  State<MatchDetailsScreen> createState() => _MatchDetailsScreenState();
+}
+
+class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
+  bool _liveEnabled = false;
+  bool _loadingFeatureFlag = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFeatureFlag();
+  }
+
+  Future<void> _loadFeatureFlag() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final config = await RemoteConfigService(
+        apiBaseUrl: apiBaseUrl,
+        prefs: prefs,
+      ).getNavigationConfig();
+      if (!mounted) return;
+      setState(() {
+        _liveEnabled = config.live;
+        _loadingFeatureFlag = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _liveEnabled = false;
+        _loadingFeatureFlag = false;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final canWatch = state == ViewerMatchState.live ||
-        state == ViewerMatchState.startingSoon;
+    final canWatch = !_loadingFeatureFlag &&
+        LiveEligibility.isWatchNowAllowed(
+          widget.match,
+          liveEnabled: _liveEnabled,
+        );
+    final state = widget.state;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Match Details')),
       body: WatermarkedPage(
-        logoUrl: match.competitionLogoUrl,
+        logoUrl: widget.match.competitionLogoUrl,
         child: SafeArea(
           child: ListView(
             padding: const EdgeInsets.all(18),
@@ -3313,44 +4287,45 @@ class MatchDetailsScreen extends StatelessWidget {
                 children: [
                   StatusPill(state: state, large: true),
                   const Spacer(),
-                  if (match.competitionLogoUrl?.isNotEmpty == true)
+                  if (widget.match.competitionLogoUrl?.isNotEmpty == true)
                     CircleAvatar(
                       radius: 24,
                       backgroundColor: Colors.transparent,
-                      backgroundImage: NetworkImage(match.competitionLogoUrl!),
+                      backgroundImage:
+                          NetworkImage(widget.match.competitionLogoUrl!),
                     ),
                 ],
               ),
               const SizedBox(height: 24),
-              MatchupPreview(match: match, large: true),
+              MatchupPreview(match: widget.match, large: true),
               const SizedBox(height: 24),
               const AdManagerBanner(),
               const SizedBox(height: 24),
-              if (match.sportName?.isNotEmpty == true)
+              if (widget.match.sportName?.isNotEmpty == true)
                 LogoDetailRow(
-                  logoUrl: match.sportLogoUrl,
+                  logoUrl: widget.match.sportLogoUrl,
                   label: 'Sport',
-                  value: match.sportName!,
+                  value: widget.match.sportName!,
                 ),
-              if (match.countryName?.isNotEmpty == true)
+              if (widget.match.countryName?.isNotEmpty == true)
                 LogoDetailRow(
-                  logoUrl: match.countryLogoUrl,
+                  logoUrl: widget.match.countryLogoUrl,
                   label: 'Country',
-                  value: match.countryName!,
+                  value: widget.match.countryName!,
                 ),
               LogoDetailRow(
-                logoUrl: match.competitionLogoUrl,
+                logoUrl: widget.match.competitionLogoUrl,
                 label: 'Competition',
-                value: match.competition,
+                value: widget.match.competition,
               ),
               DetailRow(
                   icon: Icons.schedule_rounded,
                   label: 'Kickoff',
-                  value: _formatKickoff(match.startsAt)),
+                  value: _formatKickoff(widget.match.startsAt)),
               DetailRow(
                   icon: Icons.live_tv_rounded,
                   label: 'Stream',
-                  value: _streamAvailabilityLabel(match, state)),
+                  value: _streamAvailabilityLabel(widget.match, state)),
               const SizedBox(height: 26),
               FilledButton.icon(
                 icon: const Icon(Icons.play_arrow_rounded),
@@ -3359,15 +4334,15 @@ class MatchDetailsScreen extends StatelessWidget {
                     ? () async {
                         unawaited(const MobileAnalyticsService().trackEvent(
                           eventType: 'playback_requested',
-                          matchId: match.id,
+                          matchId: widget.match.id,
                         ));
-                        await AdManager.showRewarded(matchId: match.id);
+                        await AdManager.showRewarded(matchId: widget.match.id);
                         if (!context.mounted) {
                           return;
                         }
                         Navigator.of(context).push(
                           MaterialPageRoute<void>(
-                            builder: (_) => PlaybackScreen(match: match),
+                            builder: (_) => PlaybackScreen(match: widget.match),
                           ),
                         );
                       }
@@ -3401,21 +4376,100 @@ class _PlaybackScreenState extends State<PlaybackScreen>
   Timer? _controlsTimer;
   bool _ownsController = false;
   bool _isFullscreenActive = false;
-  PlaybackScaleMode _scaleMode = PlaybackScaleMode.fit;
+  double _landscapeEmblemWidthRatio = 0.2;
   bool _hasStartedPlayback = false;
   bool _hasLoggedStreamError = false;
   bool _isBuffering = false;
+  bool _recoveryInProgress = false;
+  int _recoveryAttempt = 0;
+  int _controllerGeneration = 0;
   DateTime? _bufferStartedAt;
   Size? _lastVideoSize;
+  bool? _liveEnabled;
+  Timer? _liveConfigTimer;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _initializePlayer();
+    unawaited(_loadLiveFeatureFlag());
   }
 
+  Future<void> _loadLiveFeatureFlag() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final config = await RemoteConfigService(
+        apiBaseUrl: apiBaseUrl,
+        prefs: prefs,
+      ).getNavigationConfig();
+      if (!mounted) return;
+      if (!config.live) {
+        _blockPlayback();
+        return;
+      }
+      setState(() => _liveEnabled = true);
+      _initializePlayer();
+      _liveConfigTimer = Timer.periodic(
+        const Duration(seconds: 15),
+        (_) => unawaited(_refreshLiveAuthorization()),
+      );
+    } catch (_) {
+      if (mounted) {
+        _blockPlayback();
+      }
+    }
+  }
+
+  Future<void> _refreshLiveAuthorization({bool resumeIfAllowed = false}) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final config = await RemoteConfigService(
+        apiBaseUrl: apiBaseUrl,
+        prefs: prefs,
+      ).getNavigationConfig();
+      if (!mounted) return;
+      if (!config.live) {
+        _blockPlayback();
+        return;
+      }
+      setState(() => _liveEnabled = true);
+      if (resumeIfAllowed && _videoController?.value.isInitialized == true) {
+        await _videoController!.play();
+      }
+    } catch (_) {
+      if (mounted) {
+        _blockPlayback();
+      }
+    }
+  }
+
+  void _blockPlayback() {
+    _liveConfigTimer?.cancel();
+    _liveConfigTimer = null;
+    _liveEnabled = false;
+    final controller = _videoController;
+    _videoController = null;
+    _initializeVideoPlayerFuture = null;
+    _ownsController = false;
+    _hasStartedPlayback = false;
+    if (controller != null) {
+      controller.removeListener(_onVideoControllerValueChanged);
+      unawaited(controller.pause());
+      unawaited(controller.dispose());
+    }
+    WakelockPlus.disable();
+    if (mounted) {
+      setState(() => _state = PlaybackState.failure);
+    }
+  }
+
+  static const _maxRecoveryAttempts = 2;
+
   void _initializePlayer() {
+    if (_liveEnabled != true) {
+      return;
+    }
+
     if (widget.match.playbackUrl.isEmpty) {
       setState(() {
         _state = PlaybackState.failure;
@@ -3423,39 +4477,74 @@ class _PlaybackScreenState extends State<PlaybackScreen>
       return;
     }
 
+    final generation = ++_controllerGeneration;
     _ownsController = true;
-    _videoController = VideoPlayerController.networkUrl(
+    final controller = VideoPlayerController.networkUrl(
       Uri.parse(widget.match.playbackUrl),
+      httpHeaders: widget.match.playbackHeaders,
     );
+    _videoController = controller;
 
     _state = PlaybackState.connecting;
-    _initializeVideoPlayerFuture = _videoController!.initialize().then((_) {
-      if (!mounted) return;
-      _videoController!
+    _initializeVideoPlayerFuture = controller.initialize().then((_) {
+      if (!mounted ||
+          generation != _controllerGeneration ||
+          _liveEnabled != true ||
+          _videoController != controller) return;
+      controller
         ..setLooping(true)
         ..play();
-      _videoController!.addListener(_onVideoControllerValueChanged);
+      controller.addListener(_onVideoControllerValueChanged);
       WakelockPlus.enable();
       _hasStartedPlayback = true;
       _isBuffering = false;
       _bufferStartedAt = null;
       _hasLoggedStreamError = false;
+      _recoveryInProgress = false;
+      _recoveryAttempt = 0;
       _lastVideoSize = null;
       unawaited(_analyticsService.trackEvent(
         eventType: 'playback_start',
         matchId: widget.match.id,
         payload: {
+          'playbackMode': widget.match.playbackMode,
         },
       ));
       _scheduleHideControls();
       setState(() => _state = PlaybackState.playing);
     }).catchError((error) {
-      if (!mounted) return;
-      setState(() {
-        _videoError = error.toString();
-        _state = PlaybackState.failure;
-      });
+      if (!mounted || generation != _controllerGeneration) return;
+      unawaited(_recoverPlayback(error));
     });
+  }
+
+  Future<void> _recoverPlayback(Object error) async {
+    if (!mounted || _recoveryInProgress || _liveEnabled != true) return;
+    if (_recoveryAttempt >= _maxRecoveryAttempts) {
+      _videoError = error.toString();
+      setState(() => _state = PlaybackState.failure);
+      return;
+    }
+
+    _recoveryInProgress = true;
+    _recoveryAttempt += 1;
+    _videoError = error.toString();
+    setState(() => _state = PlaybackState.connecting);
+    await Future<void>.delayed(const Duration(seconds: 2));
+    if (!mounted || !_recoveryInProgress || _liveEnabled != true) return;
+
+    final failedController = _videoController;
+    _videoController = null;
+    _initializeVideoPlayerFuture = null;
+    _controllerGeneration += 1;
+    if (failedController != null) {
+      failedController.removeListener(_onVideoControllerValueChanged);
+      await failedController.pause();
+      await failedController.dispose();
+    }
+    if (!mounted || _liveEnabled != true) return;
+    _recoveryInProgress = false;
+    _initializePlayer();
   }
 
   void _scheduleHideControls() {
@@ -3522,12 +4611,7 @@ class _PlaybackScreenState extends State<PlaybackScreen>
       final errorDescription =
           value.errorDescription?.toString() ?? 'Unknown playback error';
       _logStreamError(errorDescription);
-      if (mounted) {
-        setState(() {
-          _videoError = errorDescription;
-          _state = PlaybackState.failure;
-        });
-      }
+      unawaited(_recoverPlayback(errorDescription));
       return;
     }
 
@@ -3623,7 +4707,7 @@ class _PlaybackScreenState extends State<PlaybackScreen>
             child: Container(
               height: 3,
               decoration: BoxDecoration(
-                color: const Color(0xFF6B6B6B),
+                color: Colors.red,
                 borderRadius: BorderRadius.circular(999),
               ),
               alignment: Alignment.centerRight,
@@ -3641,7 +4725,7 @@ class _PlaybackScreenState extends State<PlaybackScreen>
           const Text(
             'LIVE',
             style: TextStyle(
-              color: Colors.white,
+              color: Colors.red,
               fontSize: 12,
               fontWeight: FontWeight.w900,
               letterSpacing: 0,
@@ -3653,6 +4737,10 @@ class _PlaybackScreenState extends State<PlaybackScreen>
   }
 
   void _togglePlayPause() {
+    if (_liveEnabled != true) {
+      return;
+    }
+
     if (_videoController == null || !_videoController!.value.isInitialized) {
       return;
     }
@@ -3701,32 +4789,48 @@ class _PlaybackScreenState extends State<PlaybackScreen>
       builder: (context, constraints) {
         final maxWidth = constraints.maxWidth;
         final maxHeight = constraints.maxHeight;
-        var width = maxWidth;
-        var height = width / aspectRatio;
-        var scale = 1.0;
-
-        if (height > maxHeight) {
-          height = maxHeight;
-          width = height * aspectRatio;
-        }
-
-        if (_isFullscreenActive && _scaleMode != PlaybackScaleMode.fit) {
-          final coverWidth = maxWidth;
-          final coverHeight = coverWidth / aspectRatio;
-          final needsHeightCover = coverHeight < maxHeight;
-          height = needsHeightCover ? maxHeight : coverHeight;
-          width = needsHeightCover ? height * aspectRatio : coverWidth;
-          scale = _scaleMode == PlaybackScaleMode.zoom ? 1.16 : 1.0;
+        final landscape = maxWidth > maxHeight || _isFullscreenActive;
+        final videoHeight = maxWidth / aspectRatio;
+        final videoWidth =
+            videoHeight > maxHeight ? maxHeight * aspectRatio : maxWidth;
+        final width = landscape ? maxWidth : videoWidth;
+        final height = landscape ? maxHeight : videoWidth / aspectRatio;
+        final videoFit = landscape ? BoxFit.fill : BoxFit.contain;
+        if (landscape && width > 0) {
+          final measuredRatio =
+              PlayerBrandOverlay.landscapeBackingWidth / width;
+          if ((measuredRatio - _landscapeEmblemWidthRatio).abs() > 0.0001) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                setState(() => _landscapeEmblemWidthRatio = measuredRatio);
+              }
+            });
+          }
         }
 
         return Center(
           child: ClipRect(
-            child: Transform.scale(
-              scale: scale,
-              child: SizedBox(
-                width: width,
-                height: height,
-                child: VideoPlayer(_videoController!),
+            child: SizedBox(
+              key: ValueKey(
+                  '${landscape ? 'landscape-fill' : 'portrait-fit'}-${width.toInt()}-${height.toInt()}'),
+              width: width,
+              height: height,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  FittedBox(
+                    fit: videoFit,
+                    child: SizedBox(
+                      width: aspectRatio,
+                      height: 1,
+                      child: VideoPlayer(_videoController!),
+                    ),
+                  ),
+                  PlayerBrandOverlay(
+                    videoSize: Size(width, height),
+                    landscapeWidthRatio: _landscapeEmblemWidthRatio,
+                  ),
+                ],
               ),
             ),
           ),
@@ -3738,6 +4842,7 @@ class _PlaybackScreenState extends State<PlaybackScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _liveConfigTimer?.cancel();
     _controlsTimer?.cancel();
     if (_isFullscreenActive) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -3766,15 +4871,22 @@ class _PlaybackScreenState extends State<PlaybackScreen>
     if (state == AppLifecycleState.resumed &&
         _videoController!.value.isInitialized &&
         _state == PlaybackState.playing) {
-      _videoController!.play();
+      unawaited(_refreshLiveAuthorization(resumeIfAllowed: true));
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final playbackBlocked = _liveEnabled != true ||
+        !_isLiveFeedAllowed(
+          widget.match,
+          liveEnabled: _liveEnabled == true,
+        );
     Widget content;
 
-    if (_state == PlaybackState.failure || widget.match.playbackUrl.isEmpty) {
+    if (playbackBlocked ||
+        _state == PlaybackState.failure ||
+        widget.match.playbackUrl.isEmpty) {
       content = const PlaybackPanel(state: PlaybackState.failure);
     } else {
       content = FutureBuilder<void>(
@@ -3868,22 +4980,6 @@ class _PlaybackScreenState extends State<PlaybackScreen>
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      PopupMenuButton<PlaybackScaleMode>(
-                        icon:
-                            const Icon(Icons.aspect_ratio, color: Colors.white),
-                        color: const Color(0xFF101418),
-                        itemBuilder: (context) => PlaybackScaleMode.values
-                            .map(
-                              (mode) => PopupMenuItem<PlaybackScaleMode>(
-                                value: mode,
-                                child: Text(mode.name.toUpperCase()),
-                              ),
-                            )
-                            .toList(),
-                        onSelected: (mode) {
-                          setState(() => _scaleMode = mode);
-                        },
-                      ),
                     ],
                   ),
                 ),
@@ -3954,10 +5050,19 @@ class _PlaybackScreenState extends State<PlaybackScreen>
               child: content,
             ),
           ),
-          if (_controlsVisible) ...[
-            _buildPortraitSeekBar(),
-            const SizedBox(height: 12),
-          ],
+          if (_controlsVisible)
+            SafeArea(
+              top: false,
+              left: false,
+              right: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildPortraitSeekBar(),
+                  const SizedBox(height: 12),
+                ],
+              ),
+            ),
           if (_videoError != null || _state != PlaybackState.playing)
             Padding(
               padding: const EdgeInsets.all(18),

@@ -1,10 +1,11 @@
-export type CataloguePreviewMetadata = { title?: string; description?: string | null; guide: GuideProgramme[] };
+export type CataloguePreviewMetadata = { title?: string; description?: string | null; currentProgramme?: GuideProgramme | null; guide: GuideProgramme[] };
 import { useEffect, useMemo, useState } from "react";
 import type { Channel } from "@gito/shared";
 import React from "react";
 
 interface Props {
   providerId: string;
+  selectedChannel?: Channel | undefined;
   onSelectChannel?: (channel: Channel) => void;
   onSelectPlaybackEntity?: (entity: { entityType: "movie" | "episode"; entityId: string }) => void;
   contentType?: "live" | "movies" | "series" | "favorites";
@@ -20,7 +21,7 @@ type Episode = { id: string; seriesId: string; seasonId: string | null; title?: 
 type GuideProgramme = { title: string; description?: string | null; startAt?: string | null; endAt?: string | null; externalProgrammeId: string };
 const EMPTY_FAVORITE_CHANNEL_IDS: string[] = [];
 
-export function IptvCatalogueScreen({ providerId, onSelectChannel, onSelectPlaybackEntity, contentType: requestedContentType = "live", favoriteChannelIds = EMPTY_FAVORITE_CHANNEL_IDS, showContentTypeCounts = true, onPreviewMetadataChange }: Props) {
+export function IptvCatalogueScreen({ providerId, selectedChannel, onSelectChannel, onSelectPlaybackEntity, contentType: requestedContentType = "live", favoriteChannelIds = EMPTY_FAVORITE_CHANNEL_IDS, showContentTypeCounts = true, onPreviewMetadataChange }: Props) {
   const [liveCategories, setLiveCategories] = useState<Category[]>([]);
   const [movieCategories, setMovieCategories] = useState<Category[]>([]);
   const [seriesCategories, setSeriesCategories] = useState<Category[]>([]);
@@ -79,6 +80,7 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel, onSelectPlayb
       playbackUrl?: string | null;
       url?: string | null;
       logoUrl?: string | null;
+      metadataJson?: string | null;
       status?: string;
     },
     liveCategories: Category[] = []
@@ -105,6 +107,14 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel, onSelectPlayb
       ...(groupName ? { groupName } : {}),
       ...(item.logoUrl ? { logoUrl: item.logoUrl } : {})
     };
+    if (item.metadataJson) {
+      try {
+        const metadata = JSON.parse(item.metadataJson) as { playbackHeaders?: Channel["playbackHeaders"] };
+        if (metadata.playbackHeaders) mapped.playbackHeaders = metadata.playbackHeaders;
+      } catch {
+        // Ignore malformed optional playback metadata.
+      }
+    }
 
     if (externalRef) {
       mapped.externalRef = externalRef;
@@ -127,44 +137,37 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel, onSelectPlayb
       ? localCatalogueRuntime.channels.list(requestProviderId) : Promise.resolve([]);
     const liveCategoriesPromise = localCatalogueRuntime?.categories?.list
       ? localCatalogueRuntime.categories.list(requestProviderId, "live") : Promise.resolve([]);
-    const movieCategoriesPromise = localCatalogueRuntime?.categories?.list
-      ? localCatalogueRuntime.categories.list(requestProviderId, "movie") : Promise.resolve([]);
-    const seriesCategoriesPromise = localCatalogueRuntime?.categories?.list
-      ? localCatalogueRuntime.categories.list(requestProviderId, "series") : Promise.resolve([]);
-    const moviesPromise = localCatalogueRuntime?.movies?.list
-      ? localCatalogueRuntime.movies.list(requestProviderId) : Promise.resolve([]);
-    const seriesPromise = localCatalogueRuntime?.series?.list
-      ? localCatalogueRuntime.series.list(requestProviderId) : Promise.resolve([]);
-    void Promise.all([
-      liveCategoriesPromise, movieCategoriesPromise,
-      seriesCategoriesPromise,
-      liveChannelsPromise,
-      moviesPromise,
-      seriesPromise
-    ]).then(([live, movie, seriesGroup, liveItems, movieItems, seriesItems]) => {
+    void Promise.all([liveCategoriesPromise, liveChannelsPromise]).then(([live, liveItems]) => {
       if (cancelled || requestProviderId !== providerId) return;
       const mapCategory = (category: { id: string; name: string; externalReference?: string | null }) => ({ id: category.id, name: category.name, providerCategoryId: category.externalReference ?? null, externalReference: category.externalReference ?? null });
       const mappedLiveCategories = live.map(mapCategory);
-      const mappedMovieCategories = movie.map(mapCategory);
-      const mappedSeriesCategories = seriesGroup.map(mapCategory);
-      const movieCategoryNames = new Map(mappedMovieCategories.map((category: { id: string; name: string }) => [category.id, category.name]));
-      const seriesCategoryNames = new Map(mappedSeriesCategories.map((category: { id: string; name: string }) => [category.id, category.name]));
-      const mappedMovies = movieItems.map((item: any) => ({ id: item.id, providerId: item.providerAccountId, title: item.name, description: item.description, categoryId: item.categoryId, ...(movieCategoryNames.get(item.categoryId) ? { category: { name: movieCategoryNames.get(item.categoryId)! } } : {}), posterUrl: item.posterUrl }));
-      const mappedSeries = seriesItems.map((item: any) => ({ id: item.id, providerId: item.providerAccountId, title: item.name, description: item.description, categoryId: item.categoryId, ...(seriesCategoryNames.get(item.categoryId) ? { category: { name: seriesCategoryNames.get(item.categoryId)! } } : {}), posterUrl: item.posterUrl }));
       const mappedLiveChannels = liveItems.map((item: any) => mapLiveItem(item, mappedLiveCategories)).filter((channel: LiveItem) => requestedContentType !== "favorites" || favoriteChannelIds.includes(channel.id));
-      setCatalogueTotals({ live: mappedLiveChannels.length, movie: mappedMovies.length, series: mappedSeries.length });
+      setCatalogueTotals({ live: mappedLiveChannels.length, movie: 0, series: 0 });
       setLiveCategories(mappedLiveCategories);
-      setMovieCategories(mappedMovieCategories);
-      setSeriesCategories(mappedSeriesCategories);
       setLiveChannels(mappedLiveChannels);
-      setMovies(mappedMovies);
-      setSeries(mappedSeries);
+      setMovieCategories([]);
+      setSeriesCategories([]);
+      setMovies([]);
+      setSeries([]);
+      const activeChannel = selectedChannel && mappedLiveChannels.find((channel: LiveItem) => channel.id === selectedChannel.id);
+      if (activeChannel) {
+        setSelectedItem(activeChannel);
+        setSelectedGroupId(activeChannel.categoryId ?? activeChannel.groupName ?? "");
+      }
       setStatus("Catalogue loaded from the desktop provider catalogue.");
     }).catch((error) => {
       if (!cancelled && requestProviderId === providerId) setStatus(error instanceof Error ? error.message : "Unable to load IPTV catalogue data.");
     });
     return () => { cancelled = true; };
-  }, [favoriteChannelIds, providerId, requestedContentType]);
+  }, [favoriteChannelIds, providerId, requestedContentType, selectedChannel]);
+
+  useEffect(() => {
+    if (!selectedChannel || selectedChannel.providerId !== providerId) return;
+    const activeChannel = liveChannels.find((channel) => channel.id === selectedChannel.id);
+    if (!activeChannel) return;
+    setSelectedItem(activeChannel);
+    setSelectedGroupId(activeChannel.categoryId ?? activeChannel.groupName ?? "");
+  }, [liveChannels, providerId, selectedChannel]);
 
   useEffect(() => {
     setSelectedItem(undefined);
@@ -173,7 +176,7 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel, onSelectPlayb
     setSeasons([]);
     setEpisodes([]);
     setGuide([]);
-    setGuideStatus("Select a channel or movie.");
+    setGuideStatus("Select a live channel.");
     onPreviewMetadataChange?.({ guide: [] });
   }, [contentType, onPreviewMetadataChange, providerId]);
 
@@ -273,8 +276,9 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel, onSelectPlayb
       }
       const programmes = await desktopStorage.epgProgrammes.list(requestProviderId, channel.id);
       if (cancelled || requestProviderId !== providerId || requestItemId !== selectedItem.id) return;
+      const now = Date.now();
       const upcomingProgrammes = programmes
-        .filter((programme) => programme.status === "active" && Date.parse(programme.startAt) > Date.now())
+        .filter((programme) => programme.status === "active" && Date.parse(programme.endAt) > now)
         .map((programme) => ({
           title: programme.title,
           description: programme.description,
@@ -283,7 +287,8 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel, onSelectPlayb
           externalProgrammeId: programme.externalReference ?? programme.id
         }));
       setGuide(upcomingProgrammes);
-      onPreviewMetadataChange?.({ title: requestItemName, guide: upcomingProgrammes });
+      const currentProgramme = upcomingProgrammes.find((programme) => Date.parse(programme.startAt ?? "") <= now);
+      onPreviewMetadataChange?.({ title: requestItemName, currentProgramme: currentProgramme ?? null, guide: upcomingProgrammes });
       setGuideStatus(upcomingProgrammes.length ? "Upcoming programmes" : "No upcoming programmes.");
     }).catch(() => {
       if (!cancelled && requestProviderId === providerId && requestItemId === selectedItem.id) {
@@ -322,7 +327,12 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel, onSelectPlayb
     )
   })), [effectiveLiveCategories, liveChannels]);
   const movieGroups = useMemo(() => groups(movieCategories, movies), [movieCategories, movies]);
-  const seriesGroups = useMemo(() => groups(seriesCategories, series), [seriesCategories, series]);
+  const seriesGroups = useMemo(() => {
+    const categorizedGroups = groups(seriesCategories, series);
+    const uncategorizedItems = series.filter((item) => !item.categoryId && !item.category);
+    if (uncategorizedItems.length === 0) return categorizedGroups;
+    return [...categorizedGroups, { id: "series-uncategorized", name: "Uncategorized", items: uncategorizedItems }];
+  }, [seriesCategories, series]);
   const counts = catalogueTotals;
   const activeGroups: Array<Category & { items: Array<Item | LiveItem> }> = contentType === "live"
     ? liveGroups
@@ -360,7 +370,9 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel, onSelectPlayb
       setSelectedGroupItems(items);
       setGroupCounts((current) => ({ ...current, [categoryId]: items.length }));
     } else {
-      const items = series.filter((item) => item.categoryId === categoryId || item.category?.name === selectedGroup.name);
+      const items = series.filter((item) => categoryId === "series-uncategorized"
+        ? !item.categoryId && !item.category
+        : item.categoryId === categoryId || item.category?.name === selectedGroup.name);
       setSelectedGroupItems(items);
       setGroupCounts((current) => ({ ...current, [categoryId]: items.length }));
     }
@@ -370,13 +382,11 @@ export function IptvCatalogueScreen({ providerId, onSelectChannel, onSelectPlayb
   return (
     <section className="console-panel iptv-catalogue-panel">
       <div className="panel-heading">
-        <h3>IPTV Content Browser</h3>
+        <h3>Live Sports Channels</h3>
         <span>{status}</span>
       </div>
       {showContentTypeCounts ? <div className="iptv-catalogue-counts">
         <button type="button" className={contentType === "live" ? "active" : ""} onClick={() => setContentType("live")}><strong>{counts.live}</strong><span>Channels</span></button>
-        <button type="button" className={contentType === "movie" ? "active" : ""} onClick={() => setContentType("movie")}><strong>{counts.movie}</strong><span>Movies</span></button>
-        <button type="button" className={contentType === "series" ? "active" : ""} onClick={() => setContentType("series")}><strong>{counts.series}</strong><span>Series</span></button>
       </div> : null}
       <div className={`iptv-browser-grid iptv-browser-${contentType}`}>
         <aside className="iptv-browser-groups">

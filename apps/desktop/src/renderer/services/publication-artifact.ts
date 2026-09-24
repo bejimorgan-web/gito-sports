@@ -98,7 +98,7 @@ export function validateDirectPlaybackUrl(value: string): string {
 export function validateDirectXtreamPlaybackUrl(value: string): string {
   let url: URL;
   try { url = new URL(value); } catch { throw new Error("publication_playback_url_invalid"); }
-  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("publication_playback_url_unsafe");
+  if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("publication_playback_url_requires_http_or_https");
   if (url.username || url.password) throw new Error("publication_playback_url_rejects_userinfo");
 
   const pathSegments = url.pathname.split("/").filter(Boolean);
@@ -110,8 +110,31 @@ export function validateDirectXtreamPlaybackUrl(value: string): string {
   return url.toString();
 }
 
+export function resolvePublicationDeliveryUrl(value: string, providerType?: "xtream" | "m3u" | "manual" | string): { deliveryUrl: string; playbackMode: "DIRECT_SAFE" | "DIRECT_XTREAM" } {
+  if (!value) {
+    throw new Error("publication_playback_url_invalid");
+  }
+
+  const type = (providerType ?? "m3u").toLowerCase();
+
+  if (type === "xtream") {
+    const normalized = normalizeXtreamPublicationUrl(value);
+    return {
+      deliveryUrl: validateDirectXtreamPlaybackUrl(normalized),
+      playbackMode: "DIRECT_XTREAM"
+    };
+  }
+
+  const deliveryUrl = validateDirectPlaybackUrl(value);
+  return {
+    deliveryUrl,
+    playbackMode: "DIRECT_SAFE"
+  };
+}
+
 export function normalizeXtreamPublicationUrl(value: string): string {
-  return new URL(value).toString();
+  const url = new URL(value);
+  return url.toString();
 }
 
 export function buildLegacyStreamAssignment(input: {

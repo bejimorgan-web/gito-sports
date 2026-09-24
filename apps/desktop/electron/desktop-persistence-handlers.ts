@@ -120,8 +120,14 @@ export function createDesktopPersistenceHandlers(storage: DesktopSqliteStore, cr
       credentials.set(String(ref), String(username), String(password));
     },
     credentialsDelete: (ref: unknown) => credentials.delete(String(ref)),
-    validateProvider: (input: { providerId?: string; baseUrl?: string; type?: string; playlist?: string }) => iptvRuntime ? iptvRuntime.validateProvider(input) : Promise.reject(new Error("desktop_iptv_runtime_unavailable")),
-    validateProviderById: (providerId: unknown) => iptvRuntime ? iptvRuntime.validateProviderById(String(providerId)) : Promise.reject(new Error("desktop_iptv_runtime_unavailable")),
+    validateProvider: async (input: { providerId?: string; baseUrl?: string; type?: string; playlist?: string }) => {
+      if (!iptvRuntime) return Promise.reject(new Error("desktop_iptv_runtime_unavailable"));
+      return iptvRuntime.validateProvider(input);
+    },
+    validateProviderById: async (providerId: unknown) => {
+      if (!iptvRuntime) return Promise.reject(new Error("desktop_iptv_runtime_unavailable"));
+      return iptvRuntime.validateProviderById(String(providerId));
+    },
     startEpgSync: (providerId: unknown) => iptvRuntime ? iptvRuntime.startEpgSync(String(providerId)) : Promise.reject(new Error("desktop_iptv_runtime_unavailable")),
     startXtreamCatalogueSync: (providerId: unknown) => iptvRuntime ? iptvRuntime.startXtreamCatalogueSync(String(providerId)) : Promise.reject(new Error("desktop_iptv_runtime_unavailable")),
     startM3uCatalogueSync: (providerId: unknown) => iptvRuntime ? iptvRuntime.startM3uCatalogueSync(String(providerId)) : Promise.reject(new Error("desktop_iptv_runtime_unavailable")),

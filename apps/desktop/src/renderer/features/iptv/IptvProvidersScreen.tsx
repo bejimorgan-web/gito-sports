@@ -281,7 +281,7 @@ export function IptvProvidersScreen({
               const brandText = provider.type === "xtream" ? "XT" : provider.type === "m3u" ? "M3" : "IP";
 
               return (
-                <article key={provider.id} className="provider-card provider-hero-card" onDoubleClick={() => openDetails(provider)}>
+                <article key={provider.id} className="provider-card provider-hero-card" onClick={() => openDetails(provider)}>
                   <div className="provider-card-header">
                     <div className="provider-brand-lockup">
                       <div className="provider-brand-badge" aria-hidden="true">{brandText}</div>
@@ -305,7 +305,7 @@ export function IptvProvidersScreen({
                   </div>
 
                   <div className="provider-card-footer">
-                    <button type="button" className="delete-button danger-button" onClick={() => onDeleteProvider(provider.id)} disabled={Boolean(deletingProviderId)}>
+                    <button type="button" className="delete-button danger-button" onClick={(event) => { event.stopPropagation(); void onDeleteProvider(provider.id); }} disabled={Boolean(deletingProviderId)}>
                       {deletingProviderId === provider.id ? "Deleting…" : "Delete"}
                     </button>
 
@@ -313,7 +313,7 @@ export function IptvProvidersScreen({
                       type="button"
                       className={`toggle-button ${isActive ? "active" : "inactive"}`}
                       disabled={statusChangingProviderId === provider.id}
-                      onClick={() => onSetProviderStatus(provider.id, isActive ? "inactive" : "active")}
+                      onClick={(event) => { event.stopPropagation(); void onSetProviderStatus(provider.id, isActive ? "inactive" : "active"); }}
                     >
                       {statusChangingProviderId === provider.id ? (isActive ? "Deactivating…" : "Activating…") : (isActive ? "Deactivate" : "Activate")}
                     </button>

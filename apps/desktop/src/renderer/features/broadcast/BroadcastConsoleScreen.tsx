@@ -12,6 +12,7 @@ import type {
 } from "@gito/shared";
 
 import type { DesktopPublicationContext } from "../../services/publication-artifact";
+import type { CataloguePreviewMetadata } from "../iptv/IptvCatalogueScreen";
 
 import { StreamPreviewPanel } from "../preview/StreamPreviewPanel";
 import { IptvHeroCards } from "./IptvHeroCards";
@@ -43,7 +44,8 @@ interface BroadcastConsoleScreenProps {
   onOpenMatch?: (matchId?: string) => void;
   onCatalogueContextChange?: (context: { providerId: string; contentType: ContentTypeOption; favoriteChannelIds: string[] }) => void;
   catalogueBrowser?: ReactNode;
-    cataloguePreviewMetadata?: { title?: string; description?: string | null; guide: Array<{ title: string; description?: string | null; startAt?: string | null }> };
+    cataloguePreviewMetadata?: CataloguePreviewMetadata;
+  onCataloguePreviewMetadataChange?: (metadata: CataloguePreviewMetadata) => void;
   showLegacyChannelBrowser?: boolean;
 }
 
@@ -346,6 +348,7 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
   onCatalogueContextChange,
   catalogueBrowser,
     cataloguePreviewMetadata,
+  onCataloguePreviewMetadataChange,
   showLegacyChannelBrowser = true
 }: BroadcastConsoleScreenProps) {
   const [selectedSportId, setSelectedSportId] = useState<string>("");
@@ -448,6 +451,54 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
     setSelectedGroup("");
     setChannelSearchQuery("");
   }, [selectedProviderId, selectedContentType]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const reset = () => {
+      if (!cancelled) {
+        onCataloguePreviewMetadataChange?.({ ...(selectedChannel?.name ? { title: selectedChannel.name } : {}), guide: [] });
+      }
+    };
+    if (!selectedChannel || selectedChannel.contentType !== "live") {
+      reset();
+      return () => { cancelled = true; };
+    }
+
+    const storage = window.gito?.desktopStorage;
+    if (!storage?.epgChannels?.list || !storage.epgProgrammes?.list) {
+      reset();
+      return () => { cancelled = true; };
+    }
+
+    void storage.epgChannels.list(selectedChannel.providerId).then(async (epgChannels) => {
+      const epgChannel = epgChannels.find((item) =>
+        item.channelId === selectedChannel.id ||
+        item.externalReference === selectedChannel.externalRef ||
+        item.name === selectedChannel.name
+      );
+      if (!epgChannel) {
+        reset();
+        return;
+      }
+      const programmes = await storage.epgProgrammes.list(selectedChannel.providerId, epgChannel.id);
+      if (cancelled) return;
+      const now = Date.now();
+      const guide = programmes
+        .filter((programme) => programme.status === "active" && Date.parse(programme.endAt) > now)
+        .slice(0, 8)
+        .map((programme) => ({
+          title: programme.title,
+          description: programme.description,
+          startAt: programme.startAt,
+          endAt: programme.endAt,
+          externalProgrammeId: programme.externalReference ?? programme.id
+        }));
+      const currentProgramme = guide.find((programme) => Date.parse(programme.startAt ?? "") <= now) ?? null;
+      onCataloguePreviewMetadataChange?.({ title: selectedChannel.name, currentProgramme, guide });
+    }).catch(() => reset());
+
+    return () => { cancelled = true; };
+  }, [onCataloguePreviewMetadataChange, selectedChannel]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1054,7 +1105,9 @@ export const BroadcastConsoleScreen = memo(function BroadcastConsoleScreen({
                 <p>{previewChannelMetadata.description}</p>
 
                 <div className="preview-meta-section">
-                  <span className="preview-meta-label">Upcoming</span>
+                    <span className="preview-meta-label">Current programme</span>
+                    <strong>{cataloguePreviewMetadata?.currentProgramme?.title ?? "No programme currently airing"}</strong>
+                    <span className="preview-meta-label">Upcoming</span>
                   <ul>
                     {previewChannelMetadata.upcoming.map((item) => (
                       <li key={item}>{item}</li>

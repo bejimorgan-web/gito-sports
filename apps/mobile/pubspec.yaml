@@ -30,3 +30,4 @@ flutter:
   assets:
     - assets/app_logo.png
     - assets/splash_image.png
+    - assets/playback_emblem.png

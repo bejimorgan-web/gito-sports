@@ -52,6 +52,11 @@ class MobileApiService {
           .whereType<Map>()
           .map((item) => MobileSport.fromJson(Map<String, dynamic>.from(item)))
           .toList();
+
+    Future<String?> getPlaybackBrandingUrl() async {
+        final data = await _get('/mobile/branding') as Map?;
+        return data?['playbackBrandingUrl']?.toString();
+    }
   Future<List<MobileHost>> getHosts({required String sportId}) async =>
       ((await _get('/hosts?sportId=${Uri.encodeQueryComponent(sportId)}'))
               as List)

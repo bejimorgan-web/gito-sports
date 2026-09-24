@@ -56,6 +56,7 @@ const createTableSql = `
     delivery_reference TEXT NOT NULL,
     playback_mode TEXT NOT NULL DEFAULT 'DIRECT_SAFE',
     playback_url TEXT NOT NULL,
+    playback_headers TEXT,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (publication_id) REFERENCES publication_artifacts(publication_id) ON DELETE CASCADE
   );
@@ -74,6 +75,9 @@ function ensureSchema() {
   const deliveryColumns = database.prepare("PRAGMA table_info(publication_delivery)").all() as Array<{ name: string }>;
   if (!deliveryColumns.some((column) => column.name === "playback_mode")) {
     database.exec("ALTER TABLE publication_delivery ADD COLUMN playback_mode TEXT NOT NULL DEFAULT 'DIRECT_SAFE'");
+  }
+  if (!deliveryColumns.some((column) => column.name === "playback_headers")) {
+    database.exec("ALTER TABLE publication_delivery ADD COLUMN playback_headers TEXT");
   }
   const table = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'publication_artifacts'").get() as { sql?: string } | undefined;
   if (table?.sql && !table.sql.includes("'approved'")) {
@@ -200,10 +204,10 @@ export function getPublicationArtifactByMatchId(matchId: string) {
   return row ? mapPublication(row) : undefined;
 }
 
-export function getPublishedPublicationDeliveryByMatchId(matchId: string): { playbackUrl: string; deliveryReference: string; playbackMode: PublicationPlaybackMode } | undefined {
+export function getPublishedPublicationDeliveryByMatchId(matchId: string): { playbackUrl: string; deliveryReference: string; playbackMode: PublicationPlaybackMode; playbackHeaders?: Record<string, string> } | undefined {
   ensureSchema();
   const row = getDatabase().prepare(`
-    SELECT delivery.delivery_reference, delivery.playback_mode, delivery.playback_url
+    SELECT delivery.delivery_reference, delivery.playback_mode, delivery.playback_url, delivery.playback_headers
     FROM publication_artifacts artifact
     JOIN publication_delivery delivery ON delivery.publication_id = artifact.publication_id
     WHERE artifact.match_id = ?
@@ -211,10 +215,10 @@ export function getPublishedPublicationDeliveryByMatchId(matchId: string): { pla
       AND (artifact.expires_at IS NULL OR artifact.expires_at > ?)
     ORDER BY COALESCE(artifact.published_at, artifact.updated_at) DESC, artifact.publication_id DESC
     LIMIT 1
-  `).get(matchId, now()) as { delivery_reference: string; playback_mode: PublicationPlaybackMode; playback_url: string } | undefined;
+  `).get(matchId, now()) as { delivery_reference: string; playback_mode: PublicationPlaybackMode; playback_url: string; playback_headers?: string | null } | undefined;
 
   return row
-    ? { playbackUrl: row.playback_url, deliveryReference: row.delivery_reference, playbackMode: row.playback_mode }
+    ? { playbackUrl: row.playback_url, deliveryReference: row.delivery_reference, playbackMode: row.playback_mode, ...(row.playback_headers ? { playbackHeaders: JSON.parse(row.playback_headers) as Record<string, string> } : {}) }
     : undefined;
 }
 
@@ -250,7 +254,8 @@ export function listPublishedPublicationFeed() {
       sport.logo_url AS sport_logo_url,
       delivery.delivery_reference,
       delivery.playback_mode,
-      delivery.playback_url
+      delivery.playback_url,
+      delivery.playback_headers
     FROM publication_artifacts pa
     JOIN matches m ON m.id = pa.match_id
     LEFT JOIN teams home ON home.id = m.home_team_id
@@ -307,6 +312,7 @@ export function listPublishedPublicationFeed() {
     delivery_reference: string | null;
     playback_mode: PublicationPlaybackMode | null;
     playback_url: string | null;
+    playback_headers: string | null;
   }>;
 
   return rows.map((row) => ({
@@ -342,7 +348,8 @@ export function listPublishedPublicationFeed() {
     },
     ...(row.delivery_reference ? { deliveryReference: row.delivery_reference } : {}),
     ...(row.playback_mode ? { playbackMode: row.playback_mode } : {}),
-    ...(row.playback_url ? { playbackUrl: row.playback_url } : {})
+    ...(row.playback_url ? { playbackUrl: row.playback_url } : {}),
+    ...(row.playback_headers ? { playbackHeaders: JSON.parse(row.playback_headers) as Record<string, string> } : {})
   }));
 }
 
@@ -355,15 +362,16 @@ export function bindPublicationArtifact(publicationId: string, matchId: string) 
 }
 
 /** Stores the selected direct playback URL and its explicit delivery mode. */
-export function setPublicationDelivery(publicationId: string, input: { deliveryReference: string; playbackUrl: string; playbackMode?: PublicationPlaybackMode }) {
+export function setPublicationDelivery(publicationId: string, input: { deliveryReference: string; playbackUrl: string; playbackMode?: PublicationPlaybackMode; playbackHeaders?: Record<string, string> }) {
   ensureSchema();
   if (!getRow(publicationId)) return undefined;
   const deliveryReference = validatePublicationSourceReference(input.deliveryReference);
   const playbackMode = input.playbackMode ?? "DIRECT_SAFE";
   const playbackUrl = new URL(validatePublicationDeliveryUrl(input.playbackUrl, playbackMode));
-  getDatabase().prepare(`INSERT INTO publication_delivery (publication_id, delivery_reference, playback_mode, playback_url, updated_at)
-    VALUES (?, ?, ?, ?, ?) ON CONFLICT(publication_id) DO UPDATE SET delivery_reference = excluded.delivery_reference, playback_mode = excluded.playback_mode, playback_url = excluded.playback_url, updated_at = excluded.updated_at`)
-    .run(publicationId, deliveryReference, playbackMode, playbackUrl.toString(), now());
+  const playbackHeaders = input.playbackHeaders ? JSON.stringify(Object.fromEntries(Object.entries(input.playbackHeaders).filter(([key, value]) => ["user-agent", "referer"].includes(key) && typeof value === "string" && value.length > 0 && value.length <= 2048 && !/[\r\n]/.test(value)))) : null;
+  getDatabase().prepare(`INSERT INTO publication_delivery (publication_id, delivery_reference, playback_mode, playback_url, playback_headers, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(publication_id) DO UPDATE SET delivery_reference = excluded.delivery_reference, playback_mode = excluded.playback_mode, playback_url = excluded.playback_url, playback_headers = excluded.playback_headers, updated_at = excluded.updated_at`)
+    .run(publicationId, deliveryReference, playbackMode, playbackUrl.toString(), playbackHeaders, now());
   return getPublicationArtifactById(publicationId);
 }
 

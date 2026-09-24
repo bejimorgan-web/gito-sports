@@ -171,6 +171,7 @@ export function buildMobileLiveMatches(feed: any[], now = new Date()) {
         publication: entry.publication,
         playbackUrl: entry.playbackUrl,
         ...(entry.playbackMode ? { playbackMode: entry.playbackMode } : {}),
+        ...(entry.playbackHeaders ? { playbackHeaders: entry.playbackHeaders } : {}),
         deliveryReference: entry.deliveryReference,
         stream: { id: entry.publication.publicationId, status: playbackAvailable ? "active" : "unavailable", healthStatus },
         homeTeamName: entry.match.homeTeamName,

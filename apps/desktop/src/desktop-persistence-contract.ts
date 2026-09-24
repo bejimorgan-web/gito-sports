@@ -41,6 +41,7 @@ export interface DesktopChannel {
   groupName: string | null;
   logoUrl: string | null;
   playbackUrl: string;
+  metadataJson: string | null;
   contentType: DesktopContentType;
   status: DesktopRecordStatus;
   createdAt: string;
@@ -55,6 +56,7 @@ export interface DesktopChannelInput {
   groupName?: string | null;
   logoUrl?: string | null;
   playbackUrl: string;
+  metadataJson?: string | null;
   contentType?: DesktopContentType;
   status?: DesktopRecordStatus;
 }
@@ -88,6 +90,7 @@ export interface DesktopEpgChannel {
   channelId: string | null;
   name: string;
   logoUrl: string | null;
+  metadataJson: string | null;
   status: DesktopRecordStatus;
   createdAt: string;
   updatedAt: string;
@@ -100,6 +103,7 @@ export interface DesktopEpgChannelInput {
   channelId?: string | null;
   name: string;
   logoUrl?: string | null;
+  metadataJson?: string | null;
   status?: DesktopRecordStatus;
 }
 
@@ -140,6 +144,7 @@ export interface DesktopMovie {
   description: string | null;
   logoUrl: string | null;
   posterUrl: string | null;
+  metadataJson: string | null;
   contentType: DesktopContentType;
   status: DesktopRecordStatus;
   createdAt: string;
@@ -155,6 +160,7 @@ export interface DesktopMovieInput {
   description?: string | null;
   logoUrl?: string | null;
   posterUrl?: string | null;
+  metadataJson?: string | null;
   contentType?: DesktopContentType;
   status?: DesktopRecordStatus;
 }
@@ -168,6 +174,7 @@ export interface DesktopSeries {
   description: string | null;
   logoUrl: string | null;
   posterUrl: string | null;
+  metadataJson: string | null;
   status: DesktopRecordStatus;
   createdAt: string;
   updatedAt: string;
@@ -182,6 +189,7 @@ export interface DesktopSeriesInput {
   description?: string | null;
   logoUrl?: string | null;
   posterUrl?: string | null;
+  metadataJson?: string | null;
   status?: DesktopRecordStatus;
 }
 
@@ -192,6 +200,7 @@ export interface DesktopSeason {
   externalReference: string | null;
   seasonNumber: number | null;
   name: string | null;
+  metadataJson: string | null;
   status: DesktopRecordStatus;
   createdAt: string;
   updatedAt: string;
@@ -204,6 +213,7 @@ export interface DesktopSeasonInput {
   externalReference?: string | null;
   seasonNumber?: number | null;
   name?: string | null;
+  metadataJson?: string | null;
   status?: DesktopRecordStatus;
 }
 
@@ -217,6 +227,7 @@ export interface DesktopEpisode {
   name: string | null;
   description: string | null;
   logoUrl: string | null;
+  metadataJson: string | null;
   status: DesktopRecordStatus;
   createdAt: string;
   updatedAt: string;
@@ -232,6 +243,7 @@ export interface DesktopEpisodeInput {
   name?: string | null;
   description?: string | null;
   logoUrl?: string | null;
+  metadataJson?: string | null;
   status?: DesktopRecordStatus;
 }
 
@@ -405,6 +417,8 @@ export interface DesktopIptvRuntimeApi {
     baseUrl?: string;
     type?: DesktopProviderType | "manual";
     playlist?: string;
+    username?: string;
+    password?: string;
   }): Promise<ProviderConnectionTest>;
   validateProviderById(providerId: string): Promise<ProviderConnectionTest>;
   startEpgSync(providerId: string): Promise<IptvOperation>;

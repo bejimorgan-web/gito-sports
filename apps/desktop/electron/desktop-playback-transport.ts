@@ -67,7 +67,7 @@ async function jsonFetch(url: string, signal: AbortSignal) {
   if (!response.ok || response.status >= 300) throw new Error("playback_upstream_failed");
   try { return await response.json() as unknown; } catch { throw new Error("playback_upstream_failed"); }
 }
-const SAFE_MEDIA_TYPES = new Set(["video/mp4", "video/webm", "video/ogg", "video/mp2t", "video/iso.segment", "application/octet-stream"]);
+const SAFE_MEDIA_TYPES = new Set(["video/mp4", "video/webm", "video/ogg", "video/mp2t", "video/iso.segment", "video/x-matroska", "video/x-msvideo", "video/quicktime", "application/octet-stream"]);
 function safeContentType(value: string | null) {
   const normalized = (value ?? "").split(";", 1)[0]?.trim().toLowerCase() ?? "";
   if (!SAFE_MEDIA_TYPES.has(normalized)) throw new Error("playback_unsupported_format");
@@ -118,8 +118,10 @@ async function resolveSource(context: ProviderContext, signal: AbortSignal): Pro
     const records = arrayPayload(await jsonFetch(xtreamUrl(context.provider.baseUrl, context.credentials, "get_vod_streams"), signal), "streams");
     const matches = records.filter((record) => String(record.stream_id ?? "") === reference);
     if (matches.length !== 1) throw new Error("playback_identity_not_found");
-    const record = matches[0]; if (typeof record.stream_url !== "string" || !record.stream_url) throw new Error("playback_source_not_found");
-    return { destination: record.stream_url };
+    const record = matches[0];
+    if (typeof record.stream_url === "string" && /^https?:\/\//i.test(record.stream_url)) return { destination: record.stream_url };
+    const extension = String(record.container_extension ?? "mp4").replace(/^\./, "") || "mp4";
+    return { destination: `${xtreamBase(context.provider.baseUrl)}/movie/${encodeURIComponent(context.credentials.username)}/${encodeURIComponent(context.credentials.password)}/${encodeURIComponent(reference)}.${extension}` };
   }
   const episode = context.entity as DesktopEpisode; const series = context.entityType === "episode" ? null : null;
   if (!episode.seriesId) throw new Error("playback_identity_missing");
@@ -128,8 +130,11 @@ async function resolveSource(context: ProviderContext, signal: AbortSignal): Pro
   const detail = await jsonFetch(xtreamUrl(context.provider.baseUrl, context.credentials, "get_series_info", { series_id: localSeries.externalReference }), signal);
   const records = Object.values((detail && typeof detail === "object" ? (detail as Record<string, unknown>).episodes : {}) ?? {}).flatMap((value) => Array.isArray(value) ? value : []);
   const matches = records.filter((record: any) => String(record.id ?? record.episode_id ?? "") === reference);
-  if (matches.length !== 1 || typeof (matches[0] as any).movie_url !== "string") throw new Error("playback_source_not_found");
-  return { destination: (matches[0] as any).movie_url };
+  if (matches.length !== 1) throw new Error("playback_source_not_found");
+  const matchedEpisode = matches[0] as any;
+  if (typeof matchedEpisode.movie_url === "string" && /^https?:\/\//i.test(matchedEpisode.movie_url)) return { destination: matchedEpisode.movie_url };
+  const extension = String(matchedEpisode.container_extension ?? "mp4").replace(/^\./, "") || "mp4";
+  return { destination: `${xtreamBase(context.provider.baseUrl)}/series/${encodeURIComponent(context.credentials.username)}/${encodeURIComponent(context.credentials.password)}/${encodeURIComponent(reference)}.${extension}` };
 }
 
 export class DesktopPlaybackTransport {

@@ -11,7 +11,11 @@ import { getCachedScoreSnapshot } from "./score-service.js";
 import { getFixtureLineups } from "../repositories/fixture-lineups-repository.js";
 import { getPublishedPublicationDeliveryByMatchId } from "../repositories/publication-artifact-repository.js";
 
-export type MobileClub = Team & { sport: Pick<Sport, "id" | "name">; country: Pick<Country, "id" | "name"> | null };
+export type MobileClub = Team & {
+  sport: Pick<Sport, "id" | "name">;
+  country: Pick<Country, "id" | "name"> | null;
+  hostName?: string;
+};
 export type MobileSeason = Season & { competition?: Pick<Competition, "id" | "name" | "slug"> };
 export type MobileFixture = {
   id: string;
@@ -29,6 +33,7 @@ export type MobileFixture = {
   live: boolean;
   playbackUrl: string | null;
   playbackMode: "DIRECT_SAFE" | "DIRECT_XTREAM" | null;
+  playbackHeaders?: Record<string, string>;
   lineups: MobileLineup[];
 };
 export type MobileLineup = {
@@ -111,7 +116,8 @@ export function mapMobileFixture(fixture: any, suppliedSnapshot?: ScoreMatchSumm
     liveState,
     live: liveState?.isLive ?? fixture.status === "live",
     playbackUrl: delivery?.playbackUrl ?? null,
-    playbackMode: delivery?.playbackMode ?? null
+    playbackMode: delivery?.playbackMode ?? null,
+    ...(delivery?.playbackHeaders ? { playbackHeaders: delivery.playbackHeaders } : {})
     ,lineups: fixtureLineups(fixture.id)
   };
 }

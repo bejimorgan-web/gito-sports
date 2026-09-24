@@ -1,5 +1,38 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gito_live_sports_mobile/app_config.dart';
 import 'package:gito_live_sports_mobile/models/mobile_models.dart';
+
+void additionalModelContractTests() {
+  test('normalizes catalog media URLs against the configured API base', () {
+    expect(
+      normalizeMediaUrl('/uploads/logo.png', baseUrl: 'https://api.example.com'),
+      'https://api.example.com/uploads/logo.png',
+    );
+    expect(
+      normalizeMediaUrl('https://cdn.example.com/logo.png', baseUrl: 'https://api.example.com'),
+      'https://cdn.example.com/logo.png',
+    );
+    expect(
+      normalizeMediaUrl('http://cdn.example.com/logo.png', baseUrl: 'https://api.example.com'),
+      'http://cdn.example.com/logo.png',
+    );
+    expect(normalizeMediaUrl(null), isNull);
+    expect(normalizeMediaUrl(''), isNull);
+  });
+
+  test('catalog models preserve canonical logo fields', () {
+    final sport = MobileSport.fromJson({'id': 'sport-1', 'name': 'Soccer', 'logoUrl': '/uploads/sport.png'});
+    final host = MobileHost.fromJson({'id': 'host-1', 'sportId': 'sport-1', 'name': 'Germany', 'logoUrl': '/uploads/host.png'});
+    final competition = MobileCompetition.fromJson({'id': 'competition-1', 'name': 'Bundesliga', 'sportId': 'sport-1', 'hostId': 'host-1', 'logoUrl': '/uploads/competition.png'});
+    final club = MobileClub.fromJson({'id': 'team-1', 'name': 'Bayern Munich', 'sportId': 'sport-1', 'status': 'active', 'logoUrl': '/uploads/team.png'});
+
+    expect(sport.logoUrl, '$apiBaseUrl/uploads/sport.png');
+    expect(host.logoUrl, '$apiBaseUrl/uploads/host.png');
+    expect(competition.logoUrl, '$apiBaseUrl/uploads/competition.png');
+    expect(competition.hostId, 'host-1');
+    expect(club.logoUrl, '$apiBaseUrl/uploads/team.png');
+  });
+}
 
 defaultFixture() => <String, dynamic>{
       'id': 'match-1',
@@ -37,6 +70,7 @@ defaultFixture() => <String, dynamic>{
     };
 
 void main() {
+  additionalModelContractTests();
   test('parses stable club identity and nested catalog records', () {
     final club = MobileClub.fromJson({
       'id': 'team-bayern',

@@ -235,7 +235,10 @@ test("movies, series, seasons, episodes, and EPG remain local reads", async () =
       list: async () => [{ id: "movie-local", providerAccountId: "provider-local", externalReference: "movie-1", categoryId: "movie-category", name: "Local Movie", description: "Safe metadata", logoUrl: null, posterUrl: null, contentType: "movie", status: "active", createdAt: "", updatedAt: "" }]
     },
     series: {
-      list: async () => [{ id: "series-local", providerAccountId: "provider-local", externalReference: "series-1", categoryId: "series-category", name: "Local Series", description: null, logoUrl: null, posterUrl: null, status: "active", createdAt: "", updatedAt: "" }]
+      list: async () => [
+        { id: "series-local", providerAccountId: "provider-local", externalReference: "series-1", categoryId: "series-category", name: "Local Series", description: null, logoUrl: null, posterUrl: null, status: "active", createdAt: "", updatedAt: "" },
+        { id: "series-uncategorized", providerAccountId: "provider-local", externalReference: "series-2", categoryId: null, name: "Uncategorized Series", description: null, logoUrl: null, posterUrl: null, status: "active", createdAt: "", updatedAt: "" }
+      ]
     },
     seasons: {
       list: async () => [{ id: "season-local", providerAccountId: "provider-local", seriesId: "series-local", externalReference: "season-1", seasonNumber: 1, name: "Season 1", status: "active", createdAt: "", updatedAt: "" }]
@@ -277,6 +280,9 @@ test("movies, series, seasons, episodes, and EPG remain local reads", async () =
     await waitFor(() => assert.ok(screen.getByRole("button", { name: /Episode 1/ })));
     fireEvent.click(screen.getByRole("button", { name: /Episode 1/ }));
     assert.deepEqual(selected.at(-1), { entityType: "episode", entityId: "episode-local" });
+
+    fireEvent.click(screen.getByRole("button", { name: /Uncategorized/ }));
+    await waitFor(() => assert.ok(screen.getByText("Uncategorized Series")));
 
     cleanup();
 

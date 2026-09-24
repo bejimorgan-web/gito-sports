@@ -14,7 +14,7 @@ export interface ProviderConnectionTest {
 }
 
 export type IptvOperationType = "xtream_validation" | "m3u_validation" | "m3u_import" | "xtream_channel_sync" | "xtream_catalogue_sync" | "xtream_epg_sync" | "m3u_catalogue_sync";
-export type IptvOperationStatus = "queued" | "running" | "completed" | "failed" | "timeout" | "cancelled" | "interrupted";
+export type IptvOperationStatus = "queued" | "running" | "completed" | "partial" | "failed" | "timeout" | "cancelled" | "interrupted";
 
 export interface IptvOperation {
   id: string;

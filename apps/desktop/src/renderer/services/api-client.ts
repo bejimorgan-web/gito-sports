@@ -921,7 +921,7 @@ export const apiClient = {
       body: JSON.stringify({ matchId })
     });
   },
-  setPublicationDelivery(publicationId: string, input: { deliveryReference: string; playbackUrl: string; playbackMode?: "DIRECT_SAFE" | "DIRECT_XTREAM" }, accessToken: string) {
+  setPublicationDelivery(publicationId: string, input: { deliveryReference: string; playbackUrl: string; playbackMode?: "DIRECT_SAFE" | "DIRECT_XTREAM"; playbackHeaders?: Record<string, string> }, accessToken: string) {
     return request<PublicationArtifact>(`/publication-artifacts/${publicationId}/delivery`, {
       method: "POST", headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input)
     });
@@ -1035,6 +1035,16 @@ export const apiClient = {
     };
 
     return body;
+  },
+  async getPlaybackBranding() {
+    return request<{ playbackBrandingUrl: string | null }>('/mobile/branding');
+  },
+  async updatePlaybackBranding(playbackBrandingUrl: string | null, accessToken: string) {
+    return request<{ playbackBrandingUrl: string | null }>('/api/admin/mobile/branding', {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ playbackBrandingUrl })
+    });
   },
   async updateMobileFeatures(navigation: { liveScores?: boolean; sports?: boolean; live?: boolean }, accessToken: string) {
     const updates = Object.entries(navigation).filter((entry): entry is ["liveScores" | "sports" | "live", boolean] => typeof entry[1] === "boolean");
