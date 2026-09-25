@@ -196,6 +196,7 @@ CREATE TABLE IF NOT EXISTS players (
   expected_return_date TEXT,
   injury_notes TEXT,
   position TEXT,
+  secondary_positions_json TEXT NOT NULL DEFAULT '[]',
   jersey_number INTEGER,
   height_cm REAL,
   weight_kg REAL,

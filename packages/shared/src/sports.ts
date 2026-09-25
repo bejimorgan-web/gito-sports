@@ -113,7 +113,7 @@ export interface Team {
   updatedAt: string;
 }
 
-export type PlayerPosition = "goalkeeper" | "defender" | "midfielder" | "forward" | "winger" | "striker" | "fullback" | "center-back" | "attacking-midfielder" | "defensive-midfielder" | "custom";
+export type PlayerPosition = "goalkeeper" | "defender" | "midfielder" | "forward" | "winger" | "striker" | "fullback" | "center-back" | "attacking-midfielder" | "defensive-midfielder" | "custom" | "GK" | "LB" | "CB" | "RB" | "LM" | "CM" | "RM" | "ST" | "DM" | "LW" | "AM" | "RW" | "LWB" | "RWB";
 export type PlayerAvailability = "available" | "injured" | "suspended" | "unavailable";
 
 export interface Player {
@@ -129,6 +129,8 @@ export interface Player {
   expectedReturnDate?: string;
   injuryNotes?: string;
   position?: PlayerPosition;
+  primaryPosition?: PlayerPosition;
+  secondaryPositions: PlayerPosition[];
   jerseyNumber?: number;
   heightCm?: number;
   weightKg?: number;
@@ -150,6 +152,8 @@ export interface CreatePlayerRequest {
   expectedReturnDate?: string;
   injuryNotes?: string;
   position?: PlayerPosition;
+  primaryPosition?: PlayerPosition;
+  secondaryPositions?: PlayerPosition[];
   jerseyNumber?: number;
   heightCm?: number;
   weightKg?: number;
@@ -168,6 +172,8 @@ export interface UpdatePlayerRequest {
   expectedReturnDate?: string | null;
   injuryNotes?: string | null;
   position?: PlayerPosition;
+  primaryPosition?: PlayerPosition;
+  secondaryPositions?: PlayerPosition[];
   jerseyNumber?: number | null;
   heightCm?: number | null;
   weightKg?: number | null;

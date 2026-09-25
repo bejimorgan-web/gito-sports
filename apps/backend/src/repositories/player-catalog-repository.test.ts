@@ -89,6 +89,77 @@ test("player catalog foundation tracks players, squads, and reusable formations"
   assert.equal(updatedTemplate?.formation, "4-2-3-1");
 });
 
+test("existing single-position records remain valid and multi-position data normalizes safely", () => {
+  const database = getDatabase();
+  const timestamp = new Date().toISOString();
+  database.prepare("INSERT INTO players (id, team_id, country_id, first_name, last_name, display_name, availability_status, position, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'available', ?, 'active', ?, ?)").run("legacy-cm-player", "team-1", "country-1", "Test", "Player", "Test Player", "CM", timestamp, timestamp);
+  const legacyPlayer = getPlayerById("legacy-cm-player");
+  assert.equal(legacyPlayer?.position, "CM");
+  assert.equal(legacyPlayer?.primaryPosition, "CM");
+  assert.deepEqual(legacyPlayer?.secondaryPositions, []);
+
+  const player = createPlayer({
+    teamId: "team-1",
+    countryId: "country-1",
+    firstName: "Joao",
+    lastName: "Cancelo",
+    displayName: "Joao Cancelo",
+    position: "defender",
+    secondaryPositions: ["fullback", "winger"],
+  });
+
+  assert.equal(player.position, "defender");
+  assert.deepEqual(player.primaryPosition, "defender");
+  assert.deepEqual(player.secondaryPositions, ["fullback", "winger"]);
+
+  const duplicate = updatePlayer(player.id, {
+    primaryPosition: "defender",
+    secondaryPositions: ["defender", "winger", "winger", " "],
+  });
+
+  assert.equal(duplicate?.primaryPosition, "defender");
+  assert.deepEqual(duplicate?.secondaryPositions, ["winger"]);
+
+  const shortCodePlayer = createPlayer({
+    teamId: "team-1",
+    countryId: "country-1",
+    firstName: "Test",
+    lastName: "Shortcode",
+    displayName: "Test Shortcode",
+    primaryPosition: "RB",
+    secondaryPositions: ["RB", "LB", "RM", "RM"],
+  });
+
+  assert.equal(shortCodePlayer.position, "RB");
+  assert.equal(shortCodePlayer.primaryPosition, "RB");
+  assert.deepEqual(shortCodePlayer.secondaryPositions, ["LB", "RM"]);
+
+  const emptySecondaryPlayer = createPlayer({
+    teamId: "team-1",
+    countryId: "country-1",
+    firstName: "Test",
+    lastName: "Empty",
+    displayName: "Test Empty",
+    primaryPosition: "CM",
+    secondaryPositions: [],
+  });
+
+  assert.deepEqual(emptySecondaryPlayer.secondaryPositions, []);
+
+  const goalkeeper = createPlayer({
+    teamId: "team-1",
+    countryId: "country-1",
+    firstName: "Mike",
+    lastName: "Maignan",
+    displayName: "Mike Maignan",
+    primaryPosition: "goalkeeper",
+    secondaryPositions: [],
+  });
+
+  assert.equal(goalkeeper.position, "goalkeeper");
+  assert.deepEqual(goalkeeper.secondaryPositions, []);
+});
+
 test.after(() => {
   const database = getDatabase() as unknown as { close?: () => void };
   database.close?.();

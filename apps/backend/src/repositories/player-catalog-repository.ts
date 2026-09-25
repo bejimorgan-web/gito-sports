@@ -31,12 +31,44 @@ function ensureStandardFootballFormations(sportId: string) {
   for (const preset of standardFootballFormations) insert.run(`standard-${sportId}-${preset.name}`, sportId, preset.name, preset.name, preset.name, JSON.stringify(preset.positions), timestamp, timestamp);
 }
 
+function normalizePlayerPositionValue(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/\s+/g, "-");
+}
+
+function parseSecondaryPlayerPositions(jsonValue: unknown): string[] {
+  if (!jsonValue || typeof jsonValue !== "string") return [];
+  try {
+    const parsed = JSON.parse(jsonValue) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return [...new Set(parsed.filter((value): value is string => typeof value === "string").map((value) => normalizePlayerPositionValue(value)).filter((value): value is string => Boolean(value)))];
+  } catch {
+    return [];
+  }
+}
+
+function normalizePlayerPositionSelection(input: { position?: string | null; primaryPosition?: string | null; secondaryPositions?: unknown }): { position: string | null; primaryPosition: string | null; secondaryPositions: string[] } {
+  const primary = normalizePlayerPositionValue(input.primaryPosition ?? input.position);
+  const rawSecondaryPositions = Array.isArray(input.secondaryPositions) ? input.secondaryPositions : [];
+  const distinctSecondaryPositions = [...new Set(rawSecondaryPositions.map((value) => normalizePlayerPositionValue(value)).filter((value): value is string => Boolean(value)))];
+  return {
+    position: primary,
+    primaryPosition: primary,
+    secondaryPositions: distinctSecondaryPositions.filter((value) => value !== primary),
+  };
+}
+
 function player(row: any): Player {
+  const primaryPosition = normalizePlayerPositionValue(row.position) ?? normalizePlayerPositionValue(row.primary_position) ?? undefined;
+  const secondaryPositions = parseSecondaryPlayerPositions(row.secondary_positions_json);
   return { id: row.id, teamId: row.team_id, firstName: row.first_name, lastName: row.last_name, displayName: row.display_name,
     status: row.status, availability: row.availability_status ?? "available", createdAt: row.created_at, updatedAt: row.updated_at,
     ...(row.photo_url ? { photoUrl: row.photo_url } : {}),
     ...(row.injury_type ? { injuryType: row.injury_type } : {}), ...(row.expected_return_date ? { expectedReturnDate: row.expected_return_date } : {}), ...(row.injury_notes ? { injuryNotes: row.injury_notes } : {}),
-    ...(row.country_id ? { countryId: row.country_id } : {}), ...(row.position ? { position: row.position } : {}),
+    ...(row.country_id ? { countryId: row.country_id } : {}), ...(primaryPosition ? { position: primaryPosition as any, primaryPosition: primaryPosition as any } : {}),
+    secondaryPositions: secondaryPositions as any,
     ...(row.jersey_number !== null ? { jerseyNumber: row.jersey_number } : {}), ...(row.height_cm !== null ? { heightCm: row.height_cm } : {}),
     ...(row.weight_kg !== null ? { weightKg: row.weight_kg } : {}), ...(row.birth_date ? { birthDate: row.birth_date } : {}) };
 }
@@ -57,14 +89,20 @@ export function createPlayer(input: CreatePlayerRequest): Player {
   const database = getDatabase(); required(database.prepare("SELECT id FROM teams WHERE id = ?").get(input.teamId), "team_not_found");
   const playerId = id(); const timestamp = now(); const firstName = input.firstName.trim(); const lastName = input.lastName.trim();
   if (!firstName || !lastName) throw new Error("player_name_required");
-  database.prepare("INSERT INTO players (id, team_id, country_id, first_name, last_name, display_name, photo_url, availability_status, injury_type, expected_return_date, injury_notes, position, jersey_number, height_cm, weight_kg, birth_date, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)").run(playerId, input.teamId, input.countryId ?? null, firstName, lastName, input.displayName?.trim() || `${firstName} ${lastName}`, input.photoUrl ?? null, input.availability ?? "available", input.injuryType ?? null, input.expectedReturnDate ?? null, input.injuryNotes ?? null, input.position ?? null, input.jerseyNumber ?? null, input.heightCm ?? null, input.weightKg ?? null, input.birthDate ?? null, timestamp, timestamp);
+  const { position, secondaryPositions } = normalizePlayerPositionSelection(input as any);
+  database.prepare("INSERT INTO players (id, team_id, country_id, first_name, last_name, display_name, photo_url, availability_status, injury_type, expected_return_date, injury_notes, position, secondary_positions_json, jersey_number, height_cm, weight_kg, birth_date, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)").run(playerId, input.teamId, input.countryId ?? null, firstName, lastName, input.displayName?.trim() || `${firstName} ${lastName}`, input.photoUrl ?? null, input.availability ?? "available", input.injuryType ?? null, input.expectedReturnDate ?? null, input.injuryNotes ?? null, position ?? null, JSON.stringify(secondaryPositions), input.jerseyNumber ?? null, input.heightCm ?? null, input.weightKg ?? null, input.birthDate ?? null, timestamp, timestamp);
   return getPlayerById(playerId)!;
 }
 export function updatePlayer(playerId: string, input: UpdatePlayerRequest): Player | undefined {
   const database = getDatabase(); const existing = database.prepare("SELECT * FROM players WHERE id = ?").get(playerId) as any; if (!existing) return undefined;
   if (input.teamId) required(database.prepare("SELECT id FROM teams WHERE id = ?").get(input.teamId), "team_not_found");
   const firstName = (input.firstName ?? existing.first_name).trim(); const lastName = (input.lastName ?? existing.last_name).trim();
-  database.prepare("UPDATE players SET team_id = ?, country_id = ?, first_name = ?, last_name = ?, display_name = ?, photo_url = ?, availability_status = ?, injury_type = ?, expected_return_date = ?, injury_notes = ?, position = ?, jersey_number = ?, height_cm = ?, weight_kg = ?, birth_date = ?, status = ?, updated_at = ? WHERE id = ?").run(input.teamId ?? existing.team_id, input.countryId !== undefined ? input.countryId : existing.country_id, firstName, lastName, input.displayName?.trim() || `${firstName} ${lastName}`, input.photoUrl !== undefined ? input.photoUrl : existing.photo_url, input.availability ?? existing.availability_status ?? "available", input.injuryType !== undefined ? input.injuryType : existing.injury_type, input.expectedReturnDate !== undefined ? input.expectedReturnDate : existing.expected_return_date, input.injuryNotes !== undefined ? input.injuryNotes : existing.injury_notes, input.position ?? existing.position, input.jerseyNumber !== undefined ? input.jerseyNumber : existing.jersey_number, input.heightCm !== undefined ? input.heightCm : existing.height_cm, input.weightKg !== undefined ? input.weightKg : existing.weight_kg, input.birthDate !== undefined ? input.birthDate : existing.birth_date, input.status ?? existing.status, now(), playerId);
+  const nextPrimary = normalizePlayerPositionValue(input.primaryPosition ?? input.position ?? existing.position);
+  const nextSecondary = normalizePlayerPositionSelection({
+    primaryPosition: nextPrimary,
+    secondaryPositions: input.secondaryPositions !== undefined ? input.secondaryPositions : parseSecondaryPlayerPositions(existing.secondary_positions_json),
+  });
+  database.prepare("UPDATE players SET team_id = ?, country_id = ?, first_name = ?, last_name = ?, display_name = ?, photo_url = ?, availability_status = ?, injury_type = ?, expected_return_date = ?, injury_notes = ?, position = ?, secondary_positions_json = ?, jersey_number = ?, height_cm = ?, weight_kg = ?, birth_date = ?, status = ?, updated_at = ? WHERE id = ?").run(input.teamId ?? existing.team_id, input.countryId !== undefined ? input.countryId : existing.country_id, firstName, lastName, input.displayName?.trim() || `${firstName} ${lastName}`, input.photoUrl !== undefined ? input.photoUrl : existing.photo_url, input.availability ?? existing.availability_status ?? "available", input.injuryType !== undefined ? input.injuryType : existing.injury_type, input.expectedReturnDate !== undefined ? input.expectedReturnDate : existing.expected_return_date, input.injuryNotes !== undefined ? input.injuryNotes : existing.injury_notes, nextPrimary ?? existing.position, JSON.stringify(nextSecondary.secondaryPositions), input.jerseyNumber !== undefined ? input.jerseyNumber : existing.jersey_number, input.heightCm !== undefined ? input.heightCm : existing.height_cm, input.weightKg !== undefined ? input.weightKg : existing.weight_kg, input.birthDate !== undefined ? input.birthDate : existing.birth_date, input.status ?? existing.status, now(), playerId);
   return getPlayerById(playerId);
 }
 
