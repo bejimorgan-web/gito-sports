@@ -64,6 +64,16 @@ export type {
   StreamLifecycleStatus
 } from "./lifecycle.js";
 
+export type {
+  PlayerImportMode,
+  PlayerImportRowStatus,
+  PlayerImportRow,
+  PlayerImportRequest,
+  PlayerImportPreviewRow,
+  PlayerImportPreview,
+  PlayerImportResult
+} from "./player-import.js";
+
 export { canTransitionMatch, canTransitionStream } from "./lifecycle.js";
 
 // NEWS

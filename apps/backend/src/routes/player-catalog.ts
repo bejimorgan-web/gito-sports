@@ -1,6 +1,12 @@
 import { Router } from "express";
 import { protectedRoute } from "../middleware/protected.js";
 import {
+  executePlayerImport,
+  PlayerImportValidationError,
+  previewPlayerImport,
+} from "../services/player-import-service.js";
+import type { PlayerImportRequest } from "@gito/shared";
+import {
   createFormationTemplate,
   createPlayer,
   createSeasonSquad,
@@ -21,6 +27,35 @@ import {
 } from "../repositories/player-catalog-repository.js";
 
 export const playerCatalogRouter = Router();
+
+function importRequest(value: unknown): PlayerImportRequest {
+  if (!value || typeof value !== "object") throw new Error("player_import_request_invalid");
+  const request = value as Partial<PlayerImportRequest>;
+  if (!["create", "update", "create-update"].includes(String(request.mode))) throw new Error("player_import_mode_invalid");
+  if (!Array.isArray(request.rows) || request.rows.length === 0) throw new Error("player_import_rows_required");
+  if (request.rows.length > 10_000) throw new Error("player_import_row_limit_exceeded");
+  return request as PlayerImportRequest;
+}
+
+playerCatalogRouter.post("/player-import/preview", protectedRoute, (request, response) => {
+  try {
+    response.json({ data: previewPlayerImport(importRequest(request.body)) });
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+playerCatalogRouter.post("/player-import/execute", protectedRoute, (request, response) => {
+  try {
+    response.status(201).json({ data: executePlayerImport(importRequest(request.body)) });
+  } catch (error) {
+    if (error instanceof PlayerImportValidationError) {
+      response.status(400).json({ error: error.message, preview: error.preview });
+      return;
+    }
+    response.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
 
 playerCatalogRouter.get("/players", (request, response) => {
   response.json({ data: listPlayers({
