@@ -837,18 +837,6 @@ export const apiClient = {
     if (opts?.offset !== undefined) params.set('offset', String(opts.offset));
     return request<any[]>(`/fixtures${params.toString() ? `?${params.toString()}` : ''}`);
   },
-  listFixtureStreams(fixtureId: string) {
-    return request<any[]>(`/fixtures/${fixtureId}/streams`);
-  },
-  assignFixtureStream(fixtureId: string, channelId: string, accessToken: string) {
-    return request<any>(`/fixtures/${fixtureId}/streams`, { method: "POST", headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ channelId }) });
-  },
-  updateFixtureStream(fixtureId: string, streamId: string, input: { channelId?: string; protocol?: string }, accessToken: string) {
-    return request<any>(`/fixtures/${fixtureId}/streams/${streamId}`, { method: "PUT", headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
-  },
-  deleteFixtureStream(fixtureId: string, streamId: string, accessToken: string) {
-    return request<void>(`/fixtures/${fixtureId}/streams/${streamId}`, { method: "DELETE", headers: { authorization: `Bearer ${accessToken}` } });
-  },
   getFixture(fixtureId: string) {
     return request<any>(`/fixtures/${fixtureId}`);
   },

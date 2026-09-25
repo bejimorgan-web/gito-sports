@@ -81,7 +81,8 @@ export function getCanonicalFixtureById(fixtureId: string) {
            m.created_at, m.updated_at,
            h.name AS home_team_name, h.short_name AS home_team_short_name, h.logo_url AS home_team_logo_url, h.host_id AS home_team_host_id,
            a.name AS away_team_name, a.short_name AS away_team_short_name, a.logo_url AS away_team_logo_url, a.host_id AS away_team_host_id,
-           c.name AS competition_name, c.slug AS competition_slug, c.logo_url AS competition_logo_url,
+           c.name AS competition_name, c.slug AS competition_slug, c.logo_url AS competition_logo_url, c.host_id AS competition_host_id,
+           host.name AS host_name,
            s.name AS season_name,
            sp.id AS sport_id, sp.name AS sport_name,
            co.id AS country_id, co.name AS country_name
@@ -89,6 +90,7 @@ export function getCanonicalFixtureById(fixtureId: string) {
     JOIN teams h ON h.id = m.home_team_id
     JOIN teams a ON a.id = m.away_team_id
     JOIN competitions c ON c.id = m.competition_id
+    LEFT JOIN hosts host ON host.id = c.host_id
     LEFT JOIN seasons s ON s.id = m.season_id
     LEFT JOIN sports sp ON sp.id = c.sport_id
     LEFT JOIN countries co ON co.id = c.country_id
@@ -111,6 +113,7 @@ export function getCanonicalFixtureById(fixtureId: string) {
     updatedAt: row.updated_at,
     sport: row.sport_id ? { id: row.sport_id, name: row.sport_name } : null,
     country: row.country_id ? { id: row.country_id, name: row.country_name } : null,
+    host: row.competition_host_id ? { id: row.competition_host_id, name: row.host_name } : null,
     competition: { id: row.competition_id, name: row.competition_name, slug: row.competition_slug, logoUrl: row.competition_logo_url ?? null },
     season: row.season_id ? { id: row.season_id, name: row.season_name } : null,
     homeTeam: { id: row.home_team_id, name: row.home_team_name, shortName: row.home_team_short_name, logoUrl: row.home_team_logo_url, ...(row.home_team_host_id ? { hostId: row.home_team_host_id } : {}) },
@@ -143,6 +146,11 @@ export function deleteCanonicalFixture(fixtureId: string): boolean {
   if (!database.prepare("SELECT id FROM matches WHERE id = ?").get(fixtureId)) return false;
   database.exec("BEGIN TRANSACTION;");
   try {
+    database.prepare("UPDATE news_articles SET match_id = NULL WHERE match_id = ?").run(fixtureId);
+    database.prepare("DELETE FROM scheduling_match_links WHERE match_id = ?").run(fixtureId);
+    database.prepare("DELETE FROM publication_artifacts WHERE match_id = ?").run(fixtureId);
+    database.prepare("DELETE FROM lineup_player_assignments WHERE lineup_id IN (SELECT id FROM fixture_lineups WHERE fixture_id = ?)").run(fixtureId);
+    database.prepare("DELETE FROM fixture_lineups WHERE fixture_id = ?").run(fixtureId);
     const result = database.prepare("DELETE FROM matches WHERE id = ?").run(fixtureId);
     database.exec("COMMIT;");
     return result.changes > 0;

@@ -33,11 +33,6 @@ export function FixtureWorkspaceScreen({
   const [showCreatePanel, setShowCreatePanel] = useState(true);
   const [status, setStatus] = useState("Ready");
   const [selectedFixture, setSelectedFixture] = useState<any | null>(null);
-  const [fixtureStreams, setFixtureStreams] = useState<any[]>([]);
-  const [providers, setProviders] = useState<any[]>([]);
-  const [channels, setChannels] = useState<any[]>([]);
-  const [providerId, setProviderId] = useState("");
-  const [channelId, setChannelId] = useState("");
   const [deletingFixtureId, setDeletingFixtureId] = useState<string | null>(null);
   const [editingFixtureId, setEditingFixtureId] = useState<string | null>(null);
   const [editingKickoff, setEditingKickoff] = useState("");
@@ -75,17 +70,9 @@ export function FixtureWorkspaceScreen({
     void Promise.all([
       apiClient.listSports(),
       apiClient.listCompetitions(),
-      window.gito?.desktopStorage?.providerAccounts.list(),
-      window.gito?.desktopStorage?.channels.list(),
-    ]).then(([sportData, competitionData, providerData, channelData]) => {
+    ]).then(([sportData, competitionData]) => {
       setSports(sportData);
       setCompetitions(competitionData);
-      setProviders((providerData ?? []).map((provider) => ({ id: provider.id, name: provider.name })));
-      setChannels((channelData ?? []).map((channel) => ({
-        id: channel.id,
-        providerId: channel.providerAccountId,
-        name: channel.name,
-      })));
     }).catch((error) => {
       setStatus(error instanceof Error ? error.message : "Unable to load sports and competitions.");
     });
@@ -327,37 +314,11 @@ export function FixtureWorkspaceScreen({
 
   const openFixture = async (fixtureId: string) => {
     try {
-      const [fixture, streams] = await Promise.all([
-        apiClient.getFixture(fixtureId),
-        apiClient.listFixtureStreams(fixtureId),
-      ]);
+      const fixture = await apiClient.getFixture(fixtureId);
       setSelectedFixture(fixture);
-      setFixtureStreams(streams);
       setStatus("Fixture details loaded.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Unable to load fixture details.");
-    }
-  };
-
-  const assignStream = async () => {
-    if (!selectedFixture || !channelId) return;
-    try {
-      await apiClient.assignFixtureStream(selectedFixture.id, channelId, accessToken);
-      await openFixture(selectedFixture.id);
-      setStatus("Canonical stream assigned.");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Stream assignment failed.");
-    }
-  };
-
-  const removeStream = async (streamId: string) => {
-    if (!selectedFixture) return;
-    try {
-      await apiClient.deleteFixtureStream(selectedFixture.id, streamId, accessToken);
-      await openFixture(selectedFixture.id);
-      setStatus("Stream removed.");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Stream removal failed.");
     }
   };
 
@@ -658,42 +619,6 @@ export function FixtureWorkspaceScreen({
         </div>
       </section>
 
-      {editingFixtureId ? (
-        <section className="console-panel">
-          <div className="panel-heading">
-            <h3>Edit fixture</h3>
-            <span className="status-pill">{status}</span>
-          </div>
-          <div className="form-grid two-column">
-            <label>
-              Kickoff
-              <input type="datetime-local" value={editingKickoff} onChange={(event) => setEditingKickoff(event.target.value)} />
-            </label>
-            <label>
-              Venue
-              <input value={editingVenue} onChange={(event) => setEditingVenue(event.target.value)} />
-            </label>
-            <label>
-              Status
-              <select value={editingStatus} onChange={(event) => setEditingStatus(event.target.value)}>
-                <option value="scheduled">Scheduled</option>
-                <option value="postponed">Postponed</option>
-                <option value="cancelled">Cancelled</option>
-                <option value="completed">Completed</option>
-              </select>
-            </label>
-          </div>
-          <div className="button-row">
-            <button type="button" onClick={() => void saveFixture()} disabled={isSavingFixture}>
-              {isSavingFixture ? "Saving..." : "Save fixture"}
-            </button>
-            <button type="button" className="secondary" onClick={() => setEditingFixtureId(null)} disabled={isSavingFixture}>
-              Close
-            </button>
-          </div>
-        </section>
-      ) : null}
-
       {selectedFixture ? (
         <div style={{ position: "fixed", inset: 0, background: "rgba(8, 12, 20, 0.7)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={() => setSelectedFixture(null)}>
           <section className="console-panel" style={{ width: "min(960px, 100%)", maxHeight: "85vh", overflowY: "auto" }} onClick={(event) => event.stopPropagation()}>
@@ -708,7 +633,7 @@ export function FixtureWorkspaceScreen({
               </article>
               <article className="dashboard-metric-card">
                 <span>Host</span>
-                <strong>{selectedHost?.name ?? "—"}</strong>
+                <strong>{selectedFixture.host?.name ?? selectedHost?.name ?? "—"}</strong>
               </article>
               <article className="dashboard-metric-card">
                 <span>Competition</span>
@@ -722,65 +647,50 @@ export function FixtureWorkspaceScreen({
             <p><strong>Fixture:</strong> {selectedFixture.homeTeam?.name ?? selectedFixture.homeTeamId} vs {selectedFixture.awayTeam?.name ?? selectedFixture.awayTeamId}</p>
             <p><strong>Kickoff:</strong> {formatFixtureDateTime(selectedFixture.startsAt)}</p>
             <p><strong>Venue:</strong> {selectedFixture.venueName ?? "TBD"}</p>
+            <p><strong>External match:</strong> {selectedFixture.externalProvider && selectedFixture.externalMatchId ? `${selectedFixture.externalProvider} / ${selectedFixture.externalMatchId}` : "None"}</p>
             <div className="button-row">
               <button type="button" onClick={() => beginEditFixture(selectedFixture)}>Edit</button>
               <button type="button" className="secondary" onClick={() => void deleteFixture(selectedFixture.id)} disabled={deletingFixtureId === selectedFixture.id}>Delete</button>
               <button type="button" className="secondary" onClick={() => setSelectedFixture(null)}>Close</button>
             </div>
 
-            <FootballLineupEditor fixture={selectedFixture} accessToken={accessToken} />
-
-            <section className="console-panel" style={{ marginTop: 16 }}>
-              <div className="panel-heading">
-                <h3>Fixture streams</h3>
-                <span>{selectedFixture.homeTeam?.name} vs {selectedFixture.awayTeam?.name}</span>
-              </div>
-              <div className="form-grid two-column">
-                <label>
-                  Provider
-                  <select
-                    value={providerId}
-                    onChange={(event) => {
-                      setProviderId(event.target.value);
-                      setChannelId("");
-                    }}
-                  >
-                    <option value="">Select provider</option>
-                    {providers.map((provider) => (
-                      <option key={provider.id} value={provider.id}>{provider.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Channel
-                  <select
-                    value={channelId}
-                    onChange={(event) => setChannelId(event.target.value)}
-                  >
-                    <option value="">Select channel</option>
-                    {channels
-                      .filter((channel) => !providerId || channel.providerId === providerId)
-                      .map((channel) => (
-                        <option key={channel.id} value={channel.id}>{channel.name}</option>
-                      ))}
-                  </select>
-                </label>
-              </div>
-              <button type="button" onClick={() => void assignStream()} disabled={!channelId}>Assign channel</button>
-              {fixtureStreams.length === 0 ? (
-                <p>No streams assigned.</p>
-              ) : (
-                <div className="entity-list">
-                  {fixtureStreams.map((stream) => (
-                    <div className="entity-list-item" key={stream.id}>
-                      <strong>{stream.channelId}</strong>
-                      <span>{stream.status} · {stream.healthStatus}</span>
-                      <button type="button" className="secondary" onClick={() => void removeStream(stream.id)}>Remove</button>
-                    </div>
-                  ))}
+            {editingFixtureId === selectedFixture.id ? (
+              <section className="console-panel" style={{ marginTop: 16 }}>
+                <div className="panel-heading">
+                  <h3>Edit fixture</h3>
+                  <span className="status-pill">{status}</span>
                 </div>
-              )}
-            </section>
+                <div className="form-grid two-column">
+                  <label>
+                    Kickoff
+                    <input type="datetime-local" value={editingKickoff} onChange={(event) => setEditingKickoff(event.target.value)} />
+                  </label>
+                  <label>
+                    Venue
+                    <input value={editingVenue} onChange={(event) => setEditingVenue(event.target.value)} />
+                  </label>
+                  <label>
+                    Status
+                    <select value={editingStatus} onChange={(event) => setEditingStatus(event.target.value)}>
+                      <option value="scheduled">Scheduled</option>
+                      <option value="postponed">Postponed</option>
+                      <option value="cancelled">Cancelled</option>
+                      <option value="completed">Completed</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="button-row">
+                  <button type="button" onClick={() => void saveFixture()} disabled={isSavingFixture}>
+                    {isSavingFixture ? "Saving..." : "Save fixture"}
+                  </button>
+                  <button type="button" className="secondary" onClick={() => setEditingFixtureId(null)} disabled={isSavingFixture}>
+                    Cancel edit
+                  </button>
+                </div>
+              </section>
+            ) : null}
+
+            <FootballLineupEditor fixture={selectedFixture} accessToken={accessToken} />
           </section>
         </div>
       ) : null}
