@@ -271,7 +271,7 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
               <tr>
                 <th>Name</th>
                 <th>Sport</th>
-                <th>Country</th>
+                  <th>Home Stadium</th>
                 <th>Host</th>
                 <th>Type</th>
                 <th>Logo</th>
@@ -283,7 +283,7 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
                 <tr key={team.id}>
                   <td>{team.name}</td>
                   <td>{sports.find((sport) => sport.id === team.sportId)?.name ?? team.sportId}</td>
-                  <td>{countries.find((country) => country.id === team.countryId)?.name ?? team.countryId ?? "—"}</td>
+                  <td>{team.homeStadiumName ?? "—"}</td>
                   <td>{hosts.find((host) => host.id === team.hostId)?.name ?? team.hostId ?? "—"}</td>
                   <td>{team.type}</td>
                   <td>{team.logoUrl ? <img src={resolveAssetUrl(team.logoUrl)} alt={team.name} className="small-logo" /> : "—"}</td>

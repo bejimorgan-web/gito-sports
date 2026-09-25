@@ -187,8 +187,8 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
   const [teamShortName, setTeamShortName] = useState("");
   const [teamSlug, setTeamSlug] = useState("");
   const [teamLogoUrl, setTeamLogoUrl] = useState("");
+  const [teamHomeStadiumName, setTeamHomeStadiumName] = useState("");
   const [teamType, setTeamType] = useState<TeamType>("club");
-  const [teamCountryId, setTeamCountryId] = useState("");
   const [teamHostId, setTeamHostId] = useState("");
   const [editingTeamId, setEditingTeamId] = useState<string | null>(null);
 
@@ -350,8 +350,8 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
     setTeamName("");
     setTeamShortName("");
     setTeamLogoUrl("");
+    setTeamHomeStadiumName("");
     setTeamType("club");
-    setTeamCountryId("");
     setTeamHostId("");
     setEditingTeamId(null);
   };
@@ -468,8 +468,8 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
       setTeamShortName(team.shortName ?? "");
       setTeamSlug(team.slug ?? "");
       setTeamLogoUrl(team.logoUrl ?? "");
+      setTeamHomeStadiumName(team.homeStadiumName ?? "");
       setTeamType(team.type);
-      setTeamCountryId(team.countryId ?? "");
       setTeamHostId(team.hostId ?? "");
       setEditingTeamId(team.id);
       openModal({ kind: "team", action: "edit" });
@@ -478,8 +478,8 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
       setTeamShortName("");
       setTeamSlug("");
       setTeamLogoUrl("");
+      setTeamHomeStadiumName("");
       setTeamType("club");
-      setTeamCountryId("");
       setTeamHostId("");
       setEditingTeamId(null);
       openModal({ kind: "team", action: "create" });
@@ -700,7 +700,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
       ...(teamHostId ? { hostId: teamHostId } : {}),
       ...(teamShortName ? { shortName: teamShortName } : {}),
       ...(teamSlug ? { slug: teamSlug } : {}),
-      ...(teamCountryId ? { countryId: teamCountryId } : {}),
+      ...(teamHomeStadiumName.trim() ? { homeStadiumName: teamHomeStadiumName.trim() } : {}),
       ...(teamLogoUrl ? { logoUrl: teamLogoUrl } : {})
     };
     setIsSaving(true);
@@ -879,7 +879,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
             </article>
           </section>
 
-          <SeasonMembershipPanel teams={teams} competitions={competitions} selectedSportId={selectedSport.id} accessToken={accessToken} />
+          <SeasonMembershipPanel teams={teams} hosts={sportHosts} competitions={competitions} selectedSportId={selectedSport.id} accessToken={accessToken} />
 
           <section className="console-panel sports-workspace-grid">
             <article className="entity-panel">
@@ -916,7 +916,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                       key={team.id}
                       name={team.name}
                       logoUrl={team.logoUrl}
-                      detail={team.shortName ?? "Club"}
+                      detail={team.homeStadiumName ? `${team.shortName ?? "Club"} · ${team.homeStadiumName}` : team.shortName ?? "Club"}
                       size="team"
                       onDoubleClick={() => openTeamEditor(team)}
                       onDelete={() => queueDelete("team", team.id, team.name)}
@@ -1139,15 +1139,12 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                   ))}
                 </select>
               </label>
-              <label>
-                Country
-                <select value={teamCountryId} onChange={(event) => setTeamCountryId(event.target.value)}>
-                  <option value="">None</option>
-                  {supportedCountries.map((country) => (
-                    <option key={country.id} value={country.id}>{country.name}</option>
-                  ))}
-                </select>
-              </label>
+              {teamType === "club" ? (
+                <label>
+                  Home Stadium Name
+                  <input value={teamHomeStadiumName} onChange={(event) => setTeamHomeStadiumName(event.target.value)} placeholder="Enter home stadium name" />
+                </label>
+              ) : null}
               <label>
                 Participating Host
                 <select value={teamHostId} onChange={(event) => setTeamHostId(event.target.value)}>

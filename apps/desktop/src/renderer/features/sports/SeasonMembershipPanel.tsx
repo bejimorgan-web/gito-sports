@@ -1,16 +1,18 @@
 import { useEffect, useState } from "react";
-import type { Competition, Season, Team } from "@gito/shared";
+import type { Competition, Host, Season, Team } from "@gito/shared";
 import { apiClient } from "../../services/api-client";
 
 interface Props {
   teams: Team[];
+  hosts: Host[];
   competitions: Competition[];
   selectedSportId: string;
   accessToken: string;
 }
 
-export function SeasonMembershipPanel({ teams, competitions, selectedSportId, accessToken }: Props) {
+export function SeasonMembershipPanel({ teams, hosts, competitions, selectedSportId, accessToken }: Props) {
   const clubs = teams.filter((team) => team.sportId === selectedSportId && team.type === "club");
+  const [hostId, setHostId] = useState("all");
   const sportCompetitions = competitions.filter((competition) => competition.sportId === selectedSportId && competition.participantType === "clubs");
   const [teamId, setTeamId] = useState("");
   const [competitionId, setCompetitionId] = useState("");
@@ -26,12 +28,15 @@ export function SeasonMembershipPanel({ teams, competitions, selectedSportId, ac
 
   useEffect(() => {
     setTeamId("");
+    setHostId("all");
     setCompetitionId("");
     setSeasonId("");
     setSeasons([]);
     setMembers([]);
     setCompetitionMembers([]);
   }, [selectedSportId]);
+
+  const visibleClubs = hostId === "all" ? clubs : clubs.filter((team) => team.hostId === hostId);
 
   useEffect(() => {
     if (!competitionId) {
@@ -110,10 +115,17 @@ export function SeasonMembershipPanel({ teams, competitions, selectedSportId, ac
       </div>
       <div className="form-grid two-column">
         <label>
+          Host
+          <select value={hostId} onChange={(event) => { setHostId(event.target.value); setTeamId(""); }}>
+            <option value="all">All hosts</option>
+            {hosts.map((host) => <option key={host.id} value={host.id}>{host.name}</option>)}
+          </select>
+        </label>
+        <label>
           Club
           <select value={teamId} onChange={(event) => setTeamId(event.target.value)}>
             <option value="">Select club</option>
-            {clubs.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+            {visibleClubs.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
           </select>
         </label>
         <label>

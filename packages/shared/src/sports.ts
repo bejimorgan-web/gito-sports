@@ -102,6 +102,7 @@ export interface Team {
   sportId: EntityId;
   hostId?: EntityId;
   countryId?: EntityId;
+  homeStadiumName?: string;
   name: string;
   shortName?: string;
   slug?: string;
@@ -369,6 +370,7 @@ export interface CreateTeamRequest {
   sportId: EntityId;
   hostId?: EntityId;
   countryId?: EntityId;
+  homeStadiumName?: string;
   name: string;
   shortName?: string;
   slug?: string;
@@ -380,6 +382,7 @@ export interface UpdateTeamRequest {
   sportId?: EntityId;
   hostId?: EntityId;
   countryId?: EntityId;
+  homeStadiumName?: string;
   name?: string;
   shortName?: string;
   slug?: string;

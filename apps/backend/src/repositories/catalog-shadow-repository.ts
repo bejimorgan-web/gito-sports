@@ -18,6 +18,7 @@ interface TeamRow {
   sport_id: string;
   host_id: string | null;
   country_id: string | null;
+  home_stadium_name: string | null;
   name: string;
   short_name: string | null;
   slug: string | null;
@@ -71,6 +72,7 @@ function mapTeam(row: TeamRow): Team {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     ...(row.country_id ? { countryId: row.country_id } : {}),
+    ...(row.home_stadium_name ? { homeStadiumName: row.home_stadium_name } : {}),
     ...(row.short_name ? { shortName: row.short_name } : {}),
     ...(row.slug ? { slug: row.slug } : {}),
     ...(row.logo_url ? { logoUrl: row.logo_url } : {})
@@ -155,7 +157,7 @@ export function listCatalogTeams(filters?: { sportId?: string; hostId?: string; 
 
   const rows = getDatabase()
     .prepare(
-      `SELECT t.id, t.sport_id, t.host_id, t.country_id, t.name, t.short_name, t.slug, t.type, t.logo_url, t.status, t.created_at, t.updated_at
+      `SELECT t.id, t.sport_id, t.host_id, t.country_id, t.home_stadium_name, t.name, t.short_name, t.slug, t.type, t.logo_url, t.status, t.created_at, t.updated_at
        FROM entity_catalog_mapping m
        JOIN teams t ON t.id = m.legacy_id
        ${where}
@@ -169,7 +171,7 @@ export function listCatalogTeams(filters?: { sportId?: string; hostId?: string; 
 export function getCatalogTeamById(teamId: string): Team | undefined {
   const row = getDatabase()
     .prepare(
-      `SELECT t.id, t.sport_id, t.host_id, t.country_id, t.name, t.short_name, t.slug, t.type, t.logo_url, t.status, t.created_at, t.updated_at
+      `SELECT t.id, t.sport_id, t.host_id, t.country_id, t.home_stadium_name, t.name, t.short_name, t.slug, t.type, t.logo_url, t.status, t.created_at, t.updated_at
        FROM entity_catalog_mapping m
        JOIN teams t ON t.id = m.legacy_id
        WHERE m.catalog_type IN ('clubs','nationalTeams') AND m.legacy_id = ?`

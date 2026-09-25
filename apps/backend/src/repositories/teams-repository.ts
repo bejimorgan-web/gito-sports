@@ -10,6 +10,7 @@ interface TeamRow {
   sport_id: string;
   host_id: string | null;
   country_id: string | null;
+  home_stadium_name: string | null;
   name: string;
   short_name: string | null;
   slug: string | null;
@@ -43,6 +44,7 @@ function mapTeam(row: TeamRow): Team {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     ...(row.country_id ? { countryId: row.country_id } : {}),
+    ...(row.home_stadium_name ? { homeStadiumName: row.home_stadium_name } : {}),
     ...(row.short_name ? { shortName: row.short_name } : {}),
     ...(row.slug ? { slug: row.slug } : {}),
     ...(row.logo_url ? { logoUrl: row.logo_url } : {})
@@ -71,7 +73,7 @@ export function listTeams(filters?: { sportId?: string; hostId?: string; country
 
   const rows = database
     .prepare(
-      `SELECT id, sport_id, host_id, country_id, name, short_name, slug, type, logo_url, status, created_at, updated_at
+      `SELECT id, sport_id, host_id, country_id, home_stadium_name, name, short_name, slug, type, logo_url, status, created_at, updated_at
        FROM teams ${where} ORDER BY name`
     )
     .all(...parameters) as TeamRow[];
@@ -82,7 +84,7 @@ export function listTeams(filters?: { sportId?: string; hostId?: string; country
 export function getTeamById(teamId: string): Team | undefined {
   const row = getDatabase()
     .prepare(
-      `SELECT id, sport_id, host_id, country_id, name, short_name, slug, type, logo_url, status, created_at, updated_at
+      `SELECT id, sport_id, host_id, country_id, home_stadium_name, name, short_name, slug, type, logo_url, status, created_at, updated_at
        FROM teams WHERE id = ?`
     )
     .get(teamId) as TeamRow | undefined;
@@ -103,10 +105,10 @@ export function createTeam(input: CreateTeamRequest): Team {
 
   database
     .prepare(
-      `INSERT INTO teams (id, sport_id, host_id, country_id, name, short_name, slug, type, logo_url, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`
+      `INSERT INTO teams (id, sport_id, host_id, country_id, home_stadium_name, name, short_name, slug, type, logo_url, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`
     )
-    .run(id, input.sportId, input.hostId ?? null, countryId ?? null, input.name, input.shortName ?? null, slug, input.type, input.logoUrl ?? null, timestamp, timestamp);
+     .run(id, input.sportId, input.hostId ?? null, countryId ?? null, input.homeStadiumName?.trim() || null, input.name, input.shortName ?? null, slug, input.type, input.logoUrl ?? null, timestamp, timestamp);
 
   return {
     id,
@@ -118,6 +120,7 @@ export function createTeam(input: CreateTeamRequest): Team {
     createdAt: timestamp,
     updatedAt: timestamp,
     ...(countryId ? { countryId } : {}),
+    ...(input.homeStadiumName?.trim() ? { homeStadiumName: input.homeStadiumName.trim() } : {}),
     ...(input.shortName ? { shortName: input.shortName } : {}),
     slug,
     ...(input.logoUrl ? { logoUrl: input.logoUrl } : {})
@@ -128,7 +131,7 @@ export function updateTeam(teamId: string, input: Partial<CreateTeamRequest> & {
   const database = getDatabase();
   const existing = database
     .prepare(
-      `SELECT sport_id, host_id, country_id, name, short_name, slug, type, logo_url, status
+      `SELECT sport_id, host_id, country_id, home_stadium_name, name, short_name, slug, type, logo_url, status
        FROM teams WHERE id = ?`
     )
     .get(teamId) as
@@ -136,6 +139,7 @@ export function updateTeam(teamId: string, input: Partial<CreateTeamRequest> & {
         sport_id: string;
         host_id: string | null;
         country_id: string | null;
+        home_stadium_name: string | null;
         name: string;
         short_name: string | null;
         slug: string | null;
@@ -163,13 +167,14 @@ export function updateTeam(teamId: string, input: Partial<CreateTeamRequest> & {
 
   database
     .prepare(
-      `UPDATE teams SET sport_id = ?, host_id = ?, country_id = ?, name = ?, short_name = ?, slug = ?, type = ?, logo_url = ?, status = ?, updated_at = ?
+      `UPDATE teams SET sport_id = ?, host_id = ?, country_id = ?, home_stadium_name = ?, name = ?, short_name = ?, slug = ?, type = ?, logo_url = ?, status = ?, updated_at = ?
        WHERE id = ?`
     )
     .run(
       sportId,
       hostId,
       countryId,
+      input.homeStadiumName !== undefined ? input.homeStadiumName.trim() || null : existing.home_stadium_name,
       name,
       input.shortName ?? existing.short_name,
       slug,

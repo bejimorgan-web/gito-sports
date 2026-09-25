@@ -167,6 +167,7 @@ CREATE TABLE IF NOT EXISTS teams (
   sport_id TEXT,
   host_id TEXT,
   country_id TEXT,
+  home_stadium_name TEXT,
   name TEXT NOT NULL,
   short_name TEXT,
   slug TEXT,
