@@ -22,26 +22,34 @@ export type MobileFeaturesResponse = {
     liveScores: MobileFeaturePayload;
     sports: MobileFeaturePayload;
     live: MobileFeaturePayload;
+    clubs: MobileFeaturePayload;
+    news: MobileFeaturePayload;
   };
 };
 
 const DEFAULT_FEATURES: ReadonlyArray<{ feature_key: string; id: string }> = [
   { feature_key: "navigation.liveScores", id: "flag_live_scores" },
   { feature_key: "navigation.sports", id: "flag_sports" },
-  { feature_key: "navigation.live", id: "flag_live" }
+  { feature_key: "navigation.live", id: "flag_live" },
+  { feature_key: "navigation.clubs", id: "flag_clubs" },
+  { feature_key: "navigation.news", id: "flag_news" }
 ];
 
 const FEATURE_DEFAULTS: Record<string, boolean> = {
   "navigation.liveScores": true,
   "navigation.sports": true,
   "navigation.live": false,
+  "navigation.clubs": true,
+  "navigation.news": true,
 };
 
 export const DEFAULT_NAVIGATION_FEATURES: MobileFeaturesResponse = {
   navigation: {
     liveScores: { enabled: FEATURE_DEFAULTS["navigation.liveScores"] ?? true, message: null },
     sports: { enabled: FEATURE_DEFAULTS["navigation.sports"] ?? true, message: null },
-    live: { enabled: FEATURE_DEFAULTS["navigation.live"] ?? false, message: null }
+    live: { enabled: FEATURE_DEFAULTS["navigation.live"] ?? false, message: null },
+    clubs: { enabled: FEATURE_DEFAULTS["navigation.clubs"] ?? true, message: null },
+    news: { enabled: FEATURE_DEFAULTS["navigation.news"] ?? true, message: null }
   }
 };
 
@@ -108,13 +116,17 @@ export class MobileFeatureService {
       VALUES
         ('nav_live_scores', 'navigation.liveScores', 1, datetime('now'), datetime('now')),
         ('nav_sports', 'navigation.sports', 1, datetime('now'), datetime('now')),
-        ('nav_live', 'navigation.live', 0, datetime('now'), datetime('now'));
+        ('nav_live', 'navigation.live', 0, datetime('now'), datetime('now')),
+        ('nav_clubs', 'navigation.clubs', 1, datetime('now'), datetime('now')),
+        ('nav_news', 'navigation.news', 1, datetime('now'), datetime('now'));
 
       INSERT OR IGNORE INTO mobile_feature_flags (id, feature_key, enabled, display_message, created_at, updated_at)
       VALUES
         ('flag_live_scores', 'navigation.liveScores', 1, NULL, datetime('now'), datetime('now')),
         ('flag_sports', 'navigation.sports', 1, NULL, datetime('now'), datetime('now')),
-        ('flag_live', 'navigation.live', 0, NULL, datetime('now'), datetime('now'));
+        ('flag_live', 'navigation.live', 0, NULL, datetime('now'), datetime('now')),
+        ('flag_clubs', 'navigation.clubs', 1, NULL, datetime('now'), datetime('now')),
+        ('flag_news', 'navigation.news', 1, NULL, datetime('now'), datetime('now'));
     `);
   }
 
@@ -319,6 +331,14 @@ export function normalizeNavigation(rows: Array<MobileFeatureNavigationRow>) {
     live: {
       enabled: getEnabled("navigation.live"),
       message: getMessage("navigation.live")
+    },
+    clubs: {
+      enabled: getEnabled("navigation.clubs"),
+      message: getMessage("navigation.clubs")
+    },
+    news: {
+      enabled: getEnabled("navigation.news"),
+      message: getMessage("navigation.news")
     }
   };
 

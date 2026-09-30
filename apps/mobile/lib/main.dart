@@ -1451,6 +1451,8 @@ class _LiveHomeScreenState extends State<LiveHomeScreen>
         'Live Scores': config.liveScores,
         'Sports': config.sports,
         'Live': config.live,
+        'Clubs': config.clubs,
+        'News': config.news,
       };
 
       for (final entry in featureEvents.entries) {
@@ -1470,6 +1472,8 @@ class _LiveHomeScreenState extends State<LiveHomeScreen>
           liveScores: true,
           sports: true,
           live: false,
+          clubs: true,
+          news: true,
         );
         _configLoaded = true;
       });
@@ -1578,6 +1582,8 @@ class _LiveHomeScreenState extends State<LiveHomeScreen>
           liveScores: true,
           sports: true,
           live: false,
+          clubs: true,
+          news: true,
         );
 
     // Build available screens based on config
@@ -1628,23 +1634,27 @@ class _LiveHomeScreenState extends State<LiveHomeScreen>
       screenLabels.add('Live');
     }
 
-    availableScreens.add(const ClubsScreen());
-    availableDestinations.add(
-      const NavigationDestination(
-        icon: Icon(Icons.groups_rounded),
-        label: 'Clubs',
-      ),
-    );
-    screenLabels.add('Clubs');
+    if (config.clubs) {
+      availableScreens.add(const ClubsScreen());
+      availableDestinations.add(
+        const NavigationDestination(
+          icon: Icon(Icons.groups_rounded),
+          label: 'Clubs',
+        ),
+      );
+      screenLabels.add('Clubs');
+    }
 
-    availableScreens.add(const GlobalNewsScreen());
-    availableDestinations.add(
-      const NavigationDestination(
-        icon: Icon(Icons.article_rounded),
-        label: 'News',
-      ),
-    );
-    screenLabels.add('News');
+    if (config.news) {
+      availableScreens.add(const GlobalNewsScreen());
+      availableDestinations.add(
+        const NavigationDestination(
+          icon: Icon(Icons.article_rounded),
+          label: 'News',
+        ),
+      );
+      screenLabels.add('News');
+    }
 
     final bool maintenanceMode = availableScreens.isEmpty;
     if (maintenanceMode) {
@@ -1674,10 +1684,12 @@ class _LiveHomeScreenState extends State<LiveHomeScreen>
       );
     }
 
-    // Clamp active tab to valid range
+    // Keep the active tab valid whenever feature toggles change.
     if (_activeTab >= availableScreens.length) {
       _activeTab = 0;
     }
+
+    final activeIndex = _activeTab.clamp(0, availableScreens.length - 1);
 
     return Scaffold(
       appBar: AppBar(
@@ -1719,13 +1731,16 @@ class _LiveHomeScreenState extends State<LiveHomeScreen>
       ),
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 180),
-        child: availableScreens[_activeTab],
+        child: availableScreens[activeIndex],
       ),
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _activeTab,
+        selectedIndex: activeIndex,
         backgroundColor: const Color(0xFF101418),
         indicatorColor: const Color(0x2E20D37B),
         onDestinationSelected: (index) {
+          if (index < 0 || index >= availableDestinations.length) {
+            return;
+          }
           setState(() => _activeTab = index);
           // Track navigation event
           unawaited(_analyticsService.trackEvent(
@@ -4384,6 +4399,9 @@ class _PlaybackScreenState extends State<PlaybackScreen>
   int _recoveryAttempt = 0;
   int _controllerGeneration = 0;
   DateTime? _bufferStartedAt;
+  Timer? _bufferRecoveryTimer;
+  Timer? _streamHealthTimer;
+  bool _streamHealthProbeInFlight = false;
   Size? _lastVideoSize;
   bool? _liveEnabled;
   Timer? _liveConfigTimer;
@@ -4446,6 +4464,10 @@ class _PlaybackScreenState extends State<PlaybackScreen>
   void _blockPlayback() {
     _liveConfigTimer?.cancel();
     _liveConfigTimer = null;
+    _bufferRecoveryTimer?.cancel();
+    _bufferRecoveryTimer = null;
+    _streamHealthTimer?.cancel();
+    _streamHealthTimer = null;
     _liveEnabled = false;
     final controller = _videoController;
     _videoController = null;
@@ -4463,7 +4485,7 @@ class _PlaybackScreenState extends State<PlaybackScreen>
     }
   }
 
-  static const _maxRecoveryAttempts = 2;
+  static const _maxRecoveryAttempts = 6;
 
   void _initializePlayer() {
     if (_liveEnabled != true) {
@@ -4503,6 +4525,7 @@ class _PlaybackScreenState extends State<PlaybackScreen>
       _recoveryInProgress = false;
       _recoveryAttempt = 0;
       _lastVideoSize = null;
+      _startStreamHealthMonitor();
       unawaited(_analyticsService.trackEvent(
         eventType: 'playback_start',
         matchId: widget.match.id,
@@ -4528,9 +4551,10 @@ class _PlaybackScreenState extends State<PlaybackScreen>
 
     _recoveryInProgress = true;
     _recoveryAttempt += 1;
-    _videoError = error.toString();
-    setState(() => _state = PlaybackState.connecting);
-    await Future<void>.delayed(const Duration(seconds: 2));
+    _videoError = null;
+    setState(() => _state = PlaybackState.buffering);
+    final retryDelay = Duration(seconds: _recoveryAttempt < 3 ? 2 : 4);
+    await Future<void>.delayed(retryDelay);
     if (!mounted || !_recoveryInProgress || _liveEnabled != true) return;
 
     final failedController = _videoController;
@@ -4543,8 +4567,49 @@ class _PlaybackScreenState extends State<PlaybackScreen>
       await failedController.dispose();
     }
     if (!mounted || _liveEnabled != true) return;
+    _isBuffering = false;
+    _bufferStartedAt = null;
+    _bufferRecoveryTimer?.cancel();
+    _bufferRecoveryTimer = null;
     _recoveryInProgress = false;
     _initializePlayer();
+  }
+
+  void _startStreamHealthMonitor() {
+    if (widget.match.playbackMode != 'DIRECT_XTREAM') return;
+    _streamHealthTimer?.cancel();
+    _streamHealthTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      unawaited(_probeXtreamStream());
+    });
+  }
+
+  Future<void> _probeXtreamStream() async {
+    if (!mounted ||
+        _streamHealthProbeInFlight ||
+        _recoveryInProgress ||
+        _liveEnabled != true ||
+        _videoController?.value.isInitialized != true) {
+      return;
+    }
+
+    _streamHealthProbeInFlight = true;
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+    try {
+      final request = await client.getUrl(Uri.parse(widget.match.playbackUrl));
+      for (final entry in widget.match.playbackHeaders.entries) {
+        request.headers.set(entry.key, entry.value);
+      }
+      final response = await request.close().timeout(const Duration(seconds: 5));
+      await response.drain<void>();
+      if (response.statusCode < 200 || response.statusCode >= 400) {
+        unawaited(_recoverPlayback('Xtream stream health check failed.'));
+      }
+    } catch (error) {
+      unawaited(_recoverPlayback(error));
+    } finally {
+      client.close(force: true);
+      _streamHealthProbeInFlight = false;
+    }
   }
 
   void _scheduleHideControls() {
@@ -4559,6 +4624,11 @@ class _PlaybackScreenState extends State<PlaybackScreen>
     if (!_isBuffering) {
       _isBuffering = true;
       _bufferStartedAt = DateTime.now();
+      _bufferRecoveryTimer?.cancel();
+      _bufferRecoveryTimer = Timer(const Duration(seconds: 12), () {
+        if (!mounted || !_isBuffering || _recoveryInProgress) return;
+        unawaited(_recoverPlayback('Playback stalled while buffering.'));
+      });
       unawaited(_analyticsService.trackEvent(
         eventType: 'buffer_start',
         matchId: widget.match.id,
@@ -4577,6 +4647,8 @@ class _PlaybackScreenState extends State<PlaybackScreen>
           : DateTime.now().difference(startedAt).inSeconds;
       _isBuffering = false;
       _bufferStartedAt = null;
+      _bufferRecoveryTimer?.cancel();
+      _bufferRecoveryTimer = null;
       unawaited(_analyticsService.trackEvent(
         eventType: 'buffer_end',
         matchId: widget.match.id,
@@ -4844,6 +4916,8 @@ class _PlaybackScreenState extends State<PlaybackScreen>
     WidgetsBinding.instance.removeObserver(this);
     _liveConfigTimer?.cancel();
     _controlsTimer?.cancel();
+    _bufferRecoveryTimer?.cancel();
+    _streamHealthTimer?.cancel();
     if (_isFullscreenActive) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
       SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);

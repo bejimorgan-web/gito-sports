@@ -45,6 +45,9 @@ import type {
   ,UpdateFormationTemplateRequest
   ,FixtureLineup
   ,SaveFixtureLineupRequest
+  ,PlayerImportRequest
+  ,PlayerImportPreview
+  ,PlayerImportResult
 } from "@gito/shared";
 
 // Prefer the standardized `VITE_API_URL` but keep backwards compatibility
@@ -756,6 +759,12 @@ export const apiClient = {
   updatePlayer(playerId: string, input: UpdatePlayerRequest, accessToken: string) {
     return request<Player>(`/catalog/players/${playerId}`, { method: 'PUT', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
   },
+  previewPlayerImport(input: PlayerImportRequest, accessToken: string) {
+    return request<PlayerImportPreview>('/catalog/player-import/preview', { method: 'POST', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
+  },
+  executePlayerImport(input: PlayerImportRequest, accessToken: string) {
+    return request<PlayerImportResult>('/catalog/player-import/execute', { method: 'POST', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
+  },
   listSeasonSquads(filters?: { teamId?: string; competitionId?: string; seasonId?: string; status?: string }) {
     return request<SeasonSquad[]>(buildApiPath('/catalog/season-squads', filters));
   },
@@ -1017,6 +1026,8 @@ export const apiClient = {
           liveScores: { enabled: boolean; message: string | null };
           sports: { enabled: boolean; message: string | null };
           live: { enabled: boolean; message: string | null };
+          clubs: { enabled: boolean; message: string | null };
+          news: { enabled: boolean; message: string | null };
         };
       };
       timestamp: string;
@@ -1034,8 +1045,8 @@ export const apiClient = {
       body: JSON.stringify({ playbackBrandingUrl })
     });
   },
-  async updateMobileFeatures(navigation: { liveScores?: boolean; sports?: boolean; live?: boolean }, accessToken: string) {
-    const updates = Object.entries(navigation).filter((entry): entry is ["liveScores" | "sports" | "live", boolean] => typeof entry[1] === "boolean");
+  async updateMobileFeatures(navigation: { liveScores?: boolean; sports?: boolean; live?: boolean; clubs?: boolean; news?: boolean }, accessToken: string) {
+    const updates = Object.entries(navigation).filter((entry): entry is ["liveScores" | "sports" | "live" | "clubs" | "news", boolean] => typeof entry[1] === "boolean");
     await Promise.all(updates.map(([key, enabled]) => this.updateMobileFeature(`navigation.${key}`, enabled, null, accessToken)));
     return this.getMobileFeatures();
   },

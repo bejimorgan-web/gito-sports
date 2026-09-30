@@ -7,11 +7,15 @@ class MobileNavigationConfig {
   final bool liveScores;
   final bool sports;
   final bool live;
+  final bool clubs;
+  final bool news;
 
   MobileNavigationConfig({
     required this.liveScores,
     required this.sports,
     required this.live,
+    required this.clubs,
+    required this.news,
   });
 
   factory MobileNavigationConfig.fromJson(Map<String, dynamic> json) {
@@ -33,6 +37,8 @@ class MobileNavigationConfig {
       liveScores: readEnabled('liveScores', defaultValue: true),
       sports: readEnabled('sports', defaultValue: true),
       live: readEnabled('live', defaultValue: false),
+      clubs: readEnabled('clubs', defaultValue: true),
+      news: readEnabled('news', defaultValue: true),
     );
   }
 
@@ -40,6 +46,8 @@ class MobileNavigationConfig {
     'liveScores': liveScores,
     'sports': sports,
     'live': live,
+    'clubs': clubs,
+    'news': news,
   };
 
   /// Returns a copy with selected fields replaced.
@@ -47,11 +55,15 @@ class MobileNavigationConfig {
     bool? liveScores,
     bool? sports,
     bool? live,
+    bool? clubs,
+    bool? news,
   }) {
     return MobileNavigationConfig(
       liveScores: liveScores ?? this.liveScores,
       sports: sports ?? this.sports,
       live: live ?? this.live,
+      clubs: clubs ?? this.clubs,
+      news: news ?? this.news,
     );
   }
 }
@@ -95,29 +107,31 @@ class RemoteConfigService {
     try {
       print('[RemoteConfig] Fetching fresh navigation config from API');
       final config = await _fetchFromBackend();
-      
+
       // Cache in-memory and storage
       _cachedConfig = config;
       _cachedAt = DateTime.now();
       await _saveCachedConfig(config);
-      
+
       print('[RemoteConfig] Successfully fetched and cached navigation config');
       return config;
     } catch (e) {
       print('[RemoteConfig] Failed to fetch config: $e');
-      
+
       // A stale enabled Live flag must never authorize playback.
       if (cached != null) {
         print('[RemoteConfig] Falling back to stale cached config');
         return cached.copyWith(live: false);
       }
-      
+
       // Keep catalog navigation available while failing closed for Live.
       print('[RemoteConfig] No cache available, returning fail-closed defaults');
       return MobileNavigationConfig(
         liveScores: true,
         sports: true,
         live: false,
+        clubs: true,
+        news: true,
       );
     }
   }

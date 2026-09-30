@@ -416,6 +416,8 @@ mobileRouter.post("/features/update", protectedRoute, (request, response) => {
         liveScores?: boolean;
         sports?: boolean;
         live?: boolean;
+        clubs?: boolean;
+        news?: boolean;
       };
     };
 
@@ -447,6 +449,18 @@ mobileRouter.post("/features/update", protectedRoute, (request, response) => {
       MobileFeatureService.updateNavigationFeature("navigation.live", navigation.live, null);
       updates.live = navigation.live;
       console.log("[MOBILE_FEATURES_UPDATE] updated navigation.live =", navigation.live);
+    }
+
+    if (typeof navigation.clubs === "boolean") {
+      MobileFeatureService.updateNavigationFeature("navigation.clubs", navigation.clubs, null);
+      updates.clubs = navigation.clubs;
+      console.log("[MOBILE_FEATURES_UPDATE] updated navigation.clubs =", navigation.clubs);
+    }
+
+    if (typeof navigation.news === "boolean") {
+      MobileFeatureService.updateNavigationFeature("navigation.news", navigation.news, null);
+      updates.news = navigation.news;
+      console.log("[MOBILE_FEATURES_UPDATE] updated navigation.news =", navigation.news);
     }
 
     // Fetch and return updated navigation

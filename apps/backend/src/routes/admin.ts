@@ -180,7 +180,9 @@ adminRouter.put("/mobile/features", protectedRoute, (request, response) => {
     const allowedKeys = [
       "navigation.liveScores",
       "navigation.sports",
-      "navigation.live"
+      "navigation.live",
+      "navigation.clubs",
+      "navigation.news"
     ];
 
     if (!allowedKeys.includes(featureKey)) {

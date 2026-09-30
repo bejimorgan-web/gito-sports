@@ -3,7 +3,7 @@ import { apiClient } from "../../services/api-client";
 import { Toast } from "../../components/Toast";
 import { LogoUrlField } from "../../components/LogoUrlField";
 
-type MobileFeatureKey = "navigation.liveScores" | "navigation.sports" | "navigation.live";
+type MobileFeatureKey = "navigation.liveScores" | "navigation.sports" | "navigation.live" | "navigation.clubs" | "navigation.news";
 
 type MobileFeatureState = {
   key: MobileFeatureKey;
@@ -17,7 +17,9 @@ type MobileFeatureState = {
 const featureLabels: Record<MobileFeatureKey, string> = {
   "navigation.liveScores": "Live Scores",
   "navigation.sports": "Sports",
-  "navigation.live": "Live"
+  "navigation.live": "Live",
+  "navigation.clubs": "Clubs",
+  "navigation.news": "News"
 };
 
 interface MobileFeatureControlScreenProps {
@@ -68,6 +70,14 @@ export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControl
           live: {
             enabled: navigation?.live?.enabled ?? true,
             message: navigation?.live?.message ?? null
+          },
+          clubs: {
+            enabled: navigation?.clubs?.enabled ?? true,
+            message: navigation?.clubs?.message ?? null
+          },
+          news: {
+            enabled: navigation?.news?.enabled ?? true,
+            message: navigation?.news?.message ?? null
           }
         }
       };
@@ -94,6 +104,22 @@ export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControl
           label: featureLabels["navigation.live"],
           enabled: safeResponse.navigation.live.enabled,
           message: safeResponse.navigation.live.message,
+          isSaving: false,
+          error: null
+        },
+        {
+          key: "navigation.clubs",
+          label: featureLabels["navigation.clubs"],
+          enabled: safeResponse.navigation.clubs.enabled,
+          message: safeResponse.navigation.clubs.message,
+          isSaving: false,
+          error: null
+        },
+        {
+          key: "navigation.news",
+          label: featureLabels["navigation.news"],
+          enabled: safeResponse.navigation.news.enabled,
+          message: safeResponse.navigation.news.message,
           isSaving: false,
           error: null
         }
@@ -131,7 +157,9 @@ export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControl
       const navigationUpdate = {
         liveScores: features.find((f) => f.key === "navigation.liveScores")?.enabled ?? true,
         sports: features.find((f) => f.key === "navigation.sports")?.enabled ?? true,
-        live: features.find((f) => f.key === "navigation.live")?.enabled ?? true
+        live: features.find((f) => f.key === "navigation.live")?.enabled ?? true,
+        clubs: features.find((f) => f.key === "navigation.clubs")?.enabled ?? true,
+        news: features.find((f) => f.key === "navigation.news")?.enabled ?? true
       };
 
       const response = await apiClient.updateMobileFeatures(navigationUpdate, accessToken);

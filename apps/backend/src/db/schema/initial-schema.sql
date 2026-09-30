@@ -546,10 +546,14 @@ INSERT OR IGNORE INTO mobile_features (id, feature_name, enabled, created_at, up
 VALUES
   ('nav_live_scores', 'navigation.liveScores', 1, datetime('now'), datetime('now')),
   ('nav_sports', 'navigation.sports', 1, datetime('now'), datetime('now')),
-  ('nav_live', 'navigation.live', 1, datetime('now'), datetime('now'));
+  ('nav_live', 'navigation.live', 1, datetime('now'), datetime('now')),
+  ('nav_clubs', 'navigation.clubs', 1, datetime('now'), datetime('now')),
+  ('nav_news', 'navigation.news', 1, datetime('now'), datetime('now'));
 
 INSERT OR IGNORE INTO mobile_feature_flags (id, feature_key, enabled, display_message, created_at, updated_at)
 VALUES
   ('flag_live_scores', 'navigation.liveScores', 1, NULL, datetime('now'), datetime('now')),
   ('flag_sports', 'navigation.sports', 1, NULL, datetime('now'), datetime('now')),
-  ('flag_live', 'navigation.live', 1, NULL, datetime('now'), datetime('now'));
+  ('flag_live', 'navigation.live', 1, NULL, datetime('now'), datetime('now')),
+  ('flag_clubs', 'navigation.clubs', 1, NULL, datetime('now'), datetime('now')),
+  ('flag_news', 'navigation.news', 1, NULL, datetime('now'), datetime('now'));

@@ -5,6 +5,8 @@ export type MobileNavigationConfig = {
   liveScores: boolean;
   sports: boolean;
   live: boolean;
+  clubs: boolean;
+  news: boolean;
 };
 
 export type MobileFeature = {
@@ -18,7 +20,9 @@ export type MobileFeature = {
 const DEFAULT_FEATURES: ReadonlyArray<{ feature_key: string; id: string }> = [
   { feature_key: "navigation.liveScores", id: "flag_live_scores" },
   { feature_key: "navigation.sports", id: "flag_sports" },
-  { feature_key: "navigation.live", id: "flag_live" }
+  { feature_key: "navigation.live", id: "flag_live" },
+  { feature_key: "navigation.clubs", id: "flag_clubs" },
+  { feature_key: "navigation.news", id: "flag_news" }
 ];
 
 const toBool = (value: any): boolean => {
@@ -62,7 +66,9 @@ export const MobileConfigRepository = {
     const config: MobileNavigationConfig = {
       liveScores: true,
       sports: true,
-      live: true
+      live: true,
+      clubs: true,
+      news: true
     };
 
     for (const row of rows) {
@@ -73,6 +79,10 @@ export const MobileConfigRepository = {
         config.sports = enabled;
       } else if (row.feature_key === "navigation.live") {
         config.live = enabled;
+      } else if (row.feature_key === "navigation.clubs") {
+        config.clubs = enabled;
+      } else if (row.feature_key === "navigation.news") {
+        config.news = enabled;
       }
     }
 
@@ -110,6 +120,14 @@ export const MobileConfigRepository = {
 
     if (update.live !== undefined) {
       updateOrInsertFeature("navigation.live", update.live);
+    }
+
+    if (update.clubs !== undefined) {
+      updateOrInsertFeature("navigation.clubs", update.clubs);
+    }
+
+    if (update.news !== undefined) {
+      updateOrInsertFeature("navigation.news", update.news);
     }
 
     return this.getNavigationConfig();
