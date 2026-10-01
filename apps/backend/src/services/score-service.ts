@@ -768,6 +768,34 @@ export const ScoreService = {
       };
     }
 
+    // The live endpoint must be able to recover after a cold start or an
+    // unsuccessful startup refresh. Previously it returned an empty response
+    // here forever unless some other code called refreshAll() first.
+    try {
+      await refreshLiveScores(cacheKey);
+      const refreshed = getCacheEntry<ScoreMatchSummary[]>(cacheKey);
+      if (refreshed) {
+        return {
+          matches: refreshed.value,
+          source: "live",
+          ageMs: Date.now() - refreshed.createdAt,
+          cachedAt: new Date(refreshed.createdAt).toISOString()
+        };
+      }
+    } catch (error) {
+      console.warn("[score] live cache miss refresh failed", error instanceof Error ? error.message : error);
+    }
+
+    const staleAfterRefresh = getStaleCacheEntry<ScoreMatchSummary[]>(cacheKey, 120_000);
+    if (staleAfterRefresh) {
+      return {
+        matches: staleAfterRefresh.value,
+        source: "stale_cache",
+        ageMs: staleAfterRefresh.ageMs,
+        cachedAt: staleAfterRefresh.cachedAt
+      };
+    }
+
     return { matches: [], source: "cache" };
   },
 
