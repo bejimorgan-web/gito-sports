@@ -124,7 +124,9 @@ function isLiveStatus(status: string | null): boolean {
     "LIVE",
     "IN_PLAY",
     "PAUSED",
-    "SUSPENDED"
+    "SUSPENDED",
+    "SUSP",
+    "INT"
   ].includes(status);
 }
 
@@ -552,7 +554,11 @@ async function refreshLiveScores(cacheKey: string): Promise<void> {
     serviceStatus.lastApiResponseStatus = 200;
     serviceStatus.lastMatchesReceived = rawMatches.length;
     serviceStatus.lastCompetitionQueried = asString(asRecord(rawMatches[0]?.league).name) ?? null;
-    const liveMatches = rawMatches.map(normalizeMatch);
+    // Some provider configurations can return a broad fixture list even when
+    // asked for live fixtures. Only expose genuinely in-play statuses here.
+    const liveMatches = rawMatches
+      .map(normalizeMatch)
+      .filter((match) => isLiveStatus(match.status));
     console.log("MATCH COUNT AFTER FILTER:", liveMatches.length);
     console.log("LIVE COUNT:", liveMatches.length);
     setCached(cacheKey, liveMatches, liveScoresTtlMs);
@@ -759,9 +765,10 @@ export const ScoreService = {
     const today = getTodayDateRange();
     const todayCacheKey = buildScheduleCacheKey(today.dateFrom, today.dateTo);
     const todayCache = getCacheEntry<ScoreMatchSummary[]>(todayCacheKey);
-    if (todayCache && todayCache.value.length > 0) {
+    const liveTodayMatches = todayCache?.value.filter((match) => isLiveStatus(match.status)) ?? [];
+    if (todayCache && liveTodayMatches.length > 0) {
       return {
-        matches: todayCache.value,
+        matches: liveTodayMatches,
         source: "scheduled",
         ageMs: Date.now() - todayCache.createdAt,
         cachedAt: new Date(todayCache.createdAt).toISOString()
