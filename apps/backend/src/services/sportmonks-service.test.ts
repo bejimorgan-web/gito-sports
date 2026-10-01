@@ -56,13 +56,13 @@ test("provider selection prefers configured Sportmonks and otherwise preserves A
   assert.equal(getFootballProvider("  ", ""), ApiFootballService);
 });
 
-test("live fixtures use the configured v3 base URL and expected authentication", async () => {
+test("live fixtures use the Sportmonks in-play endpoint and expected authentication", async () => {
   const { requests, service } = createTestService({ data: [] }, "https://sports.example/custom/v3/");
   await service.getLiveFixtures();
 
   assert.equal(requests.length, 1);
-  assert.equal(requests[0]?.url.origin + requests[0]?.url.pathname, "https://sports.example/custom/v3/football/fixtures");
-  assert.equal(requests[0]?.url.searchParams.get("live"), "true");
+  assert.equal(requests[0]?.url.origin + requests[0]?.url.pathname, "https://sports.example/custom/v3/football/livescores/inplay");
+  assert.equal(requests[0]?.url.searchParams.has("live"), false);
   assert.equal(requests[0]?.url.searchParams.get("api_token"), fakeToken);
   assert.equal(requests[0]?.headers.get("authorization"), `Bearer ${fakeToken}`);
   assert.equal(requests[0]?.headers.get("accept"), "application/json");

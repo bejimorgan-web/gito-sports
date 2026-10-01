@@ -287,7 +287,7 @@ export function createSportmonksService(configuration: SportmonksConfig, fetcher
     },
 
     async getLiveFixtures(): Promise<Record<string, unknown>[]> {
-      const payload = await request<{ data?: Array<SportmonksRecord>; response?: Array<SportmonksRecord> }>("football/fixtures?live=true&include=participants;scores;league;state;venue");
+      const payload = await request<{ data?: Array<SportmonksRecord>; response?: Array<SportmonksRecord> }>("football/livescores/inplay?include=participants;scores;league;state;venue");
       const rows = Array.isArray(payload.data) ? payload.data : Array.isArray(payload.response) ? payload.response : [];
       return rows.map((row) => normalizeSportmonksFixture(row));
     },
