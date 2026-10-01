@@ -1,6 +1,7 @@
 import { env } from "../config/env.js";
 import { EventBus } from "../events/event-bus.js";
 import { ApiFootballService } from "./api-football-service.js";
+import { SportmonksService } from "./sportmonks-service.js";
 import { apiUsageGuard } from "./api-usage-guard.js";
 
 type CacheEntry<T> = {
@@ -148,6 +149,16 @@ function buildUpcomingCacheKey(dateFrom: string, dateTo: string) {
   return `scores:upcoming:${dateFrom}:${dateTo}`;
 }
 
+export function getFootballProvider(
+  sportmonksToken = env.sportmonksApiToken,
+  compatibilityKey = env.sportmonksApiKey
+) {
+  if (sportmonksToken?.trim() || compatibilityKey?.trim()) {
+    return SportmonksService;
+  }
+  return ApiFootballService;
+}
+
 type FetchMatchesResult = {
   matches: ApiFootballFixture[];
   success: boolean;
@@ -171,11 +182,12 @@ async function fetchMatchesForRange(dateFrom: string, dateTo: string): Promise<F
   serviceStatus.lastCompetitionQueried = null;
 
   try {
+    const provider = getFootballProvider();
     const cacheKey = `fixtures_range_${dateFrom}_${dateTo}`;
     const guardResult = await apiUsageGuard.checkAndExecute(
       'fixtures',
       cacheKey,
-      () => ApiFootballService.getFixturesByRange(dateFrom, dateTo)
+      () => provider.getFixturesByRange(dateFrom, dateTo)
     );
 
     const rawMatches = guardResult.data ?? [];
@@ -432,7 +444,7 @@ const serviceStatus: {
   lastMatchesReceived: number;
   cacheKeys: string[];
 } = {
-  footballApiEnabled: Boolean(env.apiFootballKey && env.apiFootballKey.trim()),
+  footballApiEnabled: Boolean((env.apiFootballKey && env.apiFootballKey.trim()) || (env.sportmonksApiToken && env.sportmonksApiToken.trim())),
   cacheInitialized: false,
   lastFetchTime: null,
   lastResponseCount: 0,
@@ -522,10 +534,11 @@ async function refreshAllScores(): Promise<{ liveCount: number; todayCount: numb
 
 async function refreshLiveScores(cacheKey: string): Promise<void> {
   try {
+    const provider = getFootballProvider();
     const guardResult = await apiUsageGuard.checkAndExecute(
       'live_fixtures',
       'live_fixtures_default',
-      () => ApiFootballService.getLiveFixtures()
+      () => provider.getLiveFixtures()
     );
 
     const rawMatches = guardResult.data ?? [];
@@ -766,10 +779,11 @@ export const ScoreService = {
       if (!this._backgroundRefreshes.has(cacheKey)) {
         const p = (async () => {
           try {
+            const provider = getFootballProvider();
             const guardResult = await apiUsageGuard.checkAndExecute(
               'fixtures',
               `fixture_detail_${matchId}`,
-              () => ApiFootballService.getFixtureDetails(matchId)
+              () => provider.getFixtureDetails(matchId)
             );
 
             const fixture = guardResult.data ?? null;
@@ -799,10 +813,11 @@ export const ScoreService = {
     if (!this._backgroundRefreshes.has(cacheKey)) {
       const p = (async () => {
         try {
+          const provider = getFootballProvider();
           const guardResult = await apiUsageGuard.checkAndExecute(
             'fixtures',
             `fixture_detail_${matchId}`,
-            () => ApiFootballService.getFixtureDetails(matchId)
+            () => provider.getFixtureDetails(matchId)
           );
 
           const fixture = guardResult.data ?? null;
@@ -849,10 +864,11 @@ export const ScoreService = {
       return cached;
     }
 
+    const provider = getFootballProvider();
     const guardResult = await apiUsageGuard.checkAndExecute(
       'leagues',
       'leagues_current_year',
-      () => ApiFootballService.getLeagues(new Date().getFullYear())
+      () => provider.getLeagues(new Date().getFullYear())
     );
 
     const payload = guardResult.data ?? [];

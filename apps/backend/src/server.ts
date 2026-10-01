@@ -27,9 +27,10 @@ async function initializeFootballService() {
 
   console.log('FOOTBALL STARTUP INIT TRIGGERED');
   console.log('API_FOOTBALL_KEY PRESENT =', Boolean(env.apiFootballKey?.trim()));
+  console.log('SPORTMONKS_API_TOKEN PRESENT =', Boolean(env.sportmonksApiToken?.trim()));
 
-  if (!env.apiFootballKey?.trim()) {
-    console.warn('[startup] FOOTBALL disabled because API_FOOTBALL_KEY is missing or empty.');
+  if (!env.apiFootballKey?.trim() && !env.sportmonksApiToken?.trim()) {
+    console.warn('[startup] FOOTBALL disabled because no live-score provider key is configured.');
     return true;
   }
 

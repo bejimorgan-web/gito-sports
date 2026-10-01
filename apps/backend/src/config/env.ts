@@ -46,6 +46,18 @@ const footballDataBaseUrl =
   process.env.FOOTBALL_DATA_BASE_URL ?? "https://api.football-data.org/v4";
 const apiFootballKey = process.env.API_FOOTBALL_KEY ?? "";
 const apiFootballBaseUrl = process.env.API_FOOTBALL_BASE_URL ?? "https://v3.football.api-sports.io";
+export function resolveSportmonksApiToken(token?: string, compatibilityKey?: string): string {
+  return token?.trim() || compatibilityKey?.trim() || "";
+}
+
+const sportmonksApiToken = resolveSportmonksApiToken(
+  process.env.SPORTMONKS_API_TOKEN,
+  process.env.SPORTMONKS_API_KEY
+);
+const sportmonksBaseUrl =
+  process.env.SPORTMONKS_BASE_URL?.trim() ||
+  process.env.SPORTMONKS_API_URL?.trim() ||
+  "https://api.sportmonks.com/v3";
 const adminEmail = process.env.ADMIN_EMAIL?.trim() ?? null;
 const adminPassword = process.env.ADMIN_PASSWORD ?? null;
 const adminBootstrapToken = process.env.ADMIN_BOOTSTRAP_TOKEN ?? null;
@@ -119,8 +131,10 @@ if (jwtSecret.length < 24) {
 
 console.log(`FOOTBALL_DATA_API_ENABLED = ${Boolean(footballDataApiKey.trim())}`);
 console.log(`API_FOOTBALL_ENABLED = ${Boolean(apiFootballKey.trim())}`);
+console.log(`SPORTMONKS_ENABLED = ${Boolean(sportmonksApiToken.trim())}`);
 console.log(`FOOTBALL_DATA_BASE_URL configured = ${Boolean(footballDataBaseUrl.trim())}`);
 console.log(`API_FOOTBALL_BASE_URL configured = ${Boolean(apiFootballBaseUrl.trim())}`);
+console.log(`SPORTMONKS_BASE_URL configured = ${Boolean(sportmonksBaseUrl.trim())}`);
 
 export const env = {
   port,
@@ -131,6 +145,9 @@ export const env = {
   footballDataBaseUrl,
   apiFootballKey,
   apiFootballBaseUrl,
+  sportmonksApiToken,
+  sportmonksApiKey: sportmonksApiToken,
+  sportmonksBaseUrl,
   adminEmail,
   adminPassword,
   adminBootstrapToken,
