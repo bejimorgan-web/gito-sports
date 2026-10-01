@@ -47,3 +47,12 @@ export function setBootstrapInitialized() {
 export function allReadinessFlagsReady() {
   return Object.values(readinessFlags).every(Boolean);
 }
+
+// The score provider is optional. Its cache may remain unavailable because of
+// missing credentials or an upstream outage, but that must not keep database-
+// backed product routes (including mobile configuration) in a 503 state.
+export function allCoreReadinessFlagsReady() {
+  return readinessFlags.databaseReady &&
+    readinessFlags.featureFlagsReady &&
+    readinessFlags.analyticsReady;
+}

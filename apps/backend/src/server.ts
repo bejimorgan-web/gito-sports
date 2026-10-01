@@ -5,7 +5,7 @@ import validateUploadsAtStartup from "./startup/validateUploads.js";
 import { ScoreService } from "./services/score-service.js";
 import { MobileFeatureService } from "./services/mobile-feature-service.js";
 import {
-  allReadinessFlagsReady,
+  allCoreReadinessFlagsReady,
   getReadinessStatus,
   markServerReady,
   setBootstrapInitialized,
@@ -104,11 +104,11 @@ if (runtimeConfig.errorReportingEnabled && runtimeConfig.sentryDsn) {
       setReady("footballCacheReady");
     }
 
-    if (allReadinessFlagsReady()) {
+    if (allCoreReadinessFlagsReady()) {
       markServerReady();
-      console.log('[startup] server is now fully ready');
+      console.log('[startup] core services are ready');
     } else {
-      console.warn('[startup] server initialization completed, but startup readiness flags are not all ready', getReadinessStatus());
+      console.warn('[startup] core services are not ready', getReadinessStatus());
     }
   });
 })();
