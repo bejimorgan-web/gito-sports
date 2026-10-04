@@ -4,9 +4,27 @@ import { AiNewsTaskRepository } from "../repositories/ai-news-task-repository.js
 import { NewsRepository } from "../repositories/news-repository.js";
 import { protectedRoute, type AuthenticatedRequest } from "../middleware/protected.js";
 import { AiNewsTaskService } from "../services/ai-news-task-service.js";
-import { AiNewsTaskRunner, createAiTaskProviderRegistry, getAiProviderConfiguration } from "../services/ai-news-provider.js";
+import { AiNewsTaskRunner, AiProviderError, createAiTaskProviderRegistry, getAiProviderConfiguration } from "../services/ai-news-provider.js";
 import { StoryUnderstandingInputError, StoryUnderstandingService } from "../services/story-understanding-service.js";
 import { STORY_UNDERSTANDING_PROMPT_VERSION } from "../services/story-understanding-contract.js";
+
+function providerFailureMessage(error: AiProviderError): string {
+  const messages: Record<AiProviderError["code"], string> = {
+    unavailable: "The configured AI provider or route is unavailable. Check the provider profile and task routing.",
+    configuration_missing: "AI provider configuration is incomplete. Check the server key, endpoint, and model settings.",
+    authentication_failed: "The AI provider rejected authentication (HTTP 401). Check the server API key.",
+    access_denied: "The AI provider denied access (HTTP 403). Check the key's project access and API permissions.",
+    resource_not_found: "The AI provider endpoint or configured model was not found (HTTP 404). Check both settings.",
+    rate_limited: "The AI provider rate limited the request (HTTP 429). Check quota or retry later.",
+    request_rejected: "The AI provider rejected the request (HTTP 4xx). Check provider request compatibility.",
+    upstream_unavailable: "The AI provider is temporarily unavailable (HTTP 5xx). Retry later.",
+    request_failed: "The AI provider request failed before a valid response was received.",
+    response_invalid: "The AI provider returned a response GiTO could not parse.",
+    capability_unsupported: "The selected AI provider lacks a required capability.",
+    timeout: "The AI provider request timed out."
+  };
+  return messages[error.code];
+}
 
 export interface StoryUnderstandingRouteDependencies {
   service: StoryUnderstandingService;
@@ -39,11 +57,20 @@ export function createStoryUnderstandingRouter(dependencies?: StoryUnderstanding
         idempotencyKey: headerKey
       });
       const status = result.task.status === "completed" ? 200 : result.task.status === "failed" ? 503 : 202;
+      if (status === 503) {
+        response.status(status).json({
+          error: result.task.failureCode ?? "ai_task_failed",
+          message: result.task.failureMessage ?? "Story Understanding could not be completed.",
+          data: result
+        });
+        return;
+      }
       response.status(status).json({ data: result });
     } catch (error) {
-      const code = error instanceof StoryUnderstandingInputError ? error.code : "story_understanding_failed";
+      const code = error instanceof StoryUnderstandingInputError ? error.code
+        : error instanceof AiProviderError ? `provider_${error.code}` : "story_understanding_failed";
       const status = code === "article_not_found" ? 404 : code === "article_input_too_large" ? 413 : code === "prompt_version_unsupported" ? 400 : 503;
-      response.status(status).json({ error: code });
+      response.status(status).json({ error: code, ...(error instanceof AiProviderError ? { message: providerFailureMessage(error) } : {}) });
     }
   }) as RequestHandler);
 

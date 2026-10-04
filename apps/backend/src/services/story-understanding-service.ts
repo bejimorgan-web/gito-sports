@@ -4,6 +4,7 @@ import type { NewsRepository } from "../repositories/news-repository.js";
 import { AiNewsTaskService } from "./ai-news-task-service.js";
 import { AiNewsTaskRunner, getAiProviderConfiguration, type AiProviderConfiguration } from "./ai-news-provider.js";
 import { STORY_UNDERSTANDING_INSTRUCTIONS, STORY_UNDERSTANDING_PROMPT_VERSION, STORY_UNDERSTANDING_TASK_TYPE, validateStoryUnderstandingOutput } from "./story-understanding-contract.js";
+import { normalizeNewsText } from "./news-content-normalizer.js";
 
 const MAX_STORY_INPUT_BYTES = 512 * 1024;
 
@@ -58,10 +59,10 @@ function buildCanonicalEntities(article: NewsArticle): StoryUnderstandingCanonic
 export function buildStoryUnderstandingInput(article: NewsArticle): StoryUnderstandingInput {
   const input: StoryUnderstandingInput = {
     articleId: article.id,
-    title: article.title,
-    summary: article.summary ?? null,
-    body: article.body ?? null,
-    fetchedBody: article.fetchedBody ?? null,
+    title: normalizeNewsText(article.title),
+    summary: article.summary ? normalizeNewsText(article.summary) : null,
+    body: article.body ? normalizeNewsText(article.body) : null,
+    fetchedBody: article.fetchedBody ? normalizeNewsText(article.fetchedBody) : null,
     author: article.author ?? null,
     source: {
       id: article.sourceId ?? article.source?.id ?? null,

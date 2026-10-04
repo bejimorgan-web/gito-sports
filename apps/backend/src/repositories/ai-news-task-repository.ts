@@ -140,13 +140,27 @@ export class AiNewsTaskRepository {
   }
 
   fail(taskId: string, code = "provider_error"): AiNewsTask {
+    const providerFailureMessages: Record<string, string> = {
+      configuration_missing: "AI provider configuration is incomplete. Check the server key, endpoint, and model settings.",
+      authentication_failed: "The AI provider rejected authentication (HTTP 401). Check the server API key.",
+      access_denied: "The AI provider denied access (HTTP 403). Check the key's project access and API permissions.",
+      resource_not_found: "The AI provider endpoint or configured model was not found (HTTP 404). Check both settings.",
+      rate_limited: "The AI provider rate limited the request (HTTP 429). Check quota or retry later.",
+      request_rejected: "The AI provider rejected the request (HTTP 4xx). Check provider request compatibility.",
+      upstream_unavailable: "The AI provider is temporarily unavailable (HTTP 5xx). Retry later.",
+      request_failed: "The AI provider request failed before a valid response was received.",
+      response_invalid: "The AI provider returned a response GiTO could not parse.",
+      timeout: "The AI provider request timed out.",
+      unavailable: "The configured AI provider or route is unavailable.",
+      capability_unsupported: "The selected AI provider lacks a required capability."
+    };
     const failure = code === "output_validation_failed"
       ? { code, message: "AI output failed contract validation" }
       : code === "persistence_error"
         ? { code, message: "AI result could not be safely persisted" }
-        : code === "capability_unsupported"
-          ? { code: "provider_capability_unsupported", message: "The selected AI provider lacks a required capability" }
-        : { code: "provider_error", message: "AI provider task failed" };
+        : providerFailureMessages[code]
+          ? { code: code === "capability_unsupported" ? "provider_capability_unsupported" : `provider_${code}`, message: providerFailureMessages[code]! }
+          : { code: "provider_error", message: "AI provider task failed" };
     const result = this.db.prepare(`UPDATE ai_tasks SET status = 'failed', completed_at = ?, failure_code = ?, failure_message = ?
       WHERE id = ? AND status = 'running'`).run(new Date().toISOString(), failure.code, failure.message, taskId);
     if (Number(result.changes) !== 1) throw new Error("ai_task_invalid_transition");

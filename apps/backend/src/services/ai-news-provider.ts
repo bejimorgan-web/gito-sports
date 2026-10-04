@@ -91,7 +91,7 @@ export interface AiProviderTaskResponse {
 export interface AiProviderExecutionMetadata { provider: string; model: string }
 
 export class AiProviderError extends Error {
-  constructor(readonly code: "unavailable" | "request_failed" | "response_invalid" | "capability_unsupported" | "timeout", readonly retryable = false) {
+  constructor(readonly code: "unavailable" | "configuration_missing" | "authentication_failed" | "access_denied" | "resource_not_found" | "rate_limited" | "request_rejected" | "upstream_unavailable" | "request_failed" | "response_invalid" | "capability_unsupported" | "timeout", readonly retryable = false) {
     super(code);
     this.name = "AiProviderError";
   }
@@ -112,7 +112,7 @@ export class OpenAiCompatibleTaskProvider implements AiTaskProviderAdapter {
   constructor(provider = "openai-compatible") { this.provider = provider; }
 
   async execute(request: AiProviderTaskRequest, configuration: AiProviderConfiguration): Promise<AiProviderTaskResponse> {
-    if (!configuration.apiKey || !configuration.baseUrl || !configuration.model) throw new AiProviderError("unavailable");
+    if (!configuration.apiKey || !configuration.baseUrl || !configuration.model) throw new AiProviderError("configuration_missing");
     assertCapabilities(request, configuration, this.capabilities);
     const controller = new AbortController();
     const startedAt = Date.now();
@@ -134,7 +134,14 @@ export class OpenAiCompatibleTaskProvider implements AiTaskProviderAdapter {
         }),
         signal: controller.signal
       });
-      if (!response.ok) throw new AiProviderError("request_failed", response.status === 429 || response.status >= 500);
+      if (!response.ok) {
+        const code = response.status === 401 ? "authentication_failed"
+          : response.status === 403 ? "access_denied"
+          : response.status === 404 ? "resource_not_found"
+              : response.status === 429 ? "rate_limited"
+                : response.status >= 500 ? "upstream_unavailable" : "request_rejected";
+        throw new AiProviderError(code, response.status === 429 || response.status >= 500);
+      }
       const declaredLength = Number(response.headers.get("content-length") ?? 0);
       if (declaredLength > 1024 * 1024) throw new AiProviderError("response_invalid");
       const responseText = await response.text();
@@ -229,7 +236,7 @@ export class AiNewsTaskRunner {
         result = await adapter.execute({ ...request, model: configuration.model, timeoutMs: configuration.timeoutMs ?? request.timeoutMs }, configuration);
       } catch (error) {
         if (configuration !== candidates[candidates.length - 1]) continue;
-        return this.failOrReadCurrent(running.id, error instanceof AiProviderError && error.code === "capability_unsupported" ? "capability_unsupported" : "provider_error");
+        return this.failOrReadCurrent(running.id, error instanceof AiProviderError ? error.code : "provider_error");
       }
       let output: unknown;
       try { output = validateOutput ? validateOutput(result.output) : result.output; }

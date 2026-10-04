@@ -8,6 +8,7 @@ import { AiNewsTaskRunner, AiTaskProviderRegistry, type AiProviderConfiguration 
 import { AiNewsTaskService } from "./ai-news-task-service.js";
 import { STORY_UNDERSTANDING_PROMPT_VERSION } from "./story-understanding-contract.js";
 import { StoryUnderstandingService } from "./story-understanding-service.js";
+import { buildStoryUnderstandingInput } from "./story-understanding-service.js";
 
 const article = {
   id: "article-1", title: "City wins", slug: "city-wins", summary: null, body: "City beat United next weekend.", bodyBlocks: [], status: "draft",
@@ -49,6 +50,14 @@ test("understands one canonical article with provenance, idempotency, owner scop
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM ai_tasks").get()?.n, 1);
   assert.equal(tasks.getGeneration(first.task.id)?.output && (tasks.getGeneration(first.task.id)?.output as any).uncertainty.ambiguities.length, 0);
   db.close();
+});
+
+test("Story Understanding receives fetched article content as normalized plain text", () => {
+  const input = buildStoryUnderstandingInput({ ...article, title: "<b>England</b> win", summary: "<p>Seven goals &amp; joy</p>", body: "<p>England won.</p><widget id=\"14\"></widget>", fetchedBody: "<p>Full match report</p>" } as NewsArticle);
+  assert.equal(input.title, "England win");
+  assert.equal(input.summary, "Seven goals & joy");
+  assert.equal(input.body, "England won.");
+  assert.equal(input.fetchedBody, "Full match report");
 });
 
 test("invalid provider output fails safely without generation or article changes", async () => {

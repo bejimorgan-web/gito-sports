@@ -914,9 +914,9 @@ export class NewsService {
       }
 
       const timestamp = new Date().toISOString();
-      const nextBody = existing.body && existing.body.trim().length > 0 ? existing.body : fetchedBody;
+      const nextBody = existing.body && existing.body.trim().length > 0 ? normalizeNewsText(existing.body) : fetchedBody;
       const nextSummary = existing.summary && existing.summary.trim().length > 0
-        ? existing.summary
+        ? normalizeNewsText(existing.summary)
         : extracted.summary ?? existing.summary ?? null;
 
       const updated = this.repository.updateArticle(articleId, {
@@ -1041,8 +1041,8 @@ export class NewsService {
       const summaryText = this.extractTextValue(record["description"]) ?? this.extractTextValue(record["headline"]) ?? null;
       if (bodyText || summaryText) {
         return {
-          body: bodyText,
-          summary: summaryText
+          body: bodyText ? normalizeNewsText(bodyText) : null,
+          summary: summaryText ? normalizeNewsText(summaryText) : null
         };
       }
     }

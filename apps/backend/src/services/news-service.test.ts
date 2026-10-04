@@ -5,6 +5,13 @@ process.env.GITO_NEWS_TEST_MODE = "true";
 
 const { NewsService } = await import("./news-service.js");
 
+test("article content extraction strips source HTML while retaining its text", () => {
+  const service = Object.create(NewsService.prototype) as InstanceType<typeof NewsService>;
+  const jsonLd = JSON.stringify({ "@type": "NewsArticle", articleBody: `<p>England won &amp; played well.</p><p><strong>Harry Kane</strong> scored twice.</p><widget id="14"></widget>` });
+  const result = (service as any).extractArticleContentFromHtml(`<!doctype html><html><head><script type="application/ld+json">${jsonLd}</script></head></html>`);
+  assert.equal(result.body, "England won & played well.\n\nHarry Kane scored twice.");
+});
+
 test("news service can create and publish an article", () => {
   const service = new NewsService();
 
@@ -62,7 +69,7 @@ test("news service can fetch article content from JSON-LD and preserve status", 
     const result = await service.fetchArticleContent(article.id);
     assert.equal(result.success, true);
     assert.equal(result.contentOrigin, "fetched_page");
-    assert.equal(result.body, "<p>Full fetched body</p>");
+    assert.equal(result.body, "Full fetched body");
     assert.ok(result.fetchedAt);
 
     const updated = service.getArticle(article.id);
@@ -70,8 +77,8 @@ test("news service can fetch article content from JSON-LD and preserve status", 
     assert.equal(updated?.status, "draft");
     assert.equal(updated?.contentOrigin, "fetched_page");
     assert.equal(updated?.fetchStatus, "success");
-    assert.equal(updated?.body, "<p>Full fetched body</p>");
-    assert.equal(updated?.fetchedBody, "<p>Full fetched body</p>");
+    assert.equal(updated?.body, "Full fetched body");
+    assert.equal(updated?.fetchedBody, "Full fetched body");
   } finally {
     globalThis.fetch = originalFetch;
   }

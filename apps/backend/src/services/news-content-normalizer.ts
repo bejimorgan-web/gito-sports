@@ -51,6 +51,7 @@ export function normalizeNewsText(input?: string | null): string {
 
   // Collapse whitespace but preserve paragraph breaks.
   text = text.replace(/\r\n|\r/g, "\n");
+  text = text.replace(/[ \t\f\v]*\n[ \t\f\v]*/g, "\n");
   text = text.replace(/\n[ \t\f\v]*\n+/g, "\n\n");
   text = text.replace(/[ \t\f\v]+/g, " ");
   text = text.replace(/\n{3,}/g, "\n\n");

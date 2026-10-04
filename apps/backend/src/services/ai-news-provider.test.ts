@@ -71,7 +71,17 @@ test("compatible protocol errors are normalized without exposing provider respon
   try {
     await assert.rejects(() => new OpenAiCompatibleTaskProvider().execute(request,
       { provider: "arbitrary-profile", model: "model", baseUrl: "https://provider.invalid", apiKey: "secret" }),
-    (error) => error instanceof AiProviderError && error.code === "request_failed" && error.retryable && !error.message.includes("secret"));
+    (error) => error instanceof AiProviderError && error.code === "upstream_unavailable" && error.retryable && !error.message.includes("secret"));
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("compatible protocol reports safe provider failure categories without returning its body", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response("sensitive provider response", { status: 401 })) as typeof fetch;
+  try {
+    await assert.rejects(() => new OpenAiCompatibleTaskProvider().execute(request,
+      { provider: "arbitrary-profile", model: "model", baseUrl: "https://provider.invalid", apiKey: "test-only" }),
+    (error) => error instanceof AiProviderError && error.code === "authentication_failed" && !error.message.includes("sensitive"));
   } finally { globalThis.fetch = originalFetch; }
 });
 
