@@ -128,7 +128,7 @@ curl -X GET https://gito-sports.onrender.com/api/health
 
 ### Check if migration token is set
 ```bash
-echo $MIGRATION_IMPORT_TOKEN
+if [ -n "${MIGRATION_IMPORT_TOKEN:-}" ]; then echo "MIGRATION_IMPORT_TOKEN is configured"; else echo "MIGRATION_IMPORT_TOKEN is missing"; fi
 ```
 
 ### Run all 3 validation steps
@@ -212,10 +212,10 @@ curl https://www.rendeerstatus.com/api/v2/status.json 2>/dev/null | grep -o '"st
 ### If token error
 ```bash
 # Verify local token is set
-echo $MIGRATION_IMPORT_TOKEN
+if [ -n "${MIGRATION_IMPORT_TOKEN:-}" ]; then echo "MIGRATION_IMPORT_TOKEN is configured"; else echo "MIGRATION_IMPORT_TOKEN is missing"; fi
 
-# Verify token in production (via logs)
-# Check Render dashboard: Logs → Backend
+# Verify the token is configured without displaying its value
+# Check Render dashboard: Environment → MIGRATION_IMPORT_TOKEN
 ```
 
 ### If foreign key errors

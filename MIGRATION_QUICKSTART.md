@@ -93,8 +93,8 @@ npm rebuild better-sqlite3 --build-from-source
 
 ### Import fails: "401 Unauthorized"
 ```bash
-# Check token
-echo $MIGRATION_IMPORT_TOKEN
+# Check whether the token is set without displaying its value
+if [ -n "${MIGRATION_IMPORT_TOKEN:-}" ]; then echo "MIGRATION_IMPORT_TOKEN is configured"; else echo "MIGRATION_IMPORT_TOKEN is missing"; fi
 
 # Check backend has migration routes added
 curl https://gito-sports.onrender.com/api/admin/migration/status \

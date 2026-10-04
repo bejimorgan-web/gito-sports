@@ -116,13 +116,12 @@ export function createApp() {
 
   app.get("/__debug/migration-auth", (req, res) => {
     res.json({
-      env_token: process.env.MIGRATION_IMPORT_TOKEN ?? null,
-      auth_header: req.headers.authorization ?? null,
+      authorization_header_present: Boolean(req.headers.authorization),
       node_env: process.env.NODE_ENV,
     });
   });
 
-  // Lightweight version & env endpoint to verify deployed code and env vars
+  // Lightweight public version endpoint; never return deployment credentials.
   app.get("/__debug/version", (req, res) => {
     let commit: string | null = process.env.RENDER_GIT_COMMIT || process.env.DEPLOY_COMMIT || null;
     try {
@@ -145,9 +144,6 @@ export function createApp() {
 
     res.json({
       commit: commit,
-      env_token: process.env.MIGRATION_IMPORT_TOKEN ?? null,
-      database_path: process.env.DATABASE_PATH ?? null,
-      jwt_secret_present: Boolean(process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 24),
       node_env: process.env.NODE_ENV ?? null,
       timestamp: new Date().toISOString(),
     });

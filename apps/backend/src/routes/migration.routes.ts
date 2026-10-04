@@ -26,7 +26,7 @@ function formatError(error: unknown): string {
 
 // Middleware: Validate admin authentication (JWT OR migration token)
 function validateAdminAuth(req: Request, res: Response, next: Function) {
-  console.log('MIGRATION AUTH HEADER:', req.headers.authorization);
+  console.log('MIGRATION AUTH HEADER:', req.headers.authorization ? 'present' : 'absent');
   console.log('MIGRATION USER BEFORE AUTH:', (req as any).user);
 
   const authHeader = req.headers.authorization;
@@ -147,7 +147,7 @@ function handleImportAll(req: Request, res: Response) {
 
   // --- Authentication (route-level, do not rely on upstream req.user) ---
   const incomingAuthHeader = (req.headers.authorization ?? '').toString();
-  console.log('MIGRATION AUTH HEADER:', incomingAuthHeader || null);
+  console.log('MIGRATION AUTH HEADER:', incomingAuthHeader ? 'present' : 'absent');
 
   const token = incomingAuthHeader.startsWith('Bearer ')
     ? incomingAuthHeader.slice('Bearer '.length)
