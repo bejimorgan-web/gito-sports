@@ -16,10 +16,20 @@ export const newsSchemaPath = path.join(
   "news-schema.sql"
 );
 
+export const aiNewsSchemaPath = path.join(
+  currentDirectory,
+  "schema",
+  "ai-news-schema.sql"
+);
+
 export function readInitialSchema(): string {
   return fs.readFileSync(initialSchemaPath, "utf8");
 }
 
 export function readNewsSchema(): string {
   return fs.readFileSync(newsSchemaPath, "utf8");
+}
+
+export function readAiNewsSchema(): string {
+  return fs.readFileSync(aiNewsSchemaPath, "utf8");
 }

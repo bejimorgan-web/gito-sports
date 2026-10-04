@@ -78,6 +78,26 @@ export { canTransitionMatch, canTransitionStream } from "./lifecycle.js";
 
 // NEWS
 export type {
+  AiNewsGeneration,
+  AiNewsTask,
+  AiNewsTaskStatus,
+  AiNewsTaskType,
+  AiNewsUsageMetadata,
+  CreateAiNewsTaskRequest,
+  StoryUnderstandingBasis,
+  StoryUnderstandingCanonicalEntity,
+  StoryUnderstandingClaimType,
+  StoryUnderstandingEntity,
+  StoryUnderstandingEntityType,
+  StoryUnderstandingInput,
+  StoryUnderstandingIntent,
+  StoryUnderstandingOutput,
+  StoryUnderstandingStoryType,
+  StoryUnderstandingTimeType
+} from "./ai-news.js";
+export { aiNewsTaskStatuses, aiNewsTaskTypes } from "./ai-news.js";
+
+export type {
   NewsArticle,
   NewsArticleAuditEntry,
   NewsArticleBodyBlock,

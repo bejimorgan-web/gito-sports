@@ -1,23 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import Database from "better-sqlite3";
 import { AiNewsClassificationService, type AiClassificationProvider } from "./ai-news-classification-service.js";
 
 function database() {
-  const db = new Database(":memory:");
-  db.exec(`
-    CREATE TABLE teams (id TEXT PRIMARY KEY, name TEXT, short_name TEXT, slug TEXT, status TEXT);
-    CREATE TABLE competitions (id TEXT PRIMARY KEY, name TEXT, slug TEXT, status TEXT);
-    CREATE TABLE countries (id TEXT PRIMARY KEY, name TEXT, status TEXT);
-    CREATE TABLE sports (id TEXT PRIMARY KEY, name TEXT, slug TEXT, status TEXT);
-    CREATE TABLE matches (id TEXT PRIMARY KEY, starts_at TEXT);
-  `);
-  db.prepare("INSERT INTO teams VALUES ('team-bayern', 'Bayern Munich', 'Bayern', 'bayern-munich', 'active'), ('team-dortmund', 'Borussia Dortmund', 'Dortmund', 'borussia-dortmund', 'active')").run();
-  db.prepare("INSERT INTO competitions VALUES ('competition-bundesliga', 'Bundesliga', 'bundesliga', 'active')").run();
-  db.prepare("INSERT INTO countries VALUES ('country-germany', 'Germany', 'active')").run();
-  db.prepare("INSERT INTO sports VALUES ('sport-football', 'Football', 'football', 'active')").run();
-  db.prepare("INSERT INTO matches VALUES ('match-1', '2026-08-20T15:00:00Z')").run();
-  return db;
+  const rowsByQuery: Record<string, unknown[]> = {
+    "SELECT id, name, short_name, slug FROM teams WHERE status = 'active' ORDER BY name": [
+      { id: "team-bayern", name: "Bayern Munich", short_name: "Bayern", slug: "bayern-munich" },
+      { id: "team-dortmund", name: "Borussia Dortmund", short_name: "Dortmund", slug: "borussia-dortmund" }
+    ],
+    "SELECT id, name, slug FROM competitions WHERE status = 'active' ORDER BY name": [{ id: "competition-bundesliga", name: "Bundesliga", slug: "bundesliga" }],
+    "SELECT id, name FROM countries WHERE status = 'active' ORDER BY name": [{ id: "country-germany", name: "Germany" }],
+    "SELECT id, name, slug FROM sports WHERE status = 'active' ORDER BY name": [{ id: "sport-football", name: "Football", slug: "football" }],
+    "SELECT id, id AS name FROM matches ORDER BY starts_at": [{ id: "match-1", name: "match-1" }]
+  };
+  return { prepare(sql: string) { return { all: () => rowsByQuery[sql] ?? [] }; } } as any;
 }
 
 function provider(response: unknown): AiClassificationProvider {

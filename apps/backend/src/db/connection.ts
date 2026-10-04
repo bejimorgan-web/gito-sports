@@ -6,7 +6,7 @@ import { DatabaseSync, allowSqliteInstantiation } from "./sqlite.js";
 
 import { env, runtimeConfig } from "../config/env.js";
 import { listBackups } from "../services/database-backup-service.js";
-import { readInitialSchema, readNewsSchema } from "./schema.js";
+import { readAiNewsSchema, readInitialSchema, readNewsSchema } from "./schema.js";
 import { startBackupService, stopBackupService } from "../services/database-backup-service.js";
 import { scheduleBackgroundJob } from "../background/backgroundJobRunner.js";
 import { stopBackgroundJobs } from "../background/backgroundJobRunner.js";
@@ -292,8 +292,11 @@ export function getDatabase(): DatabaseSync {
       console.log("[startup] applied news schema extensions");
     }
     ensureNewsSchemaColumns(database);
+    if (!runtimeConfig.dbReadOnlyMode) {
+      database.exec(readAiNewsSchema());
+    }
   } catch (err) {
-    console.error("[startup] failed to apply news schema", err);
+    console.error("[startup] failed to apply News/AI schema", err);
     throw err;
   }
 

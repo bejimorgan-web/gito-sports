@@ -1,10 +1,11 @@
 import type Database from "better-sqlite3";
+import { randomUUID } from "node:crypto";
 import type { NewsArticleCategoryType, NewsClassificationSuggestion } from "@gito/shared";
-import { env, runtimeConfig } from "../config/env.js";
+import { runtimeConfig } from "../config/env.js";
+import { createAiTaskProviderRegistry, executeAiRequest, getAiProviderConfiguration } from "./ai-news-provider.js";
 
 const SUPPORTED_TYPES = new Set<NewsArticleCategoryType>(["team", "competition", "country", "sport", "match"]);
 const MAX_SUGGESTIONS = 20;
-const MAX_RESPONSE_BYTES = 256 * 1024;
 
 export interface AiClassificationRequest {
   title: string;
@@ -15,41 +16,30 @@ export interface AiClassificationRequest {
 }
 
 export interface AiClassificationProvider {
-  classify(request: AiClassificationRequest, catalog: Record<string, Array<{ id: string; name: string; shortName?: string; slug?: string }>>): Promise<unknown>;
+  classify(request: AiClassificationRequest, catalog: Record<string, Array<{ id: string; name: string; shortName?: string; slug?: string }>>, validateOutput?: (output: unknown) => unknown): Promise<unknown>;
 }
 
 export class AiClassificationUnavailableError extends Error {
   constructor() { super("ai_classification_unavailable"); }
 }
 
-export class OpenAiCompatibleClassificationProvider implements AiClassificationProvider {
-  async classify(request: AiClassificationRequest, catalog: Record<string, Array<{ id: string; name: string; shortName?: string; slug?: string }>>): Promise<unknown> {
-    if (!runtimeConfig.aiClassificationEnabled || !env.aiApiKey || !env.aiBaseUrl) throw new AiClassificationUnavailableError();
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), runtimeConfig.aiClassificationTimeoutMs);
+export class GatewayAiClassificationProvider implements AiClassificationProvider {
+  async classify(request: AiClassificationRequest, catalog: Record<string, Array<{ id: string; name: string; shortName?: string; slug?: string }>>, validateOutput?: (output: unknown) => unknown): Promise<unknown> {
+    if (!runtimeConfig.aiClassificationEnabled) throw new AiClassificationUnavailableError();
     try {
-      const payload = {
-        model: env.aiModel,
-        temperature: 0,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: "Return only JSON with a suggestions array. Suggest only IDs from the supplied catalog. Never approve relationships. Each suggestion must contain categoryType, entityId, confidence (1-100), and concise reason." },
-          { role: "user", content: JSON.stringify({ article: { title: request.title, summary: request.summary ?? null, text: (request.normalizedText ?? "").slice(0, 12000), sourceUrl: request.sourceUrl ?? null }, catalog, deterministicSuggestions: request.deterministicSuggestions.map(({ categoryType, entityId, confidence, reason }) => ({ categoryType, entityId, confidence, reason })) }) }
-        ]
-      };
-      const response = await fetch(env.aiBaseUrl, { method: "POST", signal: controller.signal, headers: { "content-type": "application/json", authorization: `Bearer ${env.aiApiKey}` }, body: JSON.stringify(payload) });
-      const contentLength = Number(response.headers.get("content-length") ?? 0);
-      if (contentLength > MAX_RESPONSE_BYTES) throw new AiClassificationUnavailableError();
-      const text = await response.text();
-      if (!response.ok || Buffer.byteLength(text, "utf8") > MAX_RESPONSE_BYTES) throw new AiClassificationUnavailableError();
-      const envelope = JSON.parse(text) as any;
-      const content = envelope?.choices?.[0]?.message?.content;
-      if (typeof content !== "string") throw new AiClassificationUnavailableError();
-      return JSON.parse(content);
-    } catch (error) {
-      if (error instanceof AiClassificationUnavailableError) throw error;
+      const configuration = getAiProviderConfiguration("classification");
+      const result = await executeAiRequest(createAiTaskProviderRegistry(), configuration, {
+        taskId: randomUUID(), taskType: "classification", model: configuration.model, promptVersion: "classification-v1",
+        correlationId: randomUUID(), instructions: "Return only JSON with a suggestions array. Suggest only IDs from the supplied catalog. Never approve relationships. Each suggestion must contain categoryType, entityId, confidence (1-100), and concise reason.",
+        input: { article: { title: request.title, summary: request.summary ?? null, text: (request.normalizedText ?? "").slice(0, 12000), sourceUrl: request.sourceUrl ?? null }, catalog,
+          deterministicSuggestions: request.deterministicSuggestions.map(({ categoryType, entityId, confidence, reason }) => ({ categoryType, entityId, confidence, reason })) },
+        output: { mode: "json" }, generation: { temperature: 0 }, requiredCapabilities: ["text-generation", "structured-output", "json-mode"],
+        timeoutMs: runtimeConfig.aiClassificationTimeoutMs, retry: { maxAttempts: 1 }, metadata: { operation: "news-classification" }
+      }, validateOutput);
+      return result.output;
+    } catch {
       throw new AiClassificationUnavailableError();
-    } finally { clearTimeout(timeout); }
+    }
   }
 }
 
@@ -77,8 +67,9 @@ export class AiNewsClassificationService {
 
   async classify(request: AiClassificationRequest, articleId: string): Promise<NewsClassificationSuggestion[]> {
     const catalog = this.buildCatalog();
-    const raw = await this.provider.classify(request, catalog);
-    return this.validate(raw, articleId, catalog);
+    const validate = (output: unknown) => this.validate(output, articleId, catalog);
+    const raw = await this.provider.classify(request, catalog, validate);
+    return Array.isArray(raw) ? raw as NewsClassificationSuggestion[] : validate(raw);
   }
 
   private catalogItem(row: { id: string; name: string; short_name?: string | null; slug?: string | null }) {
@@ -107,4 +98,4 @@ export class AiNewsClassificationService {
   }
 }
 
-export const defaultAiNewsClassificationService = (database: Database) => new AiNewsClassificationService(database, new OpenAiCompatibleClassificationProvider());
+export const defaultAiNewsClassificationService = (database: Database) => new AiNewsClassificationService(database, new GatewayAiClassificationProvider());

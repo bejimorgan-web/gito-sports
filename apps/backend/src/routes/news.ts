@@ -1,12 +1,23 @@
 import { Router } from "express";
 import type { Request } from "express";
 import { protectedRoute } from "../middleware/protected.js";
+import { aiNewsTaskRouter } from "./ai-news-tasks.js";
+import { aiStoryUnderstandingRouter } from "./ai-story-understanding.js";
+import { aiResearchRouter } from "./ai-research.js";
+import { aiClaimsRouter } from "./ai-claims.js";
+import { aiArticleGenerationRouter } from "./ai-article-generation.js";
 import type { AuthenticatedRequest } from "../middleware/protected.js";
 import { NewsService } from "../services/news-service.js";
 import { buildNewsRssXml, NewsRssService, validateRssUrl } from "../services/news-rss-service.js";
 import { getWebRssUserMessage, NewsWebRssGeneratorService } from "../services/news-web-rss-generator-service.js";
 
 export const newsRouter = Router();
+
+newsRouter.use("/ai/tasks", aiNewsTaskRouter);
+newsRouter.use("/ai/story-understanding", aiStoryUnderstandingRouter);
+newsRouter.use("/ai/research", aiResearchRouter);
+newsRouter.use("/ai", aiClaimsRouter);
+newsRouter.use("/ai", aiArticleGenerationRouter);
 const newsService = new NewsService();
 const newsRssService = new NewsRssService();
 const webRssGeneratorService = new NewsWebRssGeneratorService();

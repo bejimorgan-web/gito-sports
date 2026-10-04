@@ -47,13 +47,27 @@ export function validateRssUrl(value: string): URL {
 
 function isPrivateIp(hostname: string): boolean {
   if (net.isIP(hostname) === 4) {
-    const [first, second] = hostname.split(".").map(Number);
+    const [parsedFirst, second] = hostname.split(".").map(Number);
+    const first = parsedFirst ?? -1;
     const secondOctet = second ?? -1;
-    return first === 10 || first === 127 || (first === 172 && secondOctet >= 16 && secondOctet <= 31) || (first === 192 && secondOctet === 168) || (first === 169 && secondOctet === 254) || first === 0;
+    return first === 10 || first === 127 || (first === 172 && secondOctet >= 16 && secondOctet <= 31) ||
+      (first === 192 && (secondOctet === 0 || secondOctet === 168)) || (first === 169 && secondOctet === 254) || first === 0 ||
+      (first === 100 && secondOctet >= 64 && secondOctet <= 127) || (first === 198 && (secondOctet === 18 || secondOctet === 19)) ||
+      first >= 224;
   }
   if (net.isIP(hostname) === 6) {
     const normalized = hostname.toLowerCase();
-    return normalized === "::1" || normalized === "::" || normalized.startsWith("fe80:") || normalized.startsWith("fc") || normalized.startsWith("fd");
+    if (normalized.startsWith("::ffff:")) {
+      const tail = normalized.slice("::ffff:".length);
+      if (net.isIP(tail) === 4) return isPrivateIp(tail);
+      const groups = tail.split(":");
+      if (groups.length === 2) {
+        const high = Number.parseInt(groups[0] ?? "", 16); const low = Number.parseInt(groups[1] ?? "", 16);
+        if (Number.isFinite(high) && Number.isFinite(low)) return isPrivateIp(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`);
+      }
+    }
+    return normalized === "::1" || normalized === "::" || normalized.startsWith("fe80:") || normalized.startsWith("fc") ||
+      normalized.startsWith("fd") || normalized.startsWith("ff");
   }
   return false;
 }
@@ -66,7 +80,7 @@ export async function assertPublicHostname(hostname: string): Promise<void> {
   }
 }
 
-export async function fetchPublicTextDocument(inputUrl: string, accept = "text/html, application/xhtml+xml;q=0.9") : Promise<{ text: string; contentType: string }> {
+export async function fetchPublicTextDocumentDetailed(inputUrl: string, accept = "text/html, application/xhtml+xml;q=0.9", fetcher: typeof fetch = fetch): Promise<{ text: string; contentType: string; status: number; finalUrl: string }> {
   let url = validateRssUrl(inputUrl);
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
     await assertPublicHostname(url.hostname);
@@ -74,47 +88,51 @@ export async function fetchPublicTextDocument(inputUrl: string, accept = "text/h
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     let response: Response;
     try {
-      response = await fetch(url, {
+      response = await fetcher(url, {
         redirect: "manual",
         signal: controller.signal,
         headers: { accept }
       });
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("location");
+        if (!location || redirect === MAX_REDIRECTS) throw new Error("rss_redirect_limit_exceeded");
+        url = validateRssUrl(new URL(location, url).toString());
+        continue;
+      }
+      if (!response.ok) throw new Error(`rss_fetch_failed_${response.status}`);
+      const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+      const allowsHtml = /html/i.test(accept);
+      if (contentType && !(allowsHtml ? /(html|xhtml|text\/plain)/i.test(contentType) : /(xml|rss|atom|text\/plain)/i.test(contentType))) throw new Error("rss_content_type_not_supported");
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        const text = await response.text();
+        if (Buffer.byteLength(text, "utf8") > MAX_RESPONSE_BYTES) throw new Error("rss_response_too_large");
+        return { text, contentType, status: response.status, finalUrl: url.toString() };
+      }
+      const chunks: Buffer[] = [];
+      let total = 0;
+      while (true) {
+        const next = await reader.read();
+        if (next.done) break;
+        total += next.value.byteLength;
+        if (total > MAX_RESPONSE_BYTES) {
+          await reader.cancel();
+          throw new Error("rss_response_too_large");
+        }
+        chunks.push(Buffer.from(next.value));
+      }
+      return { text: Buffer.concat(chunks).toString("utf8"), contentType, status: response.status, finalUrl: url.toString() };
     } finally {
       clearTimeout(timeout);
     }
-
-    if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get("location");
-      if (!location || redirect === MAX_REDIRECTS) throw new Error("rss_redirect_limit_exceeded");
-      url = validateRssUrl(new URL(location, url).toString());
-      continue;
-    }
-    if (!response.ok) throw new Error(`rss_fetch_failed_${response.status}`);
-    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-    const allowsHtml = /html/i.test(accept);
-    if (contentType && !(allowsHtml ? /(html|xhtml|text\/plain)/i.test(contentType) : /(xml|rss|atom|text\/plain)/i.test(contentType))) throw new Error("rss_content_type_not_supported");
-
-    const reader = response.body?.getReader();
-    if (!reader) {
-      const text = await response.text();
-      if (Buffer.byteLength(text, "utf8") > MAX_RESPONSE_BYTES) throw new Error("rss_response_too_large");
-      return { text, contentType };
-    }
-    const chunks: Buffer[] = [];
-    let total = 0;
-    while (true) {
-      const next = await reader.read();
-      if (next.done) break;
-      total += next.value.byteLength;
-      if (total > MAX_RESPONSE_BYTES) {
-        await reader.cancel();
-        throw new Error("rss_response_too_large");
-      }
-      chunks.push(Buffer.from(next.value));
-    }
-    return { text: Buffer.concat(chunks).toString("utf8"), contentType };
   }
   throw new Error("rss_redirect_limit_exceeded");
+}
+
+export async function fetchPublicTextDocument(inputUrl: string, accept = "text/html, application/xhtml+xml;q=0.9"): Promise<{ text: string; contentType: string }> {
+  const { text, contentType } = await fetchPublicTextDocumentDetailed(inputUrl, accept);
+  return { text, contentType };
 }
 
 function feedName(xml: string, fallback: string): string {
