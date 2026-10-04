@@ -4,7 +4,7 @@ import test from "node:test";
 import type { NewsArticle } from "@gito/shared";
 import { readAiNewsSchema } from "../db/schema.js";
 import { AiNewsTaskRepository } from "../repositories/ai-news-task-repository.js";
-import { AiNewsTaskRunner, AiTaskProviderRegistry, type AiProviderConfiguration } from "./ai-news-provider.js";
+import { AiNewsTaskRunner, AiProviderError, AiTaskProviderRegistry, type AiProviderConfiguration } from "./ai-news-provider.js";
 import { AiNewsTaskService } from "./ai-news-task-service.js";
 import { STORY_UNDERSTANDING_PROMPT_VERSION } from "./story-understanding-contract.js";
 import { StoryUnderstandingService } from "./story-understanding-service.js";
@@ -75,5 +75,27 @@ test("provider failure leaves the canonical article unchanged", async () => {
   assert.equal(result.task.status, "failed"); assert.equal(result.task.failureCode, "provider_error"); assert.equal(result.task.failureMessage, "AI provider task failed");
   assert.equal(tasks.getGeneration(result.task.id), null);
   assert.deepEqual({ ...db.prepare("SELECT title, body, summary, status FROM news_articles WHERE id='article-1'").get() }, { title: "Original title", body: "Original body", summary: "Original summary", status: "draft" });
+  db.close();
+});
+
+test("Story Understanding preserves safe upstream HTTP diagnostics without changing its failure code", async () => {
+  const { db, svc } = setup(() => {
+    throw new AiProviderError("resource_not_found", false, {
+      provider: "gemini",
+      model: "gemini-3.8-flash",
+      url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      httpStatus: 404,
+      errorCode: "404",
+      errorStatus: "NOT_FOUND",
+      message: "model unavailable",
+      retryable: false
+    });
+  });
+  const result = await svc.understand(article.id, "operator-1", "operator", { promptVersion: STORY_UNDERSTANDING_PROMPT_VERSION });
+  assert.equal(result.task.status, "failed");
+  assert.equal(result.task.failureCode, "provider_resource_not_found");
+  assert.match(result.task.failureMessage ?? "", /AI provider endpoint or configured model was not found \(HTTP 404\)/);
+  assert.match(result.task.failureMessage ?? "", /AI_PROVIDER_REQUEST_FAILED provider=gemini httpStatus=404 model=gemini-3\.8-flash/);
+  assert.match(result.task.failureMessage ?? "", /errorCode=404 errorStatus=NOT_FOUND message="model unavailable" retryable=false/);
   db.close();
 });

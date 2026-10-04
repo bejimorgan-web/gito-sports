@@ -139,7 +139,7 @@ export class AiNewsTaskRepository {
     return this.requireTask(taskId);
   }
 
-  fail(taskId: string, code = "provider_error"): AiNewsTask {
+  fail(taskId: string, code = "provider_error", diagnostic?: string): AiNewsTask {
     const providerFailureMessages: Record<string, string> = {
       configuration_missing: "AI provider configuration is incomplete. Check the server key, endpoint, and model settings.",
       authentication_failed: "The AI provider rejected authentication (HTTP 401). Check the server API key.",
@@ -161,8 +161,9 @@ export class AiNewsTaskRepository {
         : providerFailureMessages[code]
           ? { code: code === "capability_unsupported" ? "provider_capability_unsupported" : `provider_${code}`, message: providerFailureMessages[code]! }
           : { code: "provider_error", message: "AI provider task failed" };
+    const failureMessage = diagnostic ? `${failure.message} ${diagnostic}` : failure.message;
     const result = this.db.prepare(`UPDATE ai_tasks SET status = 'failed', completed_at = ?, failure_code = ?, failure_message = ?
-      WHERE id = ? AND status = 'running'`).run(new Date().toISOString(), failure.code, failure.message, taskId);
+      WHERE id = ? AND status = 'running'`).run(new Date().toISOString(), failure.code, failureMessage, taskId);
     if (Number(result.changes) !== 1) throw new Error("ai_task_invalid_transition");
     return this.requireTask(taskId);
   }

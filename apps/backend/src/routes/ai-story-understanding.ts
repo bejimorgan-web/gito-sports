@@ -23,7 +23,8 @@ function providerFailureMessage(error: AiProviderError): string {
     capability_unsupported: "The selected AI provider lacks a required capability.",
     timeout: "The AI provider request timed out."
   };
-  return messages[error.code];
+  const diagnostic = error.toDiagnosticMessage();
+  return diagnostic ? `${messages[error.code]} ${diagnostic}` : messages[error.code];
 }
 
 export interface StoryUnderstandingRouteDependencies {

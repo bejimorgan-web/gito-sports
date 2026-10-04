@@ -90,10 +90,43 @@ export interface AiProviderTaskResponse {
 }
 export interface AiProviderExecutionMetadata { provider: string; model: string }
 
+export interface AiProviderFailureDiagnostics {
+  provider: string;
+  model: string;
+  url: string;
+  httpStatus?: number;
+  errorCode?: string;
+  errorStatus?: string;
+  errorType?: string;
+  message?: string;
+  retryable: boolean;
+}
+
 export class AiProviderError extends Error {
-  constructor(readonly code: "unavailable" | "configuration_missing" | "authentication_failed" | "access_denied" | "resource_not_found" | "rate_limited" | "request_rejected" | "upstream_unavailable" | "request_failed" | "response_invalid" | "capability_unsupported" | "timeout", readonly retryable = false) {
+  constructor(
+    readonly code: "unavailable" | "configuration_missing" | "authentication_failed" | "access_denied" | "resource_not_found" | "rate_limited" | "request_rejected" | "upstream_unavailable" | "request_failed" | "response_invalid" | "capability_unsupported" | "timeout",
+    readonly retryable = false,
+    readonly diagnostics?: AiProviderFailureDiagnostics
+  ) {
     super(code);
     this.name = "AiProviderError";
+  }
+
+  toDiagnosticMessage(): string | undefined {
+    const detail = this.diagnostics;
+    if (!detail) return undefined;
+    return [
+      "AI_PROVIDER_REQUEST_FAILED",
+      `provider=${detail.provider}`,
+      ...(detail.httpStatus == null ? [] : [`httpStatus=${detail.httpStatus}`]),
+      `model=${detail.model}`,
+      `url=${detail.url}`,
+      ...(detail.errorCode == null ? [] : [`errorCode=${detail.errorCode}`]),
+      ...(detail.errorStatus == null ? [] : [`errorStatus=${detail.errorStatus}`]),
+      ...(detail.errorType == null ? [] : [`errorType=${detail.errorType}`]),
+      ...(detail.message == null ? [] : [`message="${detail.message}"`]),
+      `retryable=${detail.retryable}`
+    ].join(" ");
   }
 }
 
@@ -127,6 +160,97 @@ function getProviderRequestModel(model: string, baseUrl: string): string {
   return isGeminiOpenAiCompatibleEndpoint(baseUrl) ? model.replace(/^google\//i, "") : model;
 }
 
+function safeDiagnosticText(value: string, apiKey: string, requestInput: unknown, maxLength = 240): string {
+  let safe = value.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
+  if (apiKey) safe = safe.split(apiKey).join("[REDACTED]");
+  safe = safe
+    .replace(/\bBearer\s+\S+/gi, "Bearer [REDACTED]")
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, "[REDACTED]")
+    .replace(/\b(?:authorization|api[_ -]?key|password|cookie)\b\s*[:=]\s*[^,\s;]+/gi, "[REDACTED]");
+
+  const redactArticleStrings = (input: unknown): void => {
+    if (typeof input === "string") {
+      if (input.length >= 8) safe = safe.split(input).join("[ARTICLE_CONTENT]");
+    } else if (Array.isArray(input)) {
+      input.forEach(redactArticleStrings);
+    } else if (input && typeof input === "object") {
+      Object.values(input).forEach(redactArticleStrings);
+    }
+  };
+  redactArticleStrings(requestInput);
+  return safe.slice(0, maxLength);
+}
+
+function safeDiagnosticUrl(value: string, apiKey: string, requestInput: unknown): string {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "[non-http provider URL]";
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    return safeDiagnosticText(url.toString(), apiKey, requestInput, 512);
+  } catch {
+    return "[invalid provider URL]";
+  }
+}
+
+async function readBoundedResponseText(response: Response, maxBytes = 4096): Promise<{ text: string; truncated: boolean }> {
+  if (!response.body) return { text: "", truncated: false };
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let bytesRead = 0;
+  while (bytesRead < maxBytes) {
+    const chunk = await reader.read();
+    if (chunk.done) {
+      reader.releaseLock();
+      return { text: `${text}${decoder.decode()}`, truncated: false };
+    }
+    const remaining = maxBytes - bytesRead;
+    const bytes = chunk.value.subarray(0, remaining);
+    bytesRead += bytes.byteLength;
+    text += decoder.decode(bytes, { stream: true });
+    if (chunk.value.byteLength > remaining) break;
+  }
+  try { await reader.cancel(); } finally { reader.releaseLock(); }
+  return { text: `${text}${decoder.decode()}`, truncated: true };
+}
+
+function getProviderErrorFields(text: string, truncated: boolean, apiKey: string, requestInput: unknown): Pick<AiProviderFailureDiagnostics, "errorCode" | "errorStatus" | "errorType" | "message"> {
+  if (truncated) return { message: "Provider error response exceeded the diagnostic size limit" };
+  if (!text.trim()) return {};
+  try {
+    const payload: unknown = JSON.parse(text);
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return { message: "Malformed provider error response" };
+    const record = payload as Record<string, unknown>;
+    const error = record.error && typeof record.error === "object" && !Array.isArray(record.error)
+      ? record.error as Record<string, unknown>
+      : record;
+    const errorCode = typeof error.code === "string" || typeof error.code === "number"
+      ? safeDiagnosticText(String(error.code), apiKey, requestInput, 80)
+      : undefined;
+    const errorStatus = typeof error.status === "string"
+      ? safeDiagnosticText(error.status, apiKey, requestInput, 80)
+      : undefined;
+    const errorType = typeof error.type === "string"
+      ? safeDiagnosticText(error.type, apiKey, requestInput, 80)
+      : undefined;
+    const message = typeof error.message === "string"
+      ? safeDiagnosticText(error.message, apiKey, requestInput)
+      : undefined;
+    return {
+      ...(errorCode ? { errorCode } : {}),
+      ...(errorStatus ? { errorStatus } : {}),
+      ...(errorType ? { errorType } : {}),
+      ...(message ? { message } : {})
+    };
+  } catch {
+    if (/^\s*[\[{]/.test(text)) return { message: "Malformed provider error response" };
+    return { message: safeDiagnosticText(text, apiKey, requestInput) };
+  }
+}
+
 /** Generic transport for any endpoint implementing the required OpenAI-compatible
  * chat-completions surface. No provider/vendor names or model names are embedded. */
 export class OpenAiCompatibleTaskProvider implements AiTaskProviderAdapter {
@@ -140,12 +264,19 @@ export class OpenAiCompatibleTaskProvider implements AiTaskProviderAdapter {
     const controller = new AbortController();
     const startedAt = Date.now();
     const timer = setTimeout(() => controller.abort(), request.timeoutMs || configuration.timeoutMs || 20_000);
+    const requestUrl = getProviderRequestUrl(configuration.baseUrl);
+    const requestModel = getProviderRequestModel(request.model, configuration.baseUrl);
+    const diagnosticContext = {
+      provider: safeDiagnosticText(configuration.provider, configuration.apiKey, request.input, 80),
+      model: safeDiagnosticText(requestModel, configuration.apiKey, request.input, 120),
+      url: safeDiagnosticUrl(requestUrl, configuration.apiKey, request.input)
+    };
     try {
-      const response = await fetch(getProviderRequestUrl(configuration.baseUrl), {
+      const response = await fetch(requestUrl, {
         method: "POST",
         headers: { authorization: `Bearer ${configuration.apiKey}`, "content-type": "application/json" },
         body: JSON.stringify({
-          model: getProviderRequestModel(request.model, configuration.baseUrl),
+          model: requestModel,
           ...(request.output.mode === "json" && supports(configuration, "json-mode", this.capabilities) ? { response_format: { type: "json_object" } } : {}),
           ...(request.generation?.temperature == null ? {} : { temperature: request.generation.temperature }),
           ...(request.generation?.maxOutputTokens == null ? {} : { max_tokens: request.generation.maxOutputTokens }),
@@ -163,7 +294,23 @@ export class OpenAiCompatibleTaskProvider implements AiTaskProviderAdapter {
           : response.status === 404 ? "resource_not_found"
               : response.status === 429 ? "rate_limited"
                 : response.status >= 500 ? "upstream_unavailable" : "request_rejected";
-        throw new AiProviderError(code, response.status === 429 || response.status >= 500);
+        let providerBody: { text: string; truncated: boolean };
+        let providerBodyReadFailed = false;
+        try {
+          providerBody = await readBoundedResponseText(response);
+        } catch {
+          providerBody = { text: "", truncated: false };
+          providerBodyReadFailed = true;
+        }
+        const diagnostics: AiProviderFailureDiagnostics = {
+          ...diagnosticContext,
+          httpStatus: response.status,
+          ...(providerBodyReadFailed
+            ? { message: "Provider error response could not be read" }
+            : getProviderErrorFields(providerBody.text, providerBody.truncated, configuration.apiKey, request.input)),
+          retryable: response.status === 429 || response.status >= 500
+        };
+        throw new AiProviderError(code, diagnostics.retryable, diagnostics);
       }
       const declaredLength = Number(response.headers.get("content-length") ?? 0);
       if (declaredLength > 1024 * 1024) throw new AiProviderError("response_invalid");
@@ -184,8 +331,8 @@ export class OpenAiCompatibleTaskProvider implements AiTaskProviderAdapter {
       };
     } catch (error) {
       if (error instanceof AiProviderError) throw error;
-      if (controller.signal.aborted) throw new AiProviderError("timeout", true);
-      throw new AiProviderError("request_failed", true);
+      const retryable = true;
+      throw new AiProviderError(controller.signal.aborted ? "timeout" : "request_failed", retryable, { ...diagnosticContext, retryable });
     } finally { clearTimeout(timer); }
   }
 }
@@ -259,7 +406,11 @@ export class AiNewsTaskRunner {
         result = await adapter.execute({ ...request, model: configuration.model, timeoutMs: configuration.timeoutMs ?? request.timeoutMs }, configuration);
       } catch (error) {
         if (configuration !== candidates[candidates.length - 1]) continue;
-        return this.failOrReadCurrent(running.id, error instanceof AiProviderError ? error.code : "provider_error");
+        return this.failOrReadCurrent(
+          running.id,
+          error instanceof AiProviderError ? error.code : "provider_error",
+          error instanceof AiProviderError ? error.toDiagnosticMessage() : undefined
+        );
       }
       let output: unknown;
       try { output = validateOutput ? validateOutput(result.output) : result.output; }
@@ -281,8 +432,8 @@ export class AiNewsTaskRunner {
     return this.failOrReadCurrent(running.id, validationFailed ? "output_validation_failed" : "provider_error");
   }
 
-  private failOrReadCurrent(taskId: string, code: string): AiNewsTask {
-    try { return this.repository.fail(taskId, code); }
+  private failOrReadCurrent(taskId: string, code: string, diagnostic?: string): AiNewsTask {
+    try { return this.repository.fail(taskId, code, diagnostic); }
     catch {
       const latest = this.repository.getById(taskId);
       if (latest) return latest;

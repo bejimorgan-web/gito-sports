@@ -16,10 +16,12 @@ test("OpenAI compatible provider forwards bounded structured verification input"
   }) as typeof fetch;
   try {
     const provider = new OpenAiCompatibleTaskProvider();
-    await provider.execute(request,
+    await provider.execute({ ...request, generation: { temperature: 0 } },
     { provider: "openai-compatible", model: "mock", baseUrl: "https://provider.invalid", apiKey: "test-only" });
     const userPayload = JSON.parse(captured.messages[1].content);
     assert.equal(captured.model, "mock");
+    assert.equal(captured.temperature, 0);
+    assert.deepEqual(captured.response_format, { type: "json_object" });
     assert.deepEqual(userPayload.input.claim, { id: "claim-1" });
     assert.deepEqual(userPayload.input.evidence, [{ id: "evidence-1", text: "passage" }]);
   } finally { globalThis.fetch = originalFetch; }
@@ -112,6 +114,133 @@ test("compatible protocol reports safe provider failure categories without retur
     await assert.rejects(() => new OpenAiCompatibleTaskProvider().execute(request,
       { provider: "arbitrary-profile", model: "model", baseUrl: "https://provider.invalid", apiKey: "test-only" }),
     (error) => error instanceof AiProviderError && error.code === "authentication_failed" && !error.message.includes("sensitive"));
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("HTTP provider errors retain safe bounded diagnostics for common status codes", async () => {
+  const originalFetch = globalThis.fetch;
+  const cases = [
+    { status: 404, code: "resource_not_found", retryable: false },
+    { status: 401, code: "authentication_failed", retryable: false },
+    { status: 403, code: "access_denied", retryable: false },
+    { status: 429, code: "rate_limited", retryable: true },
+    { status: 500, code: "upstream_unavailable", retryable: true }
+  ] as const;
+  const apiKey = "test-gemini-api-key";
+  const authorization = "test-authorization-value";
+  const password = "test-password-value";
+  const articleText = "Private article content must never be returned";
+  const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzZWNyZXQifQ.signature123456";
+  try {
+    for (const current of cases) {
+      const providerBody = JSON.stringify({
+        error: {
+          code: current.status,
+          status: current.status === 404 ? "NOT_FOUND"
+            : current.status === 401 ? "UNAUTHENTICATED"
+              : current.status === 403 ? "PERMISSION_DENIED"
+                : current.status === 429 ? "RESOURCE_EXHAUSTED" : "INTERNAL",
+          type: "provider_error",
+          message: `model unavailable; api_key=${apiKey}; Authorization: Bearer ${authorization}; password=${password}; ${jwt}; ${articleText}`
+        }
+      });
+      globalThis.fetch = (async () => new Response(providerBody, { status: current.status })) as typeof fetch;
+      let thrown: unknown;
+      try {
+        await new OpenAiCompatibleTaskProvider().execute({ ...request, input: { articleBody: articleText } }, {
+          provider: "gemini",
+          model: "gemini-3.8-flash",
+          baseUrl: "https://user:pass@generativelanguage.googleapis.com/v1beta/openai/chat/completions?secret=query-secret#fragment",
+          apiKey
+        });
+      } catch (error) { thrown = error; }
+
+      assert.ok(thrown instanceof AiProviderError);
+      assert.equal(thrown.code, current.code);
+      assert.equal(thrown.retryable, current.retryable);
+      assert.equal(thrown.diagnostics?.httpStatus, current.status);
+      assert.equal(thrown.diagnostics?.errorCode, String(current.status));
+      assert.equal(thrown.diagnostics?.errorStatus, current.status === 404 ? "NOT_FOUND"
+        : current.status === 401 ? "UNAUTHENTICATED"
+          : current.status === 403 ? "PERMISSION_DENIED"
+            : current.status === 429 ? "RESOURCE_EXHAUSTED" : "INTERNAL");
+      assert.equal(thrown.diagnostics?.errorType, "provider_error");
+      assert.match(thrown.diagnostics?.url ?? "", /^https:\/\/generativelanguage\.googleapis\.com\//);
+      const diagnostic = thrown.toDiagnosticMessage() ?? "";
+      for (const secret of [apiKey, authorization, password, jwt, articleText, "query-secret", "user:pass", "Authorization"]) {
+        assert.equal(diagnostic.includes(secret), false, `diagnostic exposed ${secret}`);
+      }
+      assert.match(diagnostic, new RegExp(`httpStatus=${current.status}`));
+      assert.match(diagnostic, /message=/);
+      assert.equal(String(thrown).includes(apiKey), false);
+    }
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("malformed provider error body produces a safe diagnostic without its response content", async () => {
+  const originalFetch = globalThis.fetch;
+  const body = '{"error":{"message":"secret malformed response';
+  globalThis.fetch = (async () => new Response(body, { status: 404 })) as typeof fetch;
+  try {
+    await assert.rejects(
+      () => new OpenAiCompatibleTaskProvider().execute(request, {
+        provider: "gemini",
+        model: "gemini-3.8-flash",
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        apiKey: "test-only"
+      }),
+      (error) => error instanceof AiProviderError &&
+        error.code === "resource_not_found" &&
+        error.diagnostics?.message === "Malformed provider error response" &&
+        !error.toDiagnosticMessage()?.includes("secret malformed response")
+    );
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("plain-text provider errors retain only bounded sanitized message text", async () => {
+  const originalFetch = globalThis.fetch;
+  const apiKey = "test-plain-text-api-key";
+  const authorization = "test-plain-text-authorization";
+  globalThis.fetch = (async () => new Response(
+    `model unavailable Authorization: Bearer ${authorization} api_key=${apiKey}`,
+    { status: 404 }
+  )) as typeof fetch;
+  try {
+    await assert.rejects(
+      () => new OpenAiCompatibleTaskProvider().execute(request, {
+        provider: "gemini",
+        model: "gemini-3.8-flash",
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        apiKey
+      }),
+      (error) => error instanceof AiProviderError &&
+        error.diagnostics?.message?.startsWith("model unavailable") === true &&
+        !error.toDiagnosticMessage()?.includes(apiKey) &&
+        !error.toDiagnosticMessage()?.includes(authorization) &&
+        !error.toDiagnosticMessage()?.includes("Authorization")
+    );
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("provider timeout retains safe request diagnostics", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => new Promise((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+  })) as typeof fetch;
+  try {
+    await assert.rejects(
+      () => new OpenAiCompatibleTaskProvider().execute({ ...request, timeoutMs: 10 }, {
+        provider: "gemini",
+        model: "gemini-3.8-flash",
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        apiKey: "test-only"
+      }),
+      (error) => error instanceof AiProviderError &&
+        error.code === "timeout" &&
+        error.retryable &&
+        error.diagnostics?.httpStatus === undefined &&
+        /retryable=true/.test(error.toDiagnosticMessage() ?? "")
+    );
   } finally { globalThis.fetch = originalFetch; }
 });
 
