@@ -16,8 +16,9 @@ test("OpenAI compatible provider forwards bounded structured verification input"
   }) as typeof fetch;
   try {
     const provider = new OpenAiCompatibleTaskProvider();
-    await provider.execute({ ...request, generation: { temperature: 0 } },
+    const result = await provider.execute({ ...request, generation: { temperature: 0 } },
     { provider: "openai-compatible", model: "mock", baseUrl: "https://provider.invalid", apiKey: "test-only" });
+    assert.deepEqual(result.output, { status: "insufficient_evidence" });
     const userPayload = JSON.parse(captured.messages[1].content);
     assert.equal(captured.model, "mock");
     assert.equal(captured.temperature, 0);
@@ -124,7 +125,8 @@ test("HTTP provider errors retain safe bounded diagnostics for common status cod
     { status: 401, code: "authentication_failed", retryable: false },
     { status: 403, code: "access_denied", retryable: false },
     { status: 429, code: "rate_limited", retryable: true },
-    { status: 500, code: "upstream_unavailable", retryable: true }
+    { status: 500, code: "upstream_unavailable", retryable: true },
+    { status: 503, code: "upstream_unavailable", retryable: true }
   ] as const;
   const apiKey = "test-gemini-api-key";
   const authorization = "test-authorization-value";
@@ -139,7 +141,8 @@ test("HTTP provider errors retain safe bounded diagnostics for common status cod
           status: current.status === 404 ? "NOT_FOUND"
             : current.status === 401 ? "UNAUTHENTICATED"
               : current.status === 403 ? "PERMISSION_DENIED"
-                : current.status === 429 ? "RESOURCE_EXHAUSTED" : "INTERNAL",
+                : current.status === 429 ? "RESOURCE_EXHAUSTED"
+                  : current.status === 503 ? "UNAVAILABLE" : "INTERNAL",
           type: "provider_error",
           message: `model unavailable; api_key=${apiKey}; Authorization: Bearer ${authorization}; password=${password}; ${jwt}; ${articleText}`
         }
@@ -163,7 +166,8 @@ test("HTTP provider errors retain safe bounded diagnostics for common status cod
       assert.equal(thrown.diagnostics?.errorStatus, current.status === 404 ? "NOT_FOUND"
         : current.status === 401 ? "UNAUTHENTICATED"
           : current.status === 403 ? "PERMISSION_DENIED"
-            : current.status === 429 ? "RESOURCE_EXHAUSTED" : "INTERNAL");
+            : current.status === 429 ? "RESOURCE_EXHAUSTED"
+              : current.status === 503 ? "UNAVAILABLE" : "INTERNAL");
       assert.equal(thrown.diagnostics?.errorType, "provider_error");
       assert.match(thrown.diagnostics?.url ?? "", /^https:\/\/generativelanguage\.googleapis\.com\//);
       const diagnostic = thrown.toDiagnosticMessage() ?? "";
@@ -171,9 +175,113 @@ test("HTTP provider errors retain safe bounded diagnostics for common status cod
         assert.equal(diagnostic.includes(secret), false, `diagnostic exposed ${secret}`);
       }
       assert.match(diagnostic, new RegExp(`httpStatus=${current.status}`));
+      if (current.status >= 500) assert.match(diagnostic, /errorBodyFormat=json/);
       assert.match(diagnostic, /message=/);
+      assert.ok(diagnostic.length <= 2048);
       assert.equal(String(thrown).includes(apiKey), false);
     }
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("HTTP 503 omits structured error fields containing URLs", async () => {
+  const originalFetch = globalThis.fetch;
+  const privateUrl = "https://user:password@provider.invalid/error?token=fake-secret";
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    error: { code: privateUrl, status: "UNAVAILABLE", type: "provider_error", message: `See ${privateUrl}` }
+  }), { status: 503 })) as typeof fetch;
+  try {
+    await assert.rejects(
+      () => new OpenAiCompatibleTaskProvider().execute(request, {
+        provider: "gemini",
+        model: "gemini-3.8-flash",
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        apiKey: "test-only"
+      }),
+      (error) => error instanceof AiProviderError &&
+        error.diagnostics?.errorStatus === "UNAVAILABLE" &&
+        error.diagnostics?.errorCode === undefined &&
+        error.diagnostics?.message === undefined &&
+        !error.toDiagnosticMessage()?.includes(privateUrl) &&
+        !error.toDiagnosticMessage()?.includes("fake-secret")
+    );
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("HTTP 503 diagnostics never include the outbound request body", async () => {
+  const originalFetch = globalThis.fetch;
+  let outboundRequestBody = "";
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    outboundRequestBody = String(init?.body ?? "");
+    return new Response(JSON.stringify({ error: { code: 503, status: "UNAVAILABLE", message: "Try again later" } }), { status: 503 });
+  }) as typeof fetch;
+  try {
+    let thrown: unknown;
+    try {
+      await new OpenAiCompatibleTaskProvider().execute(request, {
+        provider: "gemini",
+        model: "gemini-3.8-flash",
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        apiKey: "test-only"
+      });
+    } catch (error) { thrown = error; }
+    assert.ok(thrown instanceof AiProviderError);
+    assert.ok(outboundRequestBody.length > 0);
+    assert.equal(thrown.toDiagnosticMessage()?.includes(outboundRequestBody), false);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("HTTP 503 plain text and malformed JSON expose only a bounded response-format category", async () => {
+  const originalFetch = globalThis.fetch;
+  const bodies = [
+    { body: "Internal backend detail including private source text", expectedFormat: "plain_text" },
+    { body: '{"error":{"message":"internal backend detail"', expectedFormat: "malformed_json" }
+  ] as const;
+  try {
+    for (const { body, expectedFormat } of bodies) {
+      globalThis.fetch = (async () => new Response(body, { status: 503 })) as typeof fetch;
+      let thrown: unknown;
+      try {
+        await new OpenAiCompatibleTaskProvider().execute(request, {
+          provider: "gemini",
+          model: "gemini-3.8-flash",
+          baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+          apiKey: "test-only"
+        });
+      } catch (error) { thrown = error; }
+      assert.ok(thrown instanceof AiProviderError);
+      assert.equal(thrown.code, "upstream_unavailable");
+      assert.equal(thrown.retryable, true);
+      assert.equal(thrown.diagnostics?.errorBodyFormat, expectedFormat);
+      const diagnostic = thrown.toDiagnosticMessage() ?? "";
+      assert.ok(diagnostic.length <= 2048);
+      assert.equal(diagnostic.includes(body), false);
+      if (expectedFormat === "plain_text") assert.equal(thrown.diagnostics?.message, undefined);
+      if (expectedFormat === "malformed_json") assert.equal(thrown.diagnostics?.message, "Malformed provider error response");
+    }
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("HTTP 503 oversized error bodies are truncated without persisting their contents", async () => {
+  const originalFetch = globalThis.fetch;
+  const body = JSON.stringify({ error: { message: "provider detail ".repeat(1000) } });
+  globalThis.fetch = (async () => new Response(body, { status: 503 })) as typeof fetch;
+  try {
+    let thrown: unknown;
+    try {
+      await new OpenAiCompatibleTaskProvider().execute(request, {
+        provider: "gemini",
+        model: "gemini-3.8-flash",
+        baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        apiKey: "test-only"
+      });
+    } catch (error) { thrown = error; }
+    assert.ok(thrown instanceof AiProviderError);
+    assert.equal(thrown.diagnostics?.errorBodyFormat, "truncated");
+    assert.equal(thrown.diagnostics?.message, "Provider error response exceeded the diagnostic size limit");
+    const diagnostic = thrown.toDiagnosticMessage() ?? "";
+    assert.ok(diagnostic.length <= 2048);
+    assert.equal(diagnostic.includes(body), false);
+    assert.equal(diagnostic.includes("provider detail"), false);
   } finally { globalThis.fetch = originalFetch; }
 });
 

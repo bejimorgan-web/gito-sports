@@ -100,8 +100,11 @@ export interface AiProviderFailureDiagnostics {
   errorStatus?: string;
   errorType?: string;
   message?: string;
+  errorBodyFormat?: "json" | "malformed_json" | "json_non_object" | "plain_text" | "empty" | "truncated" | "unreadable";
   retryable: boolean;
 }
+
+const MAX_PROVIDER_DIAGNOSTIC_LENGTH = 2048;
 
 export class AiProviderError extends Error {
   constructor(
@@ -125,9 +128,10 @@ export class AiProviderError extends Error {
       ...(detail.errorCode == null ? [] : [`errorCode=${detail.errorCode}`]),
       ...(detail.errorStatus == null ? [] : [`errorStatus=${detail.errorStatus}`]),
       ...(detail.errorType == null ? [] : [`errorType=${detail.errorType}`]),
+      ...(detail.errorBodyFormat == null ? [] : [`errorBodyFormat=${detail.errorBodyFormat}`]),
       ...(detail.message == null ? [] : [`message="${detail.message}"`]),
       `retryable=${detail.retryable}`
-    ].join(" ");
+    ].join(" ").slice(0, MAX_PROVIDER_DIAGNOSTIC_LENGTH);
   }
 }
 
@@ -218,36 +222,46 @@ async function readBoundedResponseText(response: Response, maxBytes = 4096): Pro
   return { text: `${text}${decoder.decode()}`, truncated: true };
 }
 
-function getProviderErrorFields(text: string, truncated: boolean, apiKey: string, requestInput: unknown): Pick<AiProviderFailureDiagnostics, "errorCode" | "errorStatus" | "errorType" | "message"> {
-  if (truncated) return { message: "Provider error response exceeded the diagnostic size limit" };
-  if (!text.trim()) return {};
+type ProviderErrorFields = Pick<AiProviderFailureDiagnostics, "errorCode" | "errorStatus" | "errorType" | "message" | "errorBodyFormat">;
+
+function getProviderErrorFields(text: string, truncated: boolean, apiKey: string, requestInput: unknown, includeBodyFormat: boolean): ProviderErrorFields {
+  const withFormat = (format: NonNullable<AiProviderFailureDiagnostics["errorBodyFormat"]>) => includeBodyFormat ? { errorBodyFormat: format } : {};
+  if (truncated) return { ...withFormat("truncated"), message: "Provider error response exceeded the diagnostic size limit" };
+  if (!text.trim()) return withFormat("empty");
   try {
     const payload: unknown = JSON.parse(text);
-    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return { message: "Malformed provider error response" };
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return { ...withFormat("json_non_object"), message: "Malformed provider error response" };
+    }
     const record = payload as Record<string, unknown>;
     const error = record.error && typeof record.error === "object" && !Array.isArray(record.error)
       ? record.error as Record<string, unknown>
       : record;
+    const safeField = (value: string, maxLength: number) => (
+      includeBodyFormat && /https?:\/\//i.test(value) ? undefined : safeDiagnosticText(value, apiKey, requestInput, maxLength)
+    );
     const errorCode = typeof error.code === "string" || typeof error.code === "number"
-      ? safeDiagnosticText(String(error.code), apiKey, requestInput, 80)
+      ? safeField(String(error.code), 80)
       : undefined;
     const errorStatus = typeof error.status === "string"
-      ? safeDiagnosticText(error.status, apiKey, requestInput, 80)
+      ? safeField(error.status, 80)
       : undefined;
     const errorType = typeof error.type === "string"
-      ? safeDiagnosticText(error.type, apiKey, requestInput, 80)
+      ? safeField(error.type, 80)
       : undefined;
     const message = typeof error.message === "string"
-      ? safeDiagnosticText(error.message, apiKey, requestInput)
+      ? safeField(error.message, 240)
       : undefined;
     return {
+      ...withFormat("json"),
       ...(errorCode ? { errorCode } : {}),
       ...(errorStatus ? { errorStatus } : {}),
       ...(errorType ? { errorType } : {}),
       ...(message ? { message } : {})
     };
   } catch {
-    if (/^\s*[\[{]/.test(text)) return { message: "Malformed provider error response" };
+    if (/^\s*[\[{]/.test(text)) return { ...withFormat("malformed_json"), message: "Malformed provider error response" };
+    if (includeBodyFormat) return { errorBodyFormat: "plain_text" };
     return { message: safeDiagnosticText(text, apiKey, requestInput) };
   }
 }
@@ -307,8 +321,8 @@ export class OpenAiCompatibleTaskProvider implements AiTaskProviderAdapter {
           ...diagnosticContext,
           httpStatus: response.status,
           ...(providerBodyReadFailed
-            ? { message: "Provider error response could not be read" }
-            : getProviderErrorFields(providerBody.text, providerBody.truncated, configuration.apiKey, request.input)),
+            ? { message: "Provider error response could not be read", ...(response.status >= 500 ? { errorBodyFormat: "unreadable" as const } : {}) }
+            : getProviderErrorFields(providerBody.text, providerBody.truncated, configuration.apiKey, request.input, response.status >= 500)),
           retryable: response.status === 429 || response.status >= 500
         };
         throw new AiProviderError(code, diagnostics.retryable, diagnostics);
