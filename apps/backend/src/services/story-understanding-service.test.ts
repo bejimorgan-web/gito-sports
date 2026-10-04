@@ -76,9 +76,11 @@ test("invalid provider output fails safely without generation or article changes
   const result = await svc.understand(article.id, "operator-1", "operator", { promptVersion: STORY_UNDERSTANDING_PROMPT_VERSION });
   assert.equal(result.task.status, "failed");
   assert.equal(result.task.failureCode, "output_validation_failed");
-  assert.equal(result.task.failureMessage, "AI output failed contract validation AI_OUTPUT_VALIDATION_FAILED validationCode=result_shape_invalid");
+  assert.equal(result.task.failureMessage, "AI output failed contract validation AI_OUTPUT_VALIDATION_FAILED validationCode=result_shape_invalid resultValueType=object resultShapeIssue=key_count_mismatch resultObjectKeyCount=10 expectedObjectKeyCount=8");
   for (const privateValue of privateValues) assert.equal(result.task.failureMessage?.includes(privateValue), false);
   assert.equal(result.task.failureMessage?.includes(JSON.stringify(invalidOutput)), false);
+  assert.equal(result.task.failureMessage?.includes("verificationStatus"), false);
+  assert.equal(result.task.failureMessage?.includes("privateModelOutput"), false);
   assert.equal(result.generation, null);
   assert.deepEqual({ ...db.prepare("SELECT status FROM news_articles WHERE id='article-1'").get() }, { status: "draft" });
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM ai_generations").get()?.n, 0);

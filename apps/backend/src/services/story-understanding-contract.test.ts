@@ -60,3 +60,44 @@ test("formats only bounded allowlisted Story Understanding validation codes", ()
     undefined
   );
 });
+
+test("reports only safe structural metadata for an invalid top-level result", () => {
+  const invalidValues: Array<{ value: unknown; type: string; issue: string }> = [
+    { value: null, type: "null", issue: "not_object" },
+    { value: ["private-array-content"], type: "array", issue: "not_object" },
+    { value: "private-string-content", type: "string", issue: "not_object" },
+    { value: 42, type: "number", issue: "not_object" },
+    { value: true, type: "boolean", issue: "not_object" },
+    { value: new Date(0), type: "object", issue: "not_object" },
+    { value: { "private-key": "private-object-content" }, type: "object", issue: "key_count_mismatch" }
+  ];
+
+  for (const { value, type, issue } of invalidValues) {
+    let error: unknown;
+    try {
+      validateStoryUnderstandingOutput(value, input);
+    } catch (caught) {
+      error = caught;
+    }
+    assert.ok(error instanceof StoryUnderstandingValidationError);
+    const diagnostic = formatSafeStoryUnderstandingValidationDiagnostic(error);
+    assert.ok(diagnostic?.includes(`resultValueType=${type}`));
+    assert.ok(diagnostic?.includes(`resultShapeIssue=${issue}`));
+    assert.equal(diagnostic?.includes("private"), false);
+  }
+
+  const unexpectedKeyValue = valid() as Record<string, unknown>;
+  delete unexpectedKeyValue.uncertainty;
+  unexpectedKeyValue["private-key"] = "private-object-content";
+  let unexpectedKeyError: unknown;
+  try {
+    validateStoryUnderstandingOutput(unexpectedKeyValue, input);
+  } catch (caught) {
+    unexpectedKeyError = caught;
+  }
+  assert.ok(unexpectedKeyError instanceof StoryUnderstandingValidationError);
+  const unexpectedKeyDiagnostic = formatSafeStoryUnderstandingValidationDiagnostic(unexpectedKeyError);
+  assert.ok(unexpectedKeyDiagnostic?.includes("resultShapeIssue=unexpected_keys"));
+  assert.ok(unexpectedKeyDiagnostic?.includes("resultObjectKeyCount=8 expectedObjectKeyCount=8"));
+  assert.equal(unexpectedKeyDiagnostic?.includes("private"), false);
+});

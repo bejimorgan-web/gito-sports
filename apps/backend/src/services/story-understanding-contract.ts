@@ -31,7 +31,10 @@ function record(value: unknown): value is Record<string, unknown> {
 
 function shape(value: unknown, keys: readonly string[], path: string): asserts value is Record<string, unknown> {
   if (!record(value) || Object.keys(value).length !== keys.length || Object.keys(value).some((key) => !keys.includes(key))) {
-    throw new StoryUnderstandingValidationError(`${path}_shape_invalid`);
+    throw new StoryUnderstandingValidationError(
+      `${path}_shape_invalid`,
+      path === "result" ? getResultShapeDiagnostic(value, keys) : undefined
+    );
   }
 }
 
@@ -66,10 +69,38 @@ function isoDate(value: unknown, path: string): asserts value is string | null {
 }
 
 export class StoryUnderstandingValidationError extends Error {
-  constructor(readonly code: string) {
+  constructor(readonly code: string, readonly resultShape?: StoryUnderstandingResultShapeDiagnostic) {
     super(code);
     this.name = "StoryUnderstandingValidationError";
   }
+}
+
+export interface StoryUnderstandingResultShapeDiagnostic {
+  valueType: "object" | "array" | "string" | "number" | "boolean" | "null" | "unknown";
+  issue: "not_object" | "key_count_mismatch" | "unexpected_keys";
+  objectKeyCount?: number;
+  expectedObjectKeyCount?: number;
+}
+
+function getResultShapeDiagnostic(value: unknown, expectedKeys: readonly string[]): StoryUnderstandingResultShapeDiagnostic {
+  if (value === null) return { valueType: "null", issue: "not_object" };
+  if (Array.isArray(value)) return { valueType: "array", issue: "not_object" };
+  if (typeof value !== "object") {
+    const valueType = typeof value;
+    return {
+      valueType: valueType === "string" || valueType === "number" || valueType === "boolean" ? valueType : "unknown",
+      issue: "not_object"
+    };
+  }
+  if (!record(value)) return { valueType: "object", issue: "not_object" };
+
+  const keyCount = Object.keys(value).length;
+  return {
+    valueType: "object",
+    issue: keyCount !== expectedKeys.length ? "key_count_mismatch" : "unexpected_keys",
+    objectKeyCount: Math.min(keyCount, 100_000),
+    expectedObjectKeyCount: expectedKeys.length
+  };
 }
 
 const safeValidationCodePatterns = [
@@ -87,9 +118,33 @@ const safeValidationCodePatterns = [
   /^uncertainty_unresolved_entities(?:_(?:[0-9]|[1-9][0-9]))?_invalid$/
 ] as const;
 
+function isBoundedCount(value: number | undefined, max: number): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= max;
+}
+
 export function formatSafeStoryUnderstandingValidationDiagnostic(error: StoryUnderstandingValidationError): string | undefined {
   if (error.code.length > 80 || !safeValidationCodePatterns.some((pattern) => pattern.test(error.code))) return undefined;
-  return `AI_OUTPUT_VALIDATION_FAILED validationCode=${error.code}`;
+  const resultShape = error.code === "result_shape_invalid" ? error.resultShape : undefined;
+  if (!resultShape) return `AI_OUTPUT_VALIDATION_FAILED validationCode=${error.code}`;
+  const valueTypes = ["object", "array", "string", "number", "boolean", "null", "unknown"] as const;
+  const issues = ["not_object", "key_count_mismatch", "unexpected_keys"] as const;
+  if (!valueTypes.includes(resultShape.valueType) || !issues.includes(resultShape.issue)) {
+    return `AI_OUTPUT_VALIDATION_FAILED validationCode=${error.code}`;
+  }
+  const objectKeyCount = resultShape.objectKeyCount;
+  const expectedObjectKeyCount = resultShape.expectedObjectKeyCount;
+  const objectKeyCountDiagnostics = resultShape.valueType === "object"
+    && isBoundedCount(objectKeyCount, 100_000)
+    && isBoundedCount(expectedObjectKeyCount, 1000)
+    ? [`resultObjectKeyCount=${objectKeyCount}`, `expectedObjectKeyCount=${expectedObjectKeyCount}`]
+    : [];
+  return [
+    "AI_OUTPUT_VALIDATION_FAILED",
+    `validationCode=${error.code}`,
+    `resultValueType=${resultShape.valueType}`,
+    `resultShapeIssue=${resultShape.issue}`,
+    ...objectKeyCountDiagnostics
+  ].join(" ");
 }
 
 export function validateStoryUnderstandingOutput(value: unknown, input: StoryUnderstandingInput): StoryUnderstandingOutput {
@@ -103,7 +158,8 @@ export function validateStoryUnderstandingOutput(value: unknown, input: StoryUnd
     throw new StoryUnderstandingValidationError("output_too_large");
   }
 
-  shape(value, ["schemaVersion", "subject", "intent", "entities", "event", "timeReferences", "keyClaims", "uncertainty"], "result");
+  const resultKeys = ["schemaVersion", "subject", "intent", "entities", "event", "timeReferences", "keyClaims", "uncertainty"] as const;
+  shape(value, resultKeys, "result");
   if (value.schemaVersion !== STORY_UNDERSTANDING_PROMPT_VERSION) throw new StoryUnderstandingValidationError("schema_version_invalid");
 
   shape(value.subject, ["primaryTopic", "topicSummary", "storyType", "basis", "confidence"], "subject");
