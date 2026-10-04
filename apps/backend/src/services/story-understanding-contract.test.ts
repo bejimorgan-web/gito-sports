@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { StoryUnderstandingInput } from "@gito/shared";
-import { MAX_STORY_UNDERSTANDING_OUTPUT_BYTES, STORY_UNDERSTANDING_PROMPT_VERSION, validateStoryUnderstandingOutput } from "./story-understanding-contract.js";
+import { formatSafeStoryUnderstandingValidationDiagnostic, MAX_STORY_UNDERSTANDING_OUTPUT_BYTES, STORY_UNDERSTANDING_PROMPT_VERSION, StoryUnderstandingValidationError, validateStoryUnderstandingOutput } from "./story-understanding-contract.js";
 
 const input: StoryUnderstandingInput = {
   articleId: "article-1", title: "City beat United", summary: null, body: "City beat United 2-1 next weekend.", fetchedBody: null,
@@ -44,4 +44,19 @@ test("rejects malformed, unbounded, unverifiable, and unsupplied canonical outpu
     const value = valid(); mutate(value);
     assert.throws(() => validateStoryUnderstandingOutput(value, input));
   }
+});
+
+test("formats only bounded allowlisted Story Understanding validation codes", () => {
+  assert.equal(
+    formatSafeStoryUnderstandingValidationDiagnostic(new StoryUnderstandingValidationError("claim_99_entities_29_invalid")),
+    "AI_OUTPUT_VALIDATION_FAILED validationCode=claim_99_entities_29_invalid"
+  );
+  assert.equal(
+    formatSafeStoryUnderstandingValidationDiagnostic(new StoryUnderstandingValidationError("private_article_text")),
+    undefined
+  );
+  assert.equal(
+    formatSafeStoryUnderstandingValidationDiagnostic(new StoryUnderstandingValidationError("x".repeat(81))),
+    undefined
+  );
 });

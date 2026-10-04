@@ -72,6 +72,26 @@ export class StoryUnderstandingValidationError extends Error {
   }
 }
 
+const safeValidationCodePatterns = [
+  /^(?:output_not_serializable|output_too_large|schema_version_invalid|entities_invalid|event_participant_not_extracted|time_references_invalid|key_claims_invalid|uncertainty_unresolved_entity_not_unresolved)$/,
+  /^(?:result|subject|intent|event|uncertainty)_shape_invalid$/,
+  /^subject_(?:primary_topic|topic_summary|story_type|basis|confidence)_invalid$/,
+  /^intent_(?:value|basis|confidence)_invalid$/,
+  /^entity_(?:0|[1-9][0-9])_(?:shape_invalid|name_invalid|type_invalid|canonical_id_invalid|resolution_status_invalid|source_text_invalid|basis_invalid|confidence_invalid|resolution_mismatch|canonical_id_not_supplied)$/,
+  /^event_(?:type|description|time_reference|location|basis|confidence|participants)_invalid$/,
+  /^event_participants_(?:[0-9]|1[0-9]|2[0-9])_invalid$/,
+  /^time_reference_(?:[0-9]|[1-4][0-9])_(?:shape_invalid|text_invalid|type_invalid|normalized_iso_invalid|basis_invalid|confidence_invalid)$/,
+  /^claim_(?:0|[1-9][0-9])_(?:shape_invalid|text_invalid|type_invalid|entities_invalid|source_context_invalid|confidence_invalid|entity_not_extracted)$/,
+  /^claim_(?:0|[1-9][0-9])_entities_(?:[0-9]|1[0-9]|2[0-9])_invalid$/,
+  /^uncertainty_(?:ambiguities|missing_information|internal_conflicts|low_confidence)(?:_(?:[0-9]|[1-4][0-9]))?_invalid$/,
+  /^uncertainty_unresolved_entities(?:_(?:[0-9]|[1-9][0-9]))?_invalid$/
+] as const;
+
+export function formatSafeStoryUnderstandingValidationDiagnostic(error: StoryUnderstandingValidationError): string | undefined {
+  if (error.code.length > 80 || !safeValidationCodePatterns.some((pattern) => pattern.test(error.code))) return undefined;
+  return `AI_OUTPUT_VALIDATION_FAILED validationCode=${error.code}`;
+}
+
 export function validateStoryUnderstandingOutput(value: unknown, input: StoryUnderstandingInput): StoryUnderstandingOutput {
   let serialized: string;
   try {

@@ -1,6 +1,7 @@
 import type { AiNewsTask, AiNewsTaskType, AiNewsUsageMetadata } from "@gito/shared";
 import { env } from "../config/env.js";
 import type { AiNewsTaskRepository } from "../repositories/ai-news-task-repository.js";
+import { formatSafeStoryUnderstandingValidationDiagnostic, StoryUnderstandingValidationError } from "./story-understanding-contract.js";
 
 export type AiCapability = "text-generation" | "structured-output" | "json-schema" | "json-mode" | "tool-calling" | "streaming" | "vision" | "embeddings" | "image-generation" | "audio-input" | "audio-output" | "reasoning-controls" | "batch";
 export type AiProviderCapabilities = Partial<Record<AiCapability, boolean>>;
@@ -414,10 +415,13 @@ export class AiNewsTaskRunner {
       }
       let output: unknown;
       try { output = validateOutput ? validateOutput(result.output) : result.output; }
-      catch {
+      catch (error) {
         validationFailed = true;
         if (configuration !== candidates[candidates.length - 1]) continue;
-        return this.failOrReadCurrent(running.id, "output_validation_failed");
+        const diagnostic = error instanceof StoryUnderstandingValidationError
+          ? formatSafeStoryUnderstandingValidationDiagnostic(error)
+          : undefined;
+        return this.failOrReadCurrent(running.id, "output_validation_failed", diagnostic);
       }
       const telemetry = { provider: result.provider ?? configuration.provider, model: result.model ?? configuration.model,
         attempt: attemptIndex + 1, validationSucceeded: true,

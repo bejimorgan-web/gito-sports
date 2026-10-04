@@ -32,8 +32,9 @@ function setup(returnOutput: () => unknown) {
   db.exec(readAiNewsSchema());
   const tasks = new AiNewsTaskRepository(db as any); const taskService = new AiNewsTaskService(tasks);
   const registry = new AiTaskProviderRegistry(); registry.register({ provider: "mock", capabilities: { "text-generation": true, "structured-output": true }, async execute(req) { assert.equal(req.taskType, "story_understanding"); return { output: returnOutput(), usage: { inputTokens: 4, outputTokens: 6, totalTokens: 10 } }; } });
-  const svc = new StoryUnderstandingService({ getArticleById: (id: string) => id === article.id ? article : null } as any, tasks, taskService, new AiNewsTaskRunner(tasks, registry, config), config);
-  return { db, tasks, svc };
+  const runner = new AiNewsTaskRunner(tasks, registry, config);
+  const svc = new StoryUnderstandingService({ getArticleById: (id: string) => id === article.id ? article : null } as any, tasks, taskService, runner, config);
+  return { db, tasks, taskService, runner, svc };
 }
 
 test("understands one canonical article with provenance, idempotency, owner scope, and no article mutation", async () => {
@@ -61,9 +62,24 @@ test("Story Understanding receives fetched article content as normalized plain t
 });
 
 test("invalid provider output fails safely without generation or article changes", async () => {
-  const { db, tasks, svc } = setup(() => ({ ...output(), verificationStatus: "verified" }));
+  const privateValues = [
+    "test-api-key-secret",
+    "Authorization: Bearer test-token",
+    "eyJhbGciOiJIUzI1NiJ9.test-payload.signature",
+    "password=test-password",
+    "private article text",
+    "private source text",
+    "private claim text"
+  ];
+  const invalidOutput = { ...output(), verificationStatus: privateValues.join(" "), privateModelOutput: output() };
+  const { db, tasks, svc } = setup(() => invalidOutput);
   const result = await svc.understand(article.id, "operator-1", "operator", { promptVersion: STORY_UNDERSTANDING_PROMPT_VERSION });
-  assert.equal(result.task.status, "failed"); assert.equal(result.task.failureCode, "output_validation_failed"); assert.equal(result.generation, null);
+  assert.equal(result.task.status, "failed");
+  assert.equal(result.task.failureCode, "output_validation_failed");
+  assert.equal(result.task.failureMessage, "AI output failed contract validation AI_OUTPUT_VALIDATION_FAILED validationCode=result_shape_invalid");
+  for (const privateValue of privateValues) assert.equal(result.task.failureMessage?.includes(privateValue), false);
+  assert.equal(result.task.failureMessage?.includes(JSON.stringify(invalidOutput)), false);
+  assert.equal(result.generation, null);
   assert.deepEqual({ ...db.prepare("SELECT status FROM news_articles WHERE id='article-1'").get() }, { status: "draft" });
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM ai_generations").get()?.n, 0);
   db.close();
@@ -75,6 +91,22 @@ test("provider failure leaves the canonical article unchanged", async () => {
   assert.equal(result.task.status, "failed"); assert.equal(result.task.failureCode, "provider_error"); assert.equal(result.task.failureMessage, "AI provider task failed");
   assert.equal(tasks.getGeneration(result.task.id), null);
   assert.deepEqual({ ...db.prepare("SELECT title, body, summary, status FROM news_articles WHERE id='article-1'").get() }, { title: "Original title", body: "Original body", summary: "Original summary", status: "draft" });
+  db.close();
+});
+
+test("non-Story Understanding validation exceptions keep the generic failure message", async () => {
+  const { db, taskService, runner } = setup(output);
+  const task = taskService.create({
+    taskType: "story_understanding",
+    articleId: article.id,
+    promptVersion: STORY_UNDERSTANDING_PROMPT_VERSION,
+    idempotencyKey: "non-validation-error"
+  }, "operator-1", config);
+  const result = await runner.run(task, { instructions: "test" }, () => {
+    throw new Error("private validator exception");
+  });
+  assert.equal(result.failureCode, "output_validation_failed");
+  assert.equal(result.failureMessage, "AI output failed contract validation");
   db.close();
 });
 
