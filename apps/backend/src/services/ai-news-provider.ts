@@ -104,6 +104,29 @@ export interface AiTaskProviderAdapter {
   execute(request: AiProviderTaskRequest, configuration: AiProviderConfiguration): Promise<AiProviderTaskResponse>;
 }
 
+const GEMINI_OPENAI_COMPATIBLE_HOST = "generativelanguage.googleapis.com";
+const GEMINI_OPENAI_COMPATIBLE_PATH = "/v1beta/openai/chat/completions";
+
+function isGeminiOpenAiCompatibleEndpoint(baseUrl: string): boolean {
+  try {
+    return new URL(baseUrl).hostname.toLowerCase() === GEMINI_OPENAI_COMPATIBLE_HOST;
+  } catch {
+    return false;
+  }
+}
+
+function getProviderRequestUrl(baseUrl: string): string {
+  if (!isGeminiOpenAiCompatibleEndpoint(baseUrl)) return baseUrl;
+  const url = new URL(baseUrl);
+  url.pathname = GEMINI_OPENAI_COMPATIBLE_PATH;
+  url.hash = "";
+  return url.toString();
+}
+
+function getProviderRequestModel(model: string, baseUrl: string): string {
+  return isGeminiOpenAiCompatibleEndpoint(baseUrl) ? model.replace(/^google\//i, "") : model;
+}
+
 /** Generic transport for any endpoint implementing the required OpenAI-compatible
  * chat-completions surface. No provider/vendor names or model names are embedded. */
 export class OpenAiCompatibleTaskProvider implements AiTaskProviderAdapter {
@@ -118,11 +141,11 @@ export class OpenAiCompatibleTaskProvider implements AiTaskProviderAdapter {
     const startedAt = Date.now();
     const timer = setTimeout(() => controller.abort(), request.timeoutMs || configuration.timeoutMs || 20_000);
     try {
-      const response = await fetch(configuration.baseUrl, {
+      const response = await fetch(getProviderRequestUrl(configuration.baseUrl), {
         method: "POST",
         headers: { authorization: `Bearer ${configuration.apiKey}`, "content-type": "application/json" },
         body: JSON.stringify({
-          model: request.model,
+          model: getProviderRequestModel(request.model, configuration.baseUrl),
           ...(request.output.mode === "json" && supports(configuration, "json-mode", this.capabilities) ? { response_format: { type: "json_object" } } : {}),
           ...(request.generation?.temperature == null ? {} : { temperature: request.generation.temperature }),
           ...(request.generation?.maxOutputTokens == null ? {} : { max_tokens: request.generation.maxOutputTokens }),

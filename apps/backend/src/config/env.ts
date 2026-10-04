@@ -84,7 +84,7 @@ const configuredGeminiApiKey = process.env.GEMINI_API_KEY?.trim() ?? "";
 const useGeminiDefaults = !configuredAiApiKey && Boolean(configuredGeminiApiKey);
 const aiApiKey = configuredAiApiKey || configuredGeminiApiKey;
 const aiProvider = process.env.AI_PROVIDER ?? "openai-compatible";
-const aiModel = process.env.AI_MODEL ?? (useGeminiDefaults ? "gemini-2.5-flash-lite" : "gpt-4o-mini");
+const aiModel = process.env.AI_MODEL ?? (useGeminiDefaults ? "gemini-2.5-flash" : "gpt-4o-mini");
 const aiBaseUrl = process.env.AI_BASE_URL ?? (useGeminiDefaults
   ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
   : "https://api.openai.com/v1/chat/completions");

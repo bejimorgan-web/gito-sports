@@ -46,6 +46,36 @@ test("generic compatible adapter accepts an arbitrary configured endpoint and re
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test("Gemini compatible endpoint is normalized and Google-prefixed models are sent without the vendor prefix", async () => {
+  const originalFetch = globalThis.fetch;
+  const captured: Array<{ url: string; model: string }> = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    captured.push({ url: String(input), model: JSON.parse(String(init?.body)).model });
+    return new Response(JSON.stringify({ choices: [{ message: { content: "{\"ok\":true}" } }] }), { status: 200 });
+  }) as typeof fetch;
+  const baseUrls = [
+    "https://generativelanguage.googleapis.com",
+    "https://generativelanguage.googleapis.com/v1beta/openai/",
+    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+  ];
+  try {
+    for (const baseUrl of baseUrls) {
+      const config: AiProviderConfiguration = {
+        provider: "gemini",
+        adapterType: "openai-compatible",
+        model: "google/gemini-2.5-flash",
+        baseUrl,
+        apiKey: "test-only"
+      };
+      await new OpenAiCompatibleTaskProvider().execute({ ...request, model: config.model }, config);
+    }
+    assert.deepEqual(captured, baseUrls.map(() => ({
+      url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      model: "gemini-2.5-flash"
+    })));
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("a native adapter can be registered without changing task code or generic adapter registration", async () => {
   let called = false;
   const native: AiTaskProviderAdapter = { provider: "native-protocol", capabilities: { "text-generation": true }, async execute(input, config) {
