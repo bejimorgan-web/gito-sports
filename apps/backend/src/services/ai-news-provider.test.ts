@@ -207,6 +207,56 @@ test("HTTP 503 omits structured error fields containing URLs", async () => {
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test("HTTP 503 non-object JSON diagnostics report only the JSON value type", async () => {
+  const originalFetch = globalThis.fetch;
+  const cases = [
+    { body: '["FAKE_API_KEY_SHOULD_NOT_APPEAR","secret-value"]', valueType: "array" },
+    { body: '"private provider response string"', valueType: "string" },
+    { body: "123", valueType: "number" },
+    { body: "true", valueType: "boolean" },
+    { body: "null", valueType: "null" }
+  ] as const;
+  let outboundRequestBody = "";
+  try {
+    for (const current of cases) {
+      globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+        outboundRequestBody = String(init?.body ?? "");
+        return new Response(current.body, { status: 503 });
+      }) as typeof fetch;
+      let thrown: unknown;
+      try {
+        await new OpenAiCompatibleTaskProvider().execute(request, {
+          provider: "gemini",
+          model: "gemini-3.8-flash",
+          baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+          apiKey: "test-only"
+        });
+      } catch (error) { thrown = error; }
+
+      assert.ok(thrown instanceof AiProviderError);
+      assert.equal(thrown.code, "upstream_unavailable");
+      assert.equal(thrown.retryable, true);
+      assert.equal(thrown.diagnostics?.errorBodyFormat, "json_non_object");
+      assert.equal(thrown.diagnostics?.jsonValueType, current.valueType);
+      const diagnostic = thrown.toDiagnosticMessage() ?? "";
+      assert.ok(diagnostic.length <= 2048);
+      assert.equal(diagnostic.includes(outboundRequestBody), false);
+      assert.equal(thrown.diagnostics?.errorCode, undefined);
+      assert.equal(thrown.diagnostics?.errorStatus, undefined);
+      assert.equal(thrown.diagnostics?.errorType, undefined);
+      assert.equal(thrown.diagnostics?.message, "Malformed provider error response");
+      assert.equal(diagnostic.includes("FAKE_API_KEY_SHOULD_NOT_APPEAR"), false);
+      assert.equal(diagnostic.includes("secret-value"), false);
+      assert.equal(diagnostic.includes("private provider response string"), false);
+      assert.equal(diagnostic.includes('message="true"'), false);
+      assert.equal(diagnostic.includes('message="123"'), false);
+      assert.equal(diagnostic.includes('message="null"'), false);
+      assert.equal(diagnostic.includes("Authorization"), false);
+      assert.equal(diagnostic.includes("test-only"), false);
+    }
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("HTTP 503 diagnostics never include the outbound request body", async () => {
   const originalFetch = globalThis.fetch;
   let outboundRequestBody = "";

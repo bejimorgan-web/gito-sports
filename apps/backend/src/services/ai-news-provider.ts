@@ -101,6 +101,7 @@ export interface AiProviderFailureDiagnostics {
   errorType?: string;
   message?: string;
   errorBodyFormat?: "json" | "malformed_json" | "json_non_object" | "plain_text" | "empty" | "truncated" | "unreadable";
+  jsonValueType?: "array" | "string" | "number" | "boolean" | "null" | "unknown";
   retryable: boolean;
 }
 
@@ -129,6 +130,7 @@ export class AiProviderError extends Error {
       ...(detail.errorStatus == null ? [] : [`errorStatus=${detail.errorStatus}`]),
       ...(detail.errorType == null ? [] : [`errorType=${detail.errorType}`]),
       ...(detail.errorBodyFormat == null ? [] : [`errorBodyFormat=${detail.errorBodyFormat}`]),
+      ...(detail.jsonValueType == null ? [] : [`jsonValueType=${detail.jsonValueType}`]),
       ...(detail.message == null ? [] : [`message="${detail.message}"`]),
       `retryable=${detail.retryable}`
     ].join(" ").slice(0, MAX_PROVIDER_DIAGNOSTIC_LENGTH);
@@ -222,7 +224,18 @@ async function readBoundedResponseText(response: Response, maxBytes = 4096): Pro
   return { text: `${text}${decoder.decode()}`, truncated: true };
 }
 
-type ProviderErrorFields = Pick<AiProviderFailureDiagnostics, "errorCode" | "errorStatus" | "errorType" | "message" | "errorBodyFormat">;
+type ProviderErrorFields = Pick<AiProviderFailureDiagnostics, "errorCode" | "errorStatus" | "errorType" | "message" | "errorBodyFormat" | "jsonValueType">;
+
+function getJsonValueType(value: unknown): NonNullable<AiProviderFailureDiagnostics["jsonValueType"]> {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  switch (typeof value) {
+    case "string": return "string";
+    case "number": return "number";
+    case "boolean": return "boolean";
+    default: return "unknown";
+  }
+}
 
 function getProviderErrorFields(text: string, truncated: boolean, apiKey: string, requestInput: unknown, includeBodyFormat: boolean): ProviderErrorFields {
   const withFormat = (format: NonNullable<AiProviderFailureDiagnostics["errorBodyFormat"]>) => includeBodyFormat ? { errorBodyFormat: format } : {};
@@ -231,7 +244,11 @@ function getProviderErrorFields(text: string, truncated: boolean, apiKey: string
   try {
     const payload: unknown = JSON.parse(text);
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-      return { ...withFormat("json_non_object"), message: "Malformed provider error response" };
+      return {
+        ...withFormat("json_non_object"),
+        ...(includeBodyFormat ? { jsonValueType: getJsonValueType(payload) } : {}),
+        message: "Malformed provider error response"
+      };
     }
     const record = payload as Record<string, unknown>;
     const error = record.error && typeof record.error === "object" && !Array.isArray(record.error)
