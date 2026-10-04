@@ -330,17 +330,26 @@ export class NewsRepository {
       id
     );
 
-    this.syncArticleCategories(id, [
-      ...this.deriveLegacyCategoryInputs({
-        sportId: nextSportId,
-        competitionId: nextCompetitionId,
-        teamId: nextTeamId,
-        hostId: input.hostId !== undefined ? input.hostId : existing.hostId ?? null,
-        countryId: nextCountryId,
-        matchId: nextMatchId
-      }),
-      ...nextCategories
-    ]);
+    const categoryRelationshipsChanged = input.categories !== undefined
+      || input.sportId !== undefined
+      || input.competitionId !== undefined
+      || input.teamId !== undefined
+      || input.hostId !== undefined
+      || input.countryId !== undefined
+      || input.matchId !== undefined;
+    if (categoryRelationshipsChanged) {
+      this.syncArticleCategories(id, [
+        ...this.deriveLegacyCategoryInputs({
+          sportId: nextSportId,
+          competitionId: nextCompetitionId,
+          teamId: nextTeamId,
+          hostId: input.hostId !== undefined ? input.hostId : existing.hostId ?? null,
+          countryId: nextCountryId,
+          matchId: nextMatchId
+        }),
+        ...nextCategories
+      ]);
+    }
 
     const article = this.getArticleById(id);
     if (!article) {
@@ -874,16 +883,39 @@ export class NewsRepository {
       deduped.set(`${entry.categoryType}:${entry.entityId}`, entry);
     }
 
-    this.db.prepare("DELETE FROM news_article_categories WHERE article_id = ? AND classification_status = 'approved'").run(articleId);
-    const insert = this.db.prepare(`
-      INSERT INTO news_article_categories (id, article_id, category_type, entity_id, confidence, reason, classification_source, classification_status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    const transaction = this.db.transaction(() => {
+      const now = new Date().toISOString();
+      if (classificationStatus === "approved") {
+        const desiredKeys = new Set(deduped.keys());
+        const approvedRows = this.db.prepare("SELECT id, category_type, entity_id FROM news_article_categories WHERE article_id = ? AND classification_status = 'approved'").all(articleId) as Array<{ id: string; category_type: string; entity_id: string }>;
+        const remove = this.db.prepare("DELETE FROM news_article_categories WHERE id = ?");
+        for (const row of approvedRows) {
+          if (!desiredKeys.has(`${row.category_type}:${row.entity_id}`)) remove.run(row.id);
+        }
+      }
 
-    const now = new Date().toISOString();
-    for (const entry of deduped.values()) {
-      insert.run(randomUUID(), articleId, entry.categoryType, entry.entityId, classificationStatus === "approved" ? 100 : 0, null, classificationStatus === "approved" ? "editorial" : "deterministic", classificationStatus, now, now);
-    }
+      const findExisting = this.db.prepare("SELECT id FROM news_article_categories WHERE article_id = ? AND category_type = ? AND entity_id = ?");
+      const update = this.db.prepare(`
+        UPDATE news_article_categories SET confidence = ?, reason = NULL, classification_source = ?, classification_status = ?, updated_at = ?
+        WHERE id = ?
+      `);
+      const insert = this.db.prepare(`
+        INSERT INTO news_article_categories (id, article_id, category_type, entity_id, confidence, reason, classification_source, classification_status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+      `);
+
+      for (const entry of deduped.values()) {
+        const existing = findExisting.get(articleId, entry.categoryType, entry.entityId) as { id: string } | undefined;
+        const confidence = classificationStatus === "approved" ? 100 : 0;
+        const source = classificationStatus === "approved" ? "editorial" : "deterministic";
+        if (existing) {
+          update.run(confidence, source, classificationStatus, now, existing.id);
+        } else {
+          insert.run(randomUUID(), articleId, entry.categoryType, entry.entityId, confidence, source, classificationStatus, now, now);
+        }
+      }
+    });
+    transaction();
   }
 
   listArticleCategories(articleId: string): NewsArticleCategory[] {

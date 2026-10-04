@@ -79,10 +79,15 @@ const normalizedMigrationImportFile = process.env.MIGRATION_IMPORT_FILE
 const autoImportMigration = (process.env.AUTO_IMPORT_MIGRATION ?? "false").toLowerCase() === "true";
 const newsTestMode = (process.env.GITO_NEWS_TEST_MODE ?? "false").toLowerCase() === "true";
 const migrationImportToken = process.env.MIGRATION_IMPORT_TOKEN ?? null;
-const aiApiKey = process.env.AI_API_KEY ?? "";
+const configuredAiApiKey = process.env.AI_API_KEY?.trim() ?? "";
+const configuredGeminiApiKey = process.env.GEMINI_API_KEY?.trim() ?? "";
+const useGeminiDefaults = !configuredAiApiKey && Boolean(configuredGeminiApiKey);
+const aiApiKey = configuredAiApiKey || configuredGeminiApiKey;
 const aiProvider = process.env.AI_PROVIDER ?? "openai-compatible";
-const aiModel = process.env.AI_MODEL ?? "gpt-4o-mini";
-const aiBaseUrl = process.env.AI_BASE_URL ?? "https://api.openai.com/v1/chat/completions";
+const aiModel = process.env.AI_MODEL ?? (useGeminiDefaults ? "gemini-2.5-flash-lite" : "gpt-4o-mini");
+const aiBaseUrl = process.env.AI_BASE_URL ?? (useGeminiDefaults
+  ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+  : "https://api.openai.com/v1/chat/completions");
 const aiClassificationEnabled = (process.env.AI_CLASSIFICATION_ENABLED ?? "false").toLowerCase() === "true";
 const aiClassificationTimeoutMs = Number(process.env.AI_CLASSIFICATION_TIMEOUT_MS ?? 10000);
 
