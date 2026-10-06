@@ -49,13 +49,14 @@ export function normalizeCompetition(request: Request, competition: Competition)
 }
 
 export function normalizeTeam(request: Request, team: Team): Team {
-  if (!team.logoUrl) {
+  if (!team.logoUrl?.startsWith("/uploads/") && !team.homeStadiumPhotoUrl?.startsWith("/uploads/")) {
     return team;
   }
 
   const normalizedTeam: Team = {
     ...team,
-    logoUrl: normalizeAssetUrl(request, team.logoUrl)
+    ...(team.logoUrl ? { logoUrl: normalizeAssetUrl(request, team.logoUrl) } : {}),
+    ...(team.homeStadiumPhotoUrl ? { homeStadiumPhotoUrl: normalizeAssetUrl(request, team.homeStadiumPhotoUrl) } : {})
   };
 
   return normalizedTeam;

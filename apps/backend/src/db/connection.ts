@@ -1052,6 +1052,10 @@ export function migrateExistingOperationalState(database: DatabaseSync) {
     database.exec("ALTER TABLE teams ADD COLUMN home_stadium_name TEXT;");
   }
 
+  if (hasTable(database, "teams") && !hasColumn(database, "teams", "home_stadium_photo_url")) {
+    database.exec("ALTER TABLE teams ADD COLUMN home_stadium_photo_url TEXT;");
+  }
+
   if (hasTable(database, "matches")) {
     if (!hasColumn(database, "matches", "external_provider")) {
       database.exec("ALTER TABLE matches ADD COLUMN external_provider TEXT;");

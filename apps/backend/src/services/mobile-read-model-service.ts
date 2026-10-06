@@ -78,6 +78,8 @@ function clubFromRow(row: any, fallback?: { sport?: { id: string; name: string }
     slug: row.slug ?? undefined,
     type: row.type,
     logoUrl: row.logoUrl ?? row.logo_url ?? undefined,
+    homeStadiumName: row.homeStadiumName ?? row.home_stadium_name ?? undefined,
+    homeStadiumPhotoUrl: row.homeStadiumPhotoUrl ?? row.home_stadium_photo_url ?? undefined,
     status: row.status,
     createdAt: row.createdAt ?? row.created_at ?? "",
     updatedAt: row.updatedAt ?? row.updated_at ?? "",
