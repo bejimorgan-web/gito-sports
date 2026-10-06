@@ -10,6 +10,7 @@ import type { ScoreMatchSummary } from "./score-service.js";
 import { getCachedScoreSnapshot } from "./score-service.js";
 import { getFixtureLineups } from "../repositories/fixture-lineups-repository.js";
 import { getPublishedPublicationDeliveryByMatchId } from "../repositories/publication-artifact-repository.js";
+import { PUBLISHED_NEWS_BRAND } from "./published-news-brand.js";
 
 export type MobileClub = Team & {
   sport: Pick<Sport, "id" | "name">;
@@ -293,7 +294,7 @@ function toMobileNewsArticle(article: any, includeBody = false) {
     ...(includeBody ? { body: safeArticleBody(article.body ?? article.fetchedBody) } : {}),
     ...(includeBody ? { bodyBlocks: Array.isArray(article.bodyBlocks) ? article.bodyBlocks : [] } : {}),
     status: "published",
-    sourceName: article.sourceName ?? article.source?.name ?? null,
+    sourceName: PUBLISHED_NEWS_BRAND,
     sourceUrl: safeAbsoluteUrl(article.sourceUrl),
     publishedAt: article.publishedAt ?? null,
     imageUrl: media[0]?.url ?? null,

@@ -6,6 +6,7 @@ import { NewsRepository } from "../repositories/news-repository.js";
 import { NewsClassificationService } from "./news-classification-service.js";
 import { normalizeNewsText } from "./news-content-normalizer.js";
 import { parseFeedItems, type ParsedFeedItem } from "./news-collector.js";
+import { PUBLISHED_NEWS_BRAND } from "./published-news-brand.js";
 
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -157,7 +158,7 @@ export function buildNewsRssXml(articles: NewsArticle[], baseUrl: string): strin
   const origin = baseUrl.replace(/\/$/, "");
   const items = articles.map((article) => {
     const url = `${origin}/news/articles/${encodeURIComponent(article.id)}`;
-    return `<item><title>${escapeXml(article.title)}</title><link>${escapeXml(url)}</link><guid isPermaLink="false">${escapeXml(article.id)}</guid><description>${escapeXml(article.summary ?? article.body ?? "")}</description>${article.author ? `<author>${escapeXml(article.author)}</author>` : ""}<pubDate>${escapeXml(article.publishedAt ?? article.createdAt)}</pubDate></item>`;
+    return `<item><title>${escapeXml(article.title)}</title><link>${escapeXml(url)}</link><guid isPermaLink="false">${escapeXml(article.id)}</guid><description>${escapeXml(article.summary ?? article.body ?? "")}</description><author>${escapeXml(PUBLISHED_NEWS_BRAND)}</author><pubDate>${escapeXml(article.publishedAt ?? article.createdAt)}</pubDate></item>`;
   }).join("");
   return `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>GiTO News</title><link>${escapeXml(origin)}</link><description>Published GiTO News articles</description>${items}</channel></rss>`;
 }
