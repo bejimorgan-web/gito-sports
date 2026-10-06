@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
 import type Database from "better-sqlite3";
 import { getDatabase } from "../db/connection.js";
-import { fetchPublicTextDocument, escapeXml, validateRssUrl } from "./news-rss-service.js";
+import { assertPublicHostname, fetchPublicTextDocument, escapeXml, validateRssUrl } from "./news-rss-service.js";
 import { normalizeNewsText } from "./news-content-normalizer.js";
-import { createNewsBrowserRenderer, type BrowserRenderResult, type NewsBrowserRenderer } from "./news-browser-renderer.js";
+import { createNewsBrowserRenderer, type BrowserExtractionSelectors, type BrowserRenderResult, type NewsBrowserRenderer } from "./news-browser-renderer.js";
 
 const MAX_DISCOVERED_ARTICLES = 25;
 
@@ -39,6 +39,8 @@ export type GeneratedRssFeed = {
   articles?: GeneratedRssArticle[];
 };
 
+export type GeneratedRssSelectors = BrowserExtractionSelectors;
+
 type DiscoveredArticle = Omit<GeneratedRssArticle, "id" | "discoveredAt" | "status">;
 
 export function getWebRssUserMessage(error: unknown): string {
@@ -64,6 +66,11 @@ export function getWebRssUserMessage(error: unknown): string {
   }
   if (message === "no_articles_discovered") {
     return "No articles were found on this page.";
+  }
+  if (message === "webpage_selector_required") return "Enter article item, title, and link CSS selectors, or leave all selectors empty for automatic discovery.";
+  if (message === "webpage_selector_invalid") return "One of the CSS selectors is invalid. Check the selector syntax and try again.";
+  if (message === "article_pages_unavailable" || message === "some_article_pages_unavailable") {
+    return "GiTO found article links but could not read one or more story pages. The publisher may block automated access.";
   }
   if (message === "rss_redirect_limit_exceeded") {
     return "GiTO could not follow this webpage's redirects safely.";
@@ -183,7 +190,7 @@ export class NewsWebRssGeneratorService {
         id TEXT PRIMARY KEY, name TEXT NOT NULL, source_url TEXT NOT NULL, feed_token TEXT NOT NULL UNIQUE,
         created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_fetched_at TEXT, status TEXT NOT NULL DEFAULT 'created',
         discovered_article_count INTEGER NOT NULL DEFAULT 0, error_message TEXT, enabled INTEGER NOT NULL DEFAULT 1,
-        crawler_tier TEXT NOT NULL DEFAULT 'http', failure_classification TEXT
+        crawler_tier TEXT NOT NULL DEFAULT 'http', failure_classification TEXT, selectors_json TEXT
       );
       CREATE TABLE IF NOT EXISTS news_generated_rss_articles (
         id TEXT PRIMARY KEY, generated_feed_id TEXT NOT NULL, external_id TEXT NOT NULL, canonical_url TEXT NOT NULL,
@@ -193,14 +200,19 @@ export class NewsWebRssGeneratorService {
         UNIQUE(generated_feed_id, external_id)
       );
     `);
+    const sourceColumns = this.db.prepare("PRAGMA table_info(news_generated_rss_sources)").all() as Array<{ name: string }>;
+    if (!sourceColumns.some((column) => column.name === "selectors_json")) {
+      this.db.exec("ALTER TABLE news_generated_rss_sources ADD COLUMN selectors_json TEXT");
+    }
   }
 
-  createFeed(name: string, sourceUrl: string): GeneratedRssFeed {
+  createFeed(name: string, sourceUrl: string, selectors?: GeneratedRssSelectors | null): GeneratedRssFeed {
     const url = validateRssUrl(sourceUrl).toString();
+    const normalizedSelectors = selectors ? this.validateSelectors(selectors) : null;
     const now = new Date().toISOString();
     const id = crypto.randomUUID();
     const token = crypto.randomBytes(18).toString("base64url");
-    this.db.prepare(`INSERT INTO news_generated_rss_sources (id, name, source_url, feed_token, created_at, updated_at, status, discovered_article_count, enabled) VALUES (?, ?, ?, ?, ?, ?, 'created', 0, 1)`).run(id, name.trim(), url, token, now, now);
+    this.db.prepare(`INSERT INTO news_generated_rss_sources (id, name, source_url, feed_token, created_at, updated_at, status, discovered_article_count, enabled, selectors_json) VALUES (?, ?, ?, ?, ?, ?, 'created', 0, 1, ?)`).run(id, name.trim(), url, token, now, now, normalizedSelectors ? JSON.stringify(normalizedSelectors) : null);
     return this.getFeed(id)!;
   }
 
@@ -231,6 +243,11 @@ export class NewsWebRssGeneratorService {
     const feed = this.getFeed(id);
     if (!feed) throw new Error("generated_rss_feed_not_found");
     try {
+      const selectors = this.getSelectors(id);
+      if (selectors) {
+        await this.refreshUsingSelectors(feed, selectors);
+        return this.getFeed(id)!;
+      }
       const page = await fetchPublicTextDocument(feed.sourceUrl);
       if (!page.contentType || !/(html|xhtml|text\/plain)/i.test(page.contentType)) throw new Error("webpage_content_type_not_supported");
       const rootUrl = validateRssUrl(feed.sourceUrl).toString();
@@ -260,18 +277,10 @@ export class NewsWebRssGeneratorService {
             : (crawlTier === "browser" ? (await this.browserRenderer.render(candidate)).html : (await fetchPublicTextDocument(candidate)).text);
           const article = await extractArticle(candidate, articlePage);
           article.sourceUrl = feed.sourceUrl;
-          const externalId = crypto.createHash("sha256").update(article.canonicalUrl).digest("hex");
-          const existing = this.db.prepare("SELECT id FROM news_generated_rss_articles WHERE generated_feed_id = ? AND external_id = ?").get(id, externalId) as { id: string } | undefined;
-          const now = new Date().toISOString();
-          if (existing) {
-            this.db.prepare("UPDATE news_generated_rss_articles SET title = ?, summary = ?, article_url = ?, published_at = ?, source_name = ?, source_url = ?, content_hash = ?, discovered_at = ? WHERE id = ?").run(article.title, article.summary, article.articleUrl, article.publishedAt, article.sourceName, article.sourceUrl, crypto.createHash("sha256").update(`${article.title}|${article.summary ?? ""}`).digest("hex"), now, existing.id);
-          } else {
-            this.db.prepare("INSERT INTO news_generated_rss_articles (id, generated_feed_id, external_id, canonical_url, title, summary, article_url, published_at, discovered_at, content_hash, source_name, source_url, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'discovered')").run(crypto.randomUUID(), id, externalId, article.canonicalUrl, article.title, article.summary, article.articleUrl, article.publishedAt, now, crypto.createHash("sha256").update(`${article.title}|${article.summary ?? ""}`).digest("hex"), article.sourceName, article.sourceUrl);
-          }
+          this.saveDiscoveredArticle(id, article);
         } catch { failed += 1; }
       }
-      const now = new Date().toISOString();
-      this.db.prepare("UPDATE news_generated_rss_sources SET updated_at = ?, last_fetched_at = ?, status = ?, discovered_article_count = (SELECT COUNT(*) FROM news_generated_rss_articles WHERE generated_feed_id = ?), error_message = NULL, crawler_tier = ?, failure_classification = NULL WHERE id = ?").run(now, now, failed ? "partial" : "ready", id, crawlTier, id);
+      await this.updateRefreshStatus(id, crawlTier, failed);
       return this.getFeed(id)!;
     } catch (error) {
       const message = error instanceof Error ? error.message : "webpage_crawl_failed";
@@ -279,6 +288,93 @@ export class NewsWebRssGeneratorService {
       this.db.prepare("UPDATE news_generated_rss_sources SET updated_at = ?, last_fetched_at = ?, status = 'failed', error_message = ?, failure_classification = ? WHERE id = ?").run(new Date().toISOString(), new Date().toISOString(), message, classification, id);
       throw error;
     }
+  }
+
+  async refreshDueFeeds(options: { intervalMinutes?: number; retryFailedHours?: number; limit?: number } = {}): Promise<void> {
+    const intervalMinutes = Math.max(5, options.intervalMinutes ?? 30);
+    const retryFailedHours = Math.max(1, options.retryFailedHours ?? 6);
+    const limit = Math.max(1, Math.min(25, options.limit ?? 10));
+    const feeds = this.db.prepare(`
+      SELECT id FROM news_generated_rss_sources
+      WHERE enabled = 1 AND (
+        last_fetched_at IS NULL
+        OR (status = 'failed' AND julianday(last_fetched_at) <= julianday('now', ?))
+        OR (status != 'failed' AND julianday(last_fetched_at) <= julianday('now', ?))
+      )
+      ORDER BY COALESCE(last_fetched_at, created_at) ASC
+      LIMIT ?
+    `).all(`-${retryFailedHours} hours`, `-${intervalMinutes} minutes`, limit) as Array<{ id: string }>;
+    for (const feed of feeds) {
+      try {
+        await this.refreshFeed(feed.id);
+      } catch (error) {
+        console.warn(`[web-rss] automatic refresh failed for feed ${feed.id}`, error instanceof Error ? error.message : String(error));
+      }
+    }
+  }
+
+  private async refreshUsingSelectors(feed: GeneratedRssFeed, selectors: GeneratedRssSelectors): Promise<void> {
+    if (!this.browserRenderer.extract) throw new Error("browser_rendering_unavailable");
+    const result = await this.browserRenderer.extract(feed.sourceUrl, selectors);
+    if (!result.entries.length) throw new Error("no_articles_discovered");
+    let failed = 0;
+    for (const entry of result.entries.slice(0, MAX_DISCOVERED_ARTICLES)) {
+      try {
+        const candidateUrl = normalizeUrl(entry.url, result.finalUrl);
+        if (!candidateUrl) { failed += 1; continue; }
+        const parsedUrl = validateRssUrl(candidateUrl);
+        await assertPublicHostname(parsedUrl.hostname);
+        this.saveDiscoveredArticle(feed.id, {
+          canonicalUrl: candidateUrl,
+          title: normalizeNewsText(entry.title),
+          summary: cleanSummary(entry.summary),
+          articleUrl: candidateUrl,
+          publishedAt: entry.publishedAt,
+          sourceName: result.sourceName,
+          sourceUrl: feed.sourceUrl
+        });
+      } catch {
+        failed += 1;
+      }
+    }
+    await this.updateRefreshStatus(feed.id, "browser", failed);
+  }
+
+  private saveDiscoveredArticle(feedId: string, article: DiscoveredArticle): void {
+    const externalId = crypto.createHash("sha256").update(article.canonicalUrl).digest("hex");
+    const existing = this.db.prepare("SELECT id FROM news_generated_rss_articles WHERE generated_feed_id = ? AND external_id = ?").get(feedId, externalId) as { id: string } | undefined;
+    const now = new Date().toISOString();
+    const contentHash = crypto.createHash("sha256").update(`${article.title}|${article.summary ?? ""}`).digest("hex");
+    if (existing) {
+      this.db.prepare("UPDATE news_generated_rss_articles SET title = ?, summary = ?, article_url = ?, published_at = ?, source_name = ?, source_url = ?, content_hash = ?, discovered_at = ? WHERE id = ?").run(article.title, article.summary, article.articleUrl, article.publishedAt, article.sourceName, article.sourceUrl, contentHash, now, existing.id);
+    } else {
+      this.db.prepare("INSERT INTO news_generated_rss_articles (id, generated_feed_id, external_id, canonical_url, title, summary, article_url, published_at, discovered_at, content_hash, source_name, source_url, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'discovered')").run(crypto.randomUUID(), feedId, externalId, article.canonicalUrl, article.title, article.summary, article.articleUrl, article.publishedAt, now, contentHash, article.sourceName, article.sourceUrl);
+    }
+  }
+
+  private async updateRefreshStatus(feedId: string, crawlerTier: "http" | "browser", failed: number): Promise<void> {
+    const now = new Date().toISOString();
+    const totalArticles = Number((this.db.prepare("SELECT COUNT(*) AS count FROM news_generated_rss_articles WHERE generated_feed_id = ?").get(feedId) as { count: number }).count);
+    const status = failed ? (totalArticles === 0 ? "failed" : "partial") : "ready";
+    const errorMessage = failed ? (totalArticles === 0 ? "article_pages_unavailable" : "some_article_pages_unavailable") : null;
+    this.db.prepare("UPDATE news_generated_rss_sources SET updated_at = ?, last_fetched_at = ?, status = ?, discovered_article_count = ?, error_message = ?, crawler_tier = ?, failure_classification = ? WHERE id = ?").run(now, now, status, totalArticles, errorMessage, crawlerTier, failed ? "fetch_failed" : null, feedId);
+  }
+
+  private getSelectors(feedId: string): GeneratedRssSelectors | null {
+    const row = this.db.prepare("SELECT selectors_json FROM news_generated_rss_sources WHERE id = ?").get(feedId) as { selectors_json?: string | null } | undefined;
+    if (!row?.selectors_json) return null;
+    try { return this.validateSelectors(JSON.parse(row.selectors_json)); } catch { throw new Error("webpage_selector_invalid"); }
+  }
+
+  private validateSelectors(value: unknown): GeneratedRssSelectors {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("webpage_selector_invalid");
+    const input = value as Record<string, unknown>;
+    if (Object.keys(input).some((key) => !["item", "title", "link", "summary", "date"].includes(key))) throw new Error("webpage_selector_invalid");
+    const result = Object.fromEntries(Object.entries(input).map(([key, selector]) => [key, typeof selector === "string" ? selector.trim() : selector])) as unknown as GeneratedRssSelectors;
+    if (!result.item || !result.title || !result.link || [result.item, result.title, result.link, result.summary, result.date].some((selector) => selector !== undefined && (typeof selector !== "string" || !selector || selector.length > 300))) {
+      throw new Error("webpage_selector_required");
+    }
+    return result;
   }
 
   buildXml(token: string, baseUrl: string): string {

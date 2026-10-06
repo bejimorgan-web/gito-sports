@@ -157,7 +157,8 @@ CREATE TABLE IF NOT EXISTS news_generated_rss_sources (
   error_message TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
   crawler_tier TEXT NOT NULL DEFAULT 'http',
-  failure_classification TEXT
+  failure_classification TEXT,
+  selectors_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS news_generated_rss_articles (

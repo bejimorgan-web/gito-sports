@@ -13,6 +13,7 @@ import { stopBackgroundJobs } from "../background/backgroundJobRunner.js";
 import { importMigrationFile, isDatabaseCatalogEmpty, isMigrationImported } from "./migration-import.js";
 import { NewsCollectionScheduler } from "../services/news-collection-scheduler.js";
 import { NewsService } from "../services/news-service.js";
+import { NewsWebRssGeneratorService } from "../services/news-web-rss-generator-service.js";
 
 let database: DatabaseSync | null = null;
 const EXPECTED_SCHEMA_VERSION = 1;
@@ -348,6 +349,8 @@ export function getDatabase(): DatabaseSync {
       const scheduler = new NewsCollectionScheduler(newsService, database);
       void scheduler.initialize();
       scheduleBackgroundJob("collect-news-sources", 5 * 60 * 1000, () => scheduler.runDueCollections());
+      const generatedRssService = new NewsWebRssGeneratorService(database);
+      scheduleBackgroundJob("refresh-generated-web-rss", 5 * 60 * 1000, () => generatedRssService.refreshDueFeeds());
     } catch (err) {
       console.error("[startup] failed to initialize news collection scheduler", err);
     }
@@ -418,7 +421,7 @@ function ensureNewsSchemaColumns(database: DatabaseSync) {
       id TEXT PRIMARY KEY, name TEXT NOT NULL, source_url TEXT NOT NULL, feed_token TEXT NOT NULL UNIQUE,
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_fetched_at TEXT, status TEXT NOT NULL DEFAULT 'created',
       discovered_article_count INTEGER NOT NULL DEFAULT 0, error_message TEXT, enabled INTEGER NOT NULL DEFAULT 1
-      , crawler_tier TEXT NOT NULL DEFAULT 'http', failure_classification TEXT
+      , crawler_tier TEXT NOT NULL DEFAULT 'http', failure_classification TEXT, selectors_json TEXT
     );
     CREATE TABLE IF NOT EXISTS news_generated_rss_articles (
       id TEXT PRIMARY KEY, generated_feed_id TEXT NOT NULL, external_id TEXT NOT NULL, canonical_url TEXT NOT NULL,
@@ -430,7 +433,7 @@ function ensureNewsSchemaColumns(database: DatabaseSync) {
     CREATE INDEX IF NOT EXISTS idx_news_generated_rss_articles_feed ON news_generated_rss_articles(generated_feed_id);
   `);
   if (hasTable(database, "news_generated_rss_sources")) {
-    for (const [columnName, columnType] of [["crawler_tier", "TEXT NOT NULL DEFAULT 'http'"], ["failure_classification", "TEXT"]] as const) {
+    for (const [columnName, columnType] of [["crawler_tier", "TEXT NOT NULL DEFAULT 'http'"], ["failure_classification", "TEXT"], ["selectors_json", "TEXT"]] as const) {
       if (!hasColumn(database, "news_generated_rss_sources", columnName)) {
         database.exec(`ALTER TABLE news_generated_rss_sources ADD COLUMN ${columnName} ${columnType}`);
       }

@@ -26,8 +26,12 @@ function backendOrigin(req: Request): string {
   return `${req.protocol}://${req.get("host")}`;
 }
 
-function absoluteGeneratedFeedUrl(req: Request, feed: { feedUrl?: string }) {
-  return { ...feed, feedUrl: feed.feedUrl ? `${backendOrigin(req)}${feed.feedUrl}` : feed.feedUrl };
+function absoluteGeneratedFeedUrl(req: Request, feed: { feedUrl?: string; errorMessage?: string | null }) {
+  return {
+    ...feed,
+    errorMessage: feed.errorMessage ? getWebRssUserMessage(new Error(feed.errorMessage)) : null,
+    feedUrl: feed.feedUrl ? `${backendOrigin(req)}${feed.feedUrl}` : feed.feedUrl
+  };
 }
 
 newsRouter.get("/", (_req, res) => {
@@ -58,9 +62,16 @@ newsRouter.post("/generated-rss-sources", protectedRoute, async (req, res) => {
       res.status(400).json({ error: "generated_rss_name_and_url_required" });
       return;
     }
-    const feed = webRssGeneratorService.createFeed(name, sourceUrl);
-    const refreshed = await webRssGeneratorService.refreshFeed(feed.id);
-    res.status(201).json(absoluteGeneratedFeedUrl(req, refreshed));
+    const selectors = req.body?.selectors ?? null;
+    const feed = webRssGeneratorService.createFeed(name, sourceUrl, selectors);
+    try {
+      const refreshed = await webRssGeneratorService.refreshFeed(feed.id);
+      res.status(201).json(absoluteGeneratedFeedUrl(req, refreshed));
+    } catch (error) {
+      const failedFeed = webRssGeneratorService.getFeed(feed.id);
+      if (!failedFeed) throw error;
+      res.status(201).json(absoluteGeneratedFeedUrl(req, failedFeed));
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "webpage_crawl_failed";
     const status = message === "no_articles_discovered" ? 422 : 400;
@@ -79,7 +90,16 @@ newsRouter.post("/generated-rss-sources/:id/refresh", protectedRoute, async (req
       res.status(400).json({ error: "generated_rss_feed_id_required" });
       return;
     }
-    res.json(absoluteGeneratedFeedUrl(req, await webRssGeneratorService.refreshFeed(feedId)));
+    try {
+      res.json(absoluteGeneratedFeedUrl(req, await webRssGeneratorService.refreshFeed(feedId)));
+    } catch (error) {
+      const failedFeed = webRssGeneratorService.getFeed(feedId);
+      if (failedFeed?.status === "failed" || failedFeed?.status === "partial") {
+        res.json(absoluteGeneratedFeedUrl(req, failedFeed));
+        return;
+      }
+      throw error;
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "webpage_crawl_failed";
     res.status(message === "no_articles_discovered" ? 422 : 400).json({ error: message, message: getWebRssUserMessage(error) });

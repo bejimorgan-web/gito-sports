@@ -12,8 +12,24 @@ export type BrowserRenderResult = {
   contentType: string;
 };
 
+export type BrowserExtractedEntry = {
+  title: string;
+  url: string;
+  summary: string | null;
+  publishedAt: string | null;
+};
+
+export type BrowserExtractionSelectors = {
+  item: string;
+  title: string;
+  link: string;
+  summary?: string;
+  date?: string;
+};
+
 export interface NewsBrowserRenderer {
   render(url: string): Promise<BrowserRenderResult>;
+  extract?(url: string, selectors: BrowserExtractionSelectors): Promise<{ entries: BrowserExtractedEntry[]; finalUrl: string; sourceName: string }>;
   close?: () => Promise<void>;
 }
 
@@ -39,6 +55,41 @@ class PlaywrightNewsBrowserRenderer implements NewsBrowserRenderer {
       this.queue.push({ url, resolve, reject });
       void this.drain();
     });
+  }
+
+  async extract(url: string, selectors: BrowserExtractionSelectors): Promise<{ entries: BrowserExtractedEntry[]; finalUrl: string; sourceName: string }> {
+    validateSelectors(selectors);
+    if (runtimeConfig.newsTestMode) throw new Error("browser_rendering_disabled_in_test_mode");
+    const rendered = await this.render(url);
+    const browser = this.browser ?? await chromium.launch({ headless: true });
+    this.browser = browser;
+    const context = await browser.newContext({ javaScriptEnabled: true });
+    try {
+      const page = await context.newPage();
+      await page.setContent(rendered.html, { waitUntil: "domcontentloaded" });
+      const entries = await page.locator(selectors.item).evaluateAll((items, fields) => items.slice(0, 25).map((item) => {
+        const getElement = (selector?: string) => selector ? item.querySelector(selector) : null;
+        const text = (element: typeof item | null): string => element?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+        const titleElement = getElement(fields.title);
+        const linkElement = getElement(fields.link);
+        const summaryElement = getElement(fields.summary);
+        const dateElement = getElement(fields.date);
+        const rawDate = dateElement?.getAttribute("datetime") ?? dateElement?.getAttribute("content") ?? text(dateElement);
+        const parsedDate = rawDate ? Date.parse(rawDate) : NaN;
+        return {
+          title: text(titleElement) || titleElement?.getAttribute("title") || "",
+          // Keep the publisher's href as authored. The snapshot is loaded with
+          // setContent(), where HTMLAnchorElement.href would resolve against
+          // about:blank instead of the original page URL.
+          url: linkElement?.getAttribute("href") ?? "",
+          summary: text(summaryElement) || summaryElement?.getAttribute("content") || null,
+          publishedAt: Number.isNaN(parsedDate) ? null : new Date(parsedDate).toISOString()
+        };
+      }), selectors);
+      return { entries: entries.filter((entry) => entry.title && entry.url), finalUrl: rendered.finalUrl, sourceName: new URL(rendered.finalUrl).hostname };
+    } finally {
+      await context.close();
+    }
   }
 
   private async drain(): Promise<void> {
@@ -113,6 +164,13 @@ class PlaywrightNewsBrowserRenderer implements NewsBrowserRenderer {
     this.queue.splice(0).forEach((job) => job.reject(new Error("browser_renderer_closed")));
     await browser?.close().catch(() => undefined);
   }
+}
+
+function validateSelectors(selectors: BrowserExtractionSelectors): void {
+  for (const selector of [selectors.item, selectors.title, selectors.link, selectors.summary, selectors.date]) {
+    if (selector !== undefined && (typeof selector !== "string" || selector.trim().length > 300)) throw new Error("webpage_selector_invalid");
+  }
+  if (!selectors.item?.trim() || !selectors.title?.trim() || !selectors.link?.trim()) throw new Error("webpage_selector_required");
 }
 
 export function createNewsBrowserRenderer(): NewsBrowserRenderer {
