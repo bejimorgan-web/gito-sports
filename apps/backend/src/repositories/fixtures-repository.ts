@@ -8,6 +8,7 @@ export interface CanonicalFixtureInput {
   awayTeamId: string;
   startsAt: string;
   venueName?: string | null;
+  venueImageUrl?: string | null;
   status?: string;
   externalProvider?: string | null;
   externalMatchId?: string | null;
@@ -28,17 +29,26 @@ function validateFixtureInput(input: CanonicalFixtureInput) {
     const membershipCount = db.prepare("SELECT COUNT(*) AS count FROM competition_season_teams WHERE competition_id = ? AND season_id = ? AND team_id IN (?, ?)").get(input.competitionId, input.seasonId, input.homeTeamId, input.awayTeamId) as { count: number };
     if (Number(membershipCount.count) !== 2) throw new Error("season_team_membership_required");
   }
-  if (!input.startsAt) throw Object.assign(new Error("Kickoff date and time are required."), { code: "invalid_starts_at" });
-  if (!/T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.test(input.startsAt) || Number.isNaN(Date.parse(input.startsAt))) {
-    throw Object.assign(new Error("Kickoff must be a valid date and time with an explicit timezone."), { code: "invalid_starts_at" });
+  if (!input.startsAt) throw Object.assign(new Error("A match date is required."), { code: "invalid_starts_at" });
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(input.startsAt);
+  const hasExplicitTimeZone = /T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.test(input.startsAt);
+  const isValidCalendarDate = dateOnly && !Number.isNaN(Date.parse(`${input.startsAt}T00:00:00.000Z`)) && new Date(`${input.startsAt}T00:00:00.000Z`).toISOString().slice(0, 10) === input.startsAt;
+  if ((!dateOnly && !hasExplicitTimeZone) || (dateOnly && !isValidCalendarDate) || Number.isNaN(Date.parse(input.startsAt))) {
+    throw Object.assign(new Error("Enter a valid match date and, when available, a kickoff time with an explicit timezone."), { code: "invalid_starts_at" });
   }
 }
 
 export function findEquivalentCanonicalFixtures(input: CanonicalFixtureInput) {
   validateFixtureInput(input);
   const db = getDatabase();
-  const rows = db.prepare(`SELECT * FROM matches WHERE competition_id = ? AND home_team_id = ? AND away_team_id = ? AND abs(strftime('%s', starts_at) - strftime('%s', ?)) <= 7200 ORDER BY abs(strftime('%s', starts_at) - strftime('%s', ?)) ASC`).all(input.competitionId, input.homeTeamId, input.awayTeamId, input.startsAt, input.startsAt) as any[];
-  return rows;
+  const rows = db.prepare("SELECT * FROM matches WHERE competition_id = ? AND home_team_id = ? AND away_team_id = ? ORDER BY starts_at ASC").all(input.competitionId, input.homeTeamId, input.awayTeamId) as any[];
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/;
+  return rows.filter((row) => {
+    if (dateOnly.test(input.startsAt) || dateOnly.test(String(row.starts_at))) {
+      return String(row.starts_at).slice(0, 10) === input.startsAt.slice(0, 10);
+    }
+    return Math.abs(Date.parse(String(row.starts_at)) - Date.parse(input.startsAt)) <= 2 * 60 * 60 * 1000;
+  });
 }
 
 export function createCanonicalFixture(input: CanonicalFixtureInput) {
@@ -52,16 +62,16 @@ export function createCanonicalFixture(input: CanonicalFixtureInput) {
   if (equivalent.length > 0) throw new Error("canonical_fixture_duplicate");
   const id = crypto.randomUUID();
   const timestamp = new Date().toISOString();
-  db.prepare("INSERT INTO matches (id, competition_id, season_id, home_team_id, away_team_id, starts_at, venue_name, external_provider, external_match_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, input.competitionId, input.seasonId ?? null, input.homeTeamId, input.awayTeamId, input.startsAt, input.venueName ?? null, input.externalProvider ?? null, input.externalMatchId ?? null, input.status ?? "scheduled", timestamp, timestamp);
+  db.prepare("INSERT INTO matches (id, competition_id, season_id, home_team_id, away_team_id, starts_at, venue_name, venue_image_url, external_provider, external_match_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, input.competitionId, input.seasonId ?? null, input.homeTeamId, input.awayTeamId, input.startsAt, input.venueName ?? null, input.venueImageUrl ?? null, input.externalProvider ?? null, input.externalMatchId ?? null, input.status ?? "scheduled", timestamp, timestamp);
   return getCanonicalFixtureById(id);
 }
 
 export function updateCanonicalFixture(fixtureId: string, input: Partial<CanonicalFixtureInput>) {
   const existing = getDatabase().prepare("SELECT * FROM matches WHERE id = ?").get(fixtureId) as any;
   if (!existing) return undefined;
-  const next = { competitionId: input.competitionId ?? existing.competition_id, seasonId: input.seasonId !== undefined ? input.seasonId : existing.season_id, homeTeamId: input.homeTeamId ?? existing.home_team_id, awayTeamId: input.awayTeamId ?? existing.away_team_id, startsAt: input.startsAt ?? existing.starts_at, venueName: input.venueName !== undefined ? input.venueName : existing.venue_name, status: input.status ?? existing.status, externalProvider: input.externalProvider !== undefined ? input.externalProvider : existing.external_provider, externalMatchId: input.externalMatchId !== undefined ? input.externalMatchId : existing.external_match_id };
+  const next = { competitionId: input.competitionId ?? existing.competition_id, seasonId: input.seasonId !== undefined ? input.seasonId : existing.season_id, homeTeamId: input.homeTeamId ?? existing.home_team_id, awayTeamId: input.awayTeamId ?? existing.away_team_id, startsAt: input.startsAt ?? existing.starts_at, venueName: input.venueName !== undefined ? input.venueName : existing.venue_name, venueImageUrl: input.venueImageUrl !== undefined ? input.venueImageUrl : existing.venue_image_url, status: input.status ?? existing.status, externalProvider: input.externalProvider !== undefined ? input.externalProvider : existing.external_provider, externalMatchId: input.externalMatchId !== undefined ? input.externalMatchId : existing.external_match_id };
   validateFixtureInput(next);
-  getDatabase().prepare("UPDATE matches SET competition_id = ?, season_id = ?, home_team_id = ?, away_team_id = ?, starts_at = ?, venue_name = ?, external_provider = ?, external_match_id = ?, status = ?, updated_at = ? WHERE id = ?").run(next.competitionId, next.seasonId ?? null, next.homeTeamId, next.awayTeamId, next.startsAt, next.venueName ?? null, next.externalProvider ?? null, next.externalMatchId ?? null, next.status, new Date().toISOString(), fixtureId);
+  getDatabase().prepare("UPDATE matches SET competition_id = ?, season_id = ?, home_team_id = ?, away_team_id = ?, starts_at = ?, venue_name = ?, venue_image_url = ?, external_provider = ?, external_match_id = ?, status = ?, updated_at = ? WHERE id = ?").run(next.competitionId, next.seasonId ?? null, next.homeTeamId, next.awayTeamId, next.startsAt, next.venueName ?? null, next.venueImageUrl ?? null, next.externalProvider ?? null, next.externalMatchId ?? null, next.status, new Date().toISOString(), fixtureId);
   return getCanonicalFixtureById(fixtureId);
 }
 
@@ -77,9 +87,10 @@ export function listCanonicalFixturesForTeam(teamId: string, options?: { seasonI
 export function getCanonicalFixtureById(fixtureId: string) {
   const row = getDatabase().prepare(`
     SELECT m.id, m.competition_id, m.season_id, m.home_team_id, m.away_team_id,
-           m.starts_at, m.venue_name, m.status, m.external_provider, m.external_match_id,
+           m.starts_at, m.venue_name, m.venue_image_url, m.status, m.external_provider, m.external_match_id,
            m.created_at, m.updated_at,
            h.name AS home_team_name, h.short_name AS home_team_short_name, h.logo_url AS home_team_logo_url, h.host_id AS home_team_host_id,
+           h.home_stadium_name AS home_team_stadium_name, h.home_stadium_photo_url AS home_team_stadium_photo_url,
            a.name AS away_team_name, a.short_name AS away_team_short_name, a.logo_url AS away_team_logo_url, a.host_id AS away_team_host_id,
            c.name AS competition_name, c.slug AS competition_slug, c.logo_url AS competition_logo_url, c.host_id AS competition_host_id,
            host.name AS host_name,
@@ -106,6 +117,7 @@ export function getCanonicalFixtureById(fixtureId: string) {
     awayTeamId: row.away_team_id,
     startsAt: row.starts_at,
     venueName: row.venue_name ?? null,
+    venueImageUrl: row.venue_image_url ?? null,
     status: row.status,
     externalProvider: row.external_provider ?? null,
     externalMatchId: row.external_match_id ?? null,
@@ -116,7 +128,7 @@ export function getCanonicalFixtureById(fixtureId: string) {
     host: row.competition_host_id ? { id: row.competition_host_id, name: row.host_name } : null,
     competition: { id: row.competition_id, name: row.competition_name, slug: row.competition_slug, logoUrl: row.competition_logo_url ?? null },
     season: row.season_id ? { id: row.season_id, name: row.season_name } : null,
-    homeTeam: { id: row.home_team_id, name: row.home_team_name, shortName: row.home_team_short_name, logoUrl: row.home_team_logo_url, ...(row.home_team_host_id ? { hostId: row.home_team_host_id } : {}) },
+    homeTeam: { id: row.home_team_id, name: row.home_team_name, shortName: row.home_team_short_name, logoUrl: row.home_team_logo_url, homeStadiumName: row.home_team_stadium_name ?? null, homeStadiumPhotoUrl: row.home_team_stadium_photo_url ?? null, ...(row.home_team_host_id ? { hostId: row.home_team_host_id } : {}) },
     awayTeam: { id: row.away_team_id, name: row.away_team_name, shortName: row.away_team_short_name, logoUrl: row.away_team_logo_url, ...(row.away_team_host_id ? { hostId: row.away_team_host_id } : {}) }
   };
 }

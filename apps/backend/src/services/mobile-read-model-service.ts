@@ -21,8 +21,10 @@ export type MobileSeason = Season & { competition?: Pick<Competition, "id" | "na
 export type MobileFixture = {
   id: string;
   startsAt: string;
+  kickoffTimeConfirmed: boolean;
   status: string;
   venue: string | null;
+  venueImageUrl: string | null;
   competition: { id: string; name: string; slug: string; logoUrl: string | null };
   season: { id: string; name: string } | null;
   sport: { id: string; name: string } | null;
@@ -107,8 +109,10 @@ export function mapMobileFixture(fixture: any, suppliedSnapshot?: ScoreMatchSumm
   return {
     id: fixture.id,
     startsAt: fixture.startsAt,
+    kickoffTimeConfirmed: !/^\d{4}-\d{2}-\d{2}$/.test(fixture.startsAt),
     status: fixture.status,
     venue: fixture.venueName ?? null,
+    venueImageUrl: fixture.venueImageUrl ?? (!fixture.venueName || fixture.venueName === home.homeStadiumName ? home.homeStadiumPhotoUrl : null) ?? null,
     competition: { id: fixture.competition.id, name: fixture.competition.name, slug: fixture.competition.slug, logoUrl: fixture.competition.logoUrl ?? null },
     season: fixture.season ? { id: fixture.season.id, name: fixture.season.name } : null,
     sport: fixture.sport ? { id: fixture.sport.id, name: fixture.sport.name } : null,

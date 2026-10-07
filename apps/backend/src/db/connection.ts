@@ -1057,6 +1057,10 @@ export function migrateExistingOperationalState(database: DatabaseSync) {
   }
 
   if (hasTable(database, "matches")) {
+    if (!hasColumn(database, "matches", "venue_image_url")) {
+      database.exec("ALTER TABLE matches ADD COLUMN venue_image_url TEXT;");
+    }
+
     if (!hasColumn(database, "matches", "external_provider")) {
       database.exec("ALTER TABLE matches ADD COLUMN external_provider TEXT;");
     }

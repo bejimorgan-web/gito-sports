@@ -305,6 +305,7 @@ CREATE TABLE IF NOT EXISTS matches (
   away_team_id TEXT NOT NULL,
   starts_at TEXT NOT NULL,
   venue_name TEXT,
+  venue_image_url TEXT,
   external_provider TEXT,
   external_match_id TEXT,
   status TEXT NOT NULL DEFAULT 'draft' CHECK (
