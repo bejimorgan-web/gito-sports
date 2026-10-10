@@ -23,6 +23,7 @@ import { ClubManagementScreen } from "./features/clubs/ClubManagementScreen";
 import { FixtureWorkspaceScreen } from "./features/clubs/FixtureWorkspaceScreen";
 import { SquadManagementScreen } from "./features/teams/SquadManagementScreen";
 import { FormationManagementScreen } from "./features/sports/FormationManagementScreen";
+import { ManualScoreControlScreen } from "./features/scores/ManualScoreControlScreen";
 import { AuthenticatedLayout } from "./layouts/AuthenticatedLayout";
 import { LoginScreen } from "./screens/LoginScreen";
 import { apiClient, API_BASE_URL, setAccessToken as setClientAccessToken } from "./services/api-client";
@@ -222,6 +223,7 @@ function renderScreen(
   activeScreen: NavigationKey,
   state: {
     accessToken: string;
+    operatorRole: string | null;
     assignment: DesktopPublicationContext | undefined;
     backendStatus: BackendStatus;
     channels: Channel[];
@@ -357,6 +359,8 @@ function renderScreen(
       );
     case "sports":
       return <SportsWorkspaceScreen accessToken={state.accessToken} />;
+    case "scores":
+      return <ManualScoreControlScreen accessToken={state.accessToken} isAdmin={state.operatorRole === "admin"} />;
     case "matches":
       return <MatchSchedulerScreen selectedMatchId={state.selectedMatchId} accessToken={state.accessToken} />;
     case "approvals":
@@ -436,6 +440,7 @@ export function App() {
   // Auth state
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentEmail, setCurrentEmail] = useState<string | null>(null);
+  const [operatorRole, setOperatorRole] = useState<string | null>(null);
   
   // Screen state
   const [activeScreen, setActiveScreen] = useState<NavigationKey>("dashboard");
@@ -477,8 +482,9 @@ export function App() {
   }, []);
 
   // Handle login
-  const handleLogin = useCallback((email: string, accessToken: string) => {
+  const handleLogin = useCallback((email: string, accessToken: string, role: string) => {
     setCurrentEmail(email);
+    setOperatorRole(role);
     setAccessToken(accessToken);
     setClientAccessToken(accessToken);
     setIsAuthenticated(true);
@@ -489,6 +495,7 @@ export function App() {
     selectionTrace("LOGOUT_CLEAR", { previous: selectionSnapshot(selectedChannelRef.current), reason: "logout" });
     setIsAuthenticated(false);
     setCurrentEmail(null);
+    setOperatorRole(null);
     setAccessToken("");
     setClientAccessToken(null);
     setActiveScreen("dashboard");
@@ -1303,6 +1310,7 @@ export function App() {
   const screenState = useMemo(
     () => ({
       accessToken,
+      operatorRole,
       assignment,
       backendStatus,
       channels,
@@ -1325,6 +1333,7 @@ export function App() {
     }),
     [
       accessToken,
+      operatorRole,
       assignment,
       backendStatus,
       channels,
@@ -1359,6 +1368,7 @@ export function App() {
       onNavigate={setActiveScreen}
       activeProvider={selectedChannel ? providers.find((p) => p.id === selectedChannel.providerId) : undefined}
       currentEmail={currentEmail}
+      operatorRole={operatorRole}
       apiBaseUrl={API_BASE_URL}
       onLogout={handleLogout}
     >

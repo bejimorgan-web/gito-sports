@@ -29,6 +29,11 @@ async function initializeFootballService() {
   console.log('API_FOOTBALL_KEY PRESENT =', Boolean(env.apiFootballKey?.trim()));
   console.log('SPORTMONKS_API_TOKEN PRESENT =', Boolean(env.sportmonksApiToken?.trim()));
 
+  if (ScoreService.getSourceMode().mode === "manual") {
+    console.log('[startup] live-score source is Manual; provider refresh is disabled.');
+    return true;
+  }
+
   if (!env.apiFootballKey?.trim() && !env.sportmonksApiToken?.trim()) {
     console.warn('[startup] FOOTBALL disabled because no live-score provider key is configured.');
     return true;

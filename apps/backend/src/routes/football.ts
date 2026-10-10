@@ -13,7 +13,7 @@ function handleFootballError(error: unknown, response: Response) {
 }
 
 function normalizeResponseSource(source: string) {
-  return ["cache", "stale_cache"].includes(source) ? "cache" : "api";
+  return source === "manual" ? "manual" : ["cache", "stale_cache"].includes(source) ? "cache" : "api";
 }
 
 function buildMeta(source: string, count: number, ageMs?: number, cachedAt?: string) {

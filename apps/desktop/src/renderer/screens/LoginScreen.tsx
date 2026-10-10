@@ -2,7 +2,7 @@ import { useState } from "react";
 import { apiClient } from "../services/api-client";
 
 interface LoginScreenProps {
-  onLoginSuccess: (email: string, accessToken: string) => void;
+  onLoginSuccess: (email: string, accessToken: string, role: string) => void;
   onError?: (error: string) => void;
 }
 
@@ -31,7 +31,7 @@ export function LoginScreen({ onLoginSuccess, onError }: LoginScreenProps) {
       }
 
       const session = await apiClient.login(email, password);
-      onLoginSuccess(email, session.accessToken);
+      onLoginSuccess(email, session.accessToken, session.operator.role);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Login failed";
       console.error('[LoginScreen] login error', message, err);

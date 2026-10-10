@@ -3,6 +3,8 @@ import { EventBus } from "../events/event-bus.js";
 import { ApiFootballService } from "./api-football-service.js";
 import { SportmonksService } from "./sportmonks-service.js";
 import { apiUsageGuard } from "./api-usage-guard.js";
+import { getDatabase } from "../db/connection.js";
+import { getScoreSourceMode, setScoreSourceMode, type ScoreSourceMode } from "../repositories/score-source-mode-repository.js";
 
 type CacheEntry<T> = {
   expiresAt: number;
@@ -13,7 +15,7 @@ type CacheEntry<T> = {
 type ApiFootballFixture = Record<string, unknown>;
 type ApiFootballLeague = Record<string, unknown>;
 
-export type ScoreSource = "live" | "cache" | "stale_cache" | "scheduled";
+export type ScoreSource = "live" | "cache" | "stale_cache" | "scheduled" | "manual";
 
 export type ScoreListResult = {
   matches: ScoreMatchSummary[];
@@ -66,6 +68,10 @@ export type ScoreMatchSummary = {
     home: number | null;
     away: number | null;
     winner: string | null;
+  };
+  manualScore?: {
+    version: number;
+    finalResultConfirmed: boolean;
   };
   events: ScoreEventDescriptor[];
 };
@@ -434,6 +440,181 @@ function emitScoreEvent(event: "scores:updated" | "scores:cache:refreshed" | "sc
   EventBus.emit(event, payload);
 }
 
+type ManualScoreReadRow = {
+  matchId: string;
+  externalProvider: string | null;
+  externalMatchId: string | null;
+  utcDate: string;
+  status: string;
+  homeScore: number;
+  awayScore: number;
+  version: number;
+  finalResultConfirmed: number;
+  competitionId: string;
+  competitionName: string;
+  competitionLogoUrl: string | null;
+  homeTeamId: string;
+  homeTeamName: string;
+  homeTeamLogoUrl: string | null;
+  awayTeamId: string;
+  awayTeamName: string;
+  awayTeamLogoUrl: string | null;
+};
+
+function manualScoreRows(whereSql: string, ...values: string[]): ManualScoreReadRow[] {
+  return getDatabase().prepare(`
+    SELECT m.id AS matchId,
+           m.external_provider AS externalProvider,
+           m.external_match_id AS externalMatchId,
+           m.starts_at AS utcDate,
+           ms.status,
+           ms.home_score AS homeScore,
+           ms.away_score AS awayScore,
+           ms.version,
+           ms.final_result_confirmed AS finalResultConfirmed,
+           c.id AS competitionId,
+           c.name AS competitionName,
+           c.logo_url AS competitionLogoUrl,
+           h.id AS homeTeamId,
+           h.name AS homeTeamName,
+           h.logo_url AS homeTeamLogoUrl,
+           a.id AS awayTeamId,
+           a.name AS awayTeamName,
+           a.logo_url AS awayTeamLogoUrl
+    FROM match_score_state ms
+    JOIN matches m ON m.id = ms.match_id
+    JOIN competitions c ON c.id = m.competition_id
+    JOIN sports s ON s.id = c.sport_id
+    JOIN teams h ON h.id = m.home_team_id
+    JOIN teams a ON a.id = m.away_team_id
+    LEFT JOIN seasons se ON se.id = m.season_id
+    WHERE lower(s.slug) IN ('football', 'soccer')
+      AND h.sport_id = c.sport_id
+      AND a.sport_id = c.sport_id
+      AND (m.season_id IS NULL OR se.competition_id = m.competition_id)
+      AND ${whereSql}
+  `).all(...values) as ManualScoreReadRow[];
+}
+
+function canonicalMatchesForProviderFixture(providerIdentity: string, externalMatchId: string): string[] {
+  return (getDatabase().prepare(`
+    SELECT id
+    FROM matches
+    WHERE lower(trim(external_provider)) = ? AND external_match_id = ?
+  `).all(providerIdentity, externalMatchId) as Array<{ id: string }>).map((row) => row.id);
+}
+
+function getFootballProviderIdentity(): string {
+  return env.sportmonksApiToken?.trim() || env.sportmonksApiKey?.trim()
+    ? "sportmonks"
+    : "api-football";
+}
+
+function toManualScoreSummary(row: ManualScoreReadRow): ScoreMatchSummary {
+  const homeScore = Number(row.homeScore);
+  const awayScore = Number(row.awayScore);
+  const status = row.status === "live" ? "LIVE"
+    : row.status === "paused" ? "PAUSED"
+      : row.status === "ended" ? "FT"
+        : row.status === "postponed" ? "PST"
+          : row.status === "cancelled" ? "CANC"
+            : "NS";
+
+  return {
+    id: row.matchId,
+    utcDate: row.utcDate,
+    status,
+    minute: null,
+    competition: {
+      id: row.competitionId,
+      name: row.competitionName,
+      logoUrl: row.competitionLogoUrl
+    },
+    homeTeam: {
+      id: row.homeTeamId,
+      name: row.homeTeamName,
+      logoUrl: row.homeTeamLogoUrl
+    },
+    awayTeam: {
+      id: row.awayTeamId,
+      name: row.awayTeamName,
+      logoUrl: row.awayTeamLogoUrl
+    },
+    score: {
+      home: homeScore,
+      away: awayScore,
+      winner: homeScore > awayScore ? "home" : awayScore > homeScore ? "away" : null
+    },
+    manualScore: {
+      version: Number(row.version),
+      finalResultConfirmed: Number(row.finalResultConfirmed) === 1
+    },
+    events: notificationDescriptors()
+  };
+}
+
+function manualSummaryForCanonicalMatch(matchId: string): ScoreMatchSummary | null {
+  const rows = manualScoreRows("m.id = ?", matchId);
+  return rows.length === 1 ? toManualScoreSummary(rows[0]!) : null;
+}
+
+function applyManualScoreToProviderMatch(match: ScoreMatchSummary, providerIdentity: string): ScoreMatchSummary {
+  if (getScoreSourceMode() === "api") return match;
+  const canonicalMatches = canonicalMatchesForProviderFixture(providerIdentity, match.id);
+  if (canonicalMatches.length !== 1) return match;
+  const rows = manualScoreRows("m.id = ?", canonicalMatches[0]!);
+  if (rows.length !== 1) {
+    return match;
+  }
+  const manual = toManualScoreSummary(rows[0]!);
+  return {
+    ...match,
+    id: manual.id,
+    utcDate: manual.utcDate,
+    status: manual.status,
+    minute: manual.minute,
+    competition: {
+      ...match.competition,
+      id: manual.competition.id,
+      name: manual.competition.name,
+      logoUrl: manual.competition.logoUrl ?? match.competition.logoUrl
+    },
+    homeTeam: {
+      ...match.homeTeam,
+      id: manual.homeTeam.id,
+      name: manual.homeTeam.name,
+      logoUrl: manual.homeTeam.logoUrl ?? match.homeTeam.logoUrl
+    },
+    awayTeam: {
+      ...match.awayTeam,
+      id: manual.awayTeam.id,
+      name: manual.awayTeam.name,
+      logoUrl: manual.awayTeam.logoUrl ?? match.awayTeam.logoUrl
+    },
+    score: manual.score,
+    manualScore: manual.manualScore
+  };
+}
+
+function withManualLiveScores(matches: ScoreMatchSummary[]): ScoreMatchSummary[] {
+  if (getScoreSourceMode() === "api") return matches;
+  const providerIdentity = getFootballProviderIdentity();
+  const providerIds = new Set(matches.map((match) => match.id));
+  const providerMatches = matches
+    .map((match) => applyManualScoreToProviderMatch(match, providerIdentity))
+    .filter((match) => isLiveStatus(match.status));
+  const manualLive = manualScoreRows("ms.status IN ('live', 'paused')")
+    .filter((row) => {
+      if (!row.externalMatchId || row.externalProvider?.trim().toLowerCase() !== providerIdentity || !providerIds.has(row.externalMatchId)) {
+        return true;
+      }
+      const canonicalMatches = canonicalMatchesForProviderFixture(providerIdentity, row.externalMatchId);
+      return canonicalMatches.length !== 1 || canonicalMatches[0] !== row.matchId;
+    })
+    .map(toManualScoreSummary);
+  return [...providerMatches, ...manualLive];
+}
+
 const serviceStatus: {
   footballApiEnabled: boolean;
   cacheInitialized: boolean;
@@ -470,6 +651,9 @@ function clearCacheKeys(prefix?: string) {
 }
 
 async function refreshAllScores(): Promise<{ liveCount: number; todayCount: number; upcomingCount: number }> {
+  if (getScoreSourceMode() === "manual") {
+    return { liveCount: 0, todayCount: 0, upcomingCount: 0 };
+  }
   if (refreshAllInProgress) {
     return refreshAllInProgress;
   }
@@ -649,7 +833,12 @@ function normalizeMatch(match: ApiFootballFixture): ScoreMatchSummary {
   const goals = asRecord(score.goals);
 
   return {
-    id: (asNumber(match.id)?.toString() ?? asString(match.id) ?? "match"),
+    id:
+      asNumber(fixture.id)?.toString() ??
+      asString(fixture.id) ??
+      asNumber(match.id)?.toString() ??
+      asString(match.id) ??
+      "match",
     utcDate: asString(fixture.date),
     status: asString(status.short) ?? asString(status.long) ?? "UNKNOWN",
     minute: inferMinute(match),
@@ -713,6 +902,29 @@ export const ScoreService = {
     };
   },
 
+  getSourceMode() {
+    return {
+      mode: getScoreSourceMode(),
+      apiConfigured: serviceStatus.footballApiEnabled,
+      provider: getScoreSourceMode() === "api"
+        ? (env.sportmonksApiToken?.trim() || env.sportmonksApiKey?.trim() ? "Sportmonks" : "API-Football")
+        : null
+    };
+  },
+
+  setSourceMode(mode: ScoreSourceMode) {
+    if (mode === "api" && !serviceStatus.footballApiEnabled) {
+      throw Object.assign(new Error("Configure a live-score provider key on the backend before selecting API mode."), {
+        statusCode: 409,
+        code: "score_provider_not_configured"
+      });
+    }
+    setScoreSourceMode(mode);
+    clearCacheKeys("scores:");
+    emitScoreEvent("scores:updated", { cacheKey: "scores:live", source: mode, modeChanged: true });
+    return this.getSourceMode();
+  },
+
   getDebug() {
     return {
       enabled: serviceStatus.footballApiEnabled,
@@ -732,11 +944,26 @@ export const ScoreService = {
     clearCacheKeys(prefix);
   },
 
+  notifyManualScoreUpdate(matchId: string, version: number) {
+    const payload = { cacheKey: "scores:live", source: "manual", matchId, version };
+    emitScoreEvent("scores:updated", payload);
+    emitScoreEvent("scores:cache:refreshed", payload);
+  },
+
   refreshAll() {
     return refreshAllScores();
   },
 
   async listLiveScores(): Promise<ScoreListResult> {
+    if (getScoreSourceMode() === "manual") {
+      return {
+        matches: manualScoreRows("ms.status IN ('live', 'paused')").map(toManualScoreSummary),
+        source: "manual",
+        ageMs: 0,
+        cachedAt: new Date().toISOString()
+      };
+    }
+
     const cacheKey = "scores:live";
     const cached = getCacheEntry<ScoreMatchSummary[]>(cacheKey);
 
@@ -745,7 +972,7 @@ export const ScoreService = {
         scheduleBackgroundRefresh(cacheKey, () => refreshLiveScores(cacheKey));
       }
       return {
-        matches: cached.value,
+        matches: withManualLiveScores(cached.value),
         source: "cache",
         ageMs: Date.now() - cached.createdAt,
         cachedAt: new Date(cached.createdAt).toISOString()
@@ -755,7 +982,7 @@ export const ScoreService = {
     const stale = getStaleCacheEntry<ScoreMatchSummary[]>(cacheKey, 120_000);
     if (stale) {
       return {
-        matches: stale.value,
+        matches: withManualLiveScores(stale.value),
         source: "cache",
         ageMs: stale.ageMs,
         cachedAt: stale.cachedAt
@@ -768,7 +995,7 @@ export const ScoreService = {
     const liveTodayMatches = todayCache?.value.filter((match) => isLiveStatus(match.status)) ?? [];
     if (todayCache && liveTodayMatches.length > 0) {
       return {
-        matches: liveTodayMatches,
+        matches: withManualLiveScores(liveTodayMatches),
         source: "scheduled",
         ageMs: Date.now() - todayCache.createdAt,
         cachedAt: new Date(todayCache.createdAt).toISOString()
@@ -783,7 +1010,7 @@ export const ScoreService = {
       const refreshed = getCacheEntry<ScoreMatchSummary[]>(cacheKey);
       if (refreshed) {
         return {
-          matches: refreshed.value,
+          matches: withManualLiveScores(refreshed.value),
           source: "live",
           ageMs: Date.now() - refreshed.createdAt,
           cachedAt: new Date(refreshed.createdAt).toISOString()
@@ -796,17 +1023,22 @@ export const ScoreService = {
     const staleAfterRefresh = getStaleCacheEntry<ScoreMatchSummary[]>(cacheKey, 120_000);
     if (staleAfterRefresh) {
       return {
-        matches: staleAfterRefresh.value,
+        matches: withManualLiveScores(staleAfterRefresh.value),
         source: "stale_cache",
         ageMs: staleAfterRefresh.ageMs,
         cachedAt: staleAfterRefresh.cachedAt
       };
     }
 
-    return { matches: [], source: "cache" };
+    return { matches: withManualLiveScores([]), source: "cache" };
   },
 
   async getMatch(matchId: string): Promise<ScoreMatchResult | null> {
+    if (getScoreSourceMode() === "manual") {
+      const manualMatch = manualSummaryForCanonicalMatch(matchId);
+      return manualMatch ? { match: manualMatch, source: "manual" } : null;
+    }
+
     const cacheKey = `scores:match:${matchId}`;
     const cached = getCacheEntry<ScoreMatchSummary>(cacheKey);
     if (cached) {
@@ -837,7 +1069,7 @@ export const ScoreService = {
       }
 
       return {
-        match: cached.value,
+        match: applyManualScoreToProviderMatch(cached.value, getFootballProviderIdentity()),
         source: "cache",
         ageMs: Date.now() - cached.createdAt,
         cachedAt: new Date(cached.createdAt).toISOString()
@@ -873,7 +1105,7 @@ export const ScoreService = {
     const stale = getStaleCacheEntry<ScoreMatchSummary>(cacheKey, 120_000);
     if (stale) {
       return {
-        match: stale.value,
+        match: applyManualScoreToProviderMatch(stale.value, getFootballProviderIdentity()),
         source: "stale_cache",
         ageMs: stale.ageMs,
         cachedAt: stale.cachedAt

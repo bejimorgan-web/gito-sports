@@ -296,6 +296,7 @@ export function getDatabase(): DatabaseSync {
     if (!runtimeConfig.dbReadOnlyMode) {
       database.exec(readAiNewsSchema());
     }
+    ensureManualScoreSchema(database);
   } catch (err) {
     console.error("[startup] failed to apply News/AI schema", err);
     throw err;
@@ -401,6 +402,67 @@ function hasTable(database: DatabaseSync, tableName: string): boolean {
     .get(tableName) as { name: string } | undefined;
 
   return Boolean(row);
+}
+
+export function ensureManualScoreSchema(database: DatabaseSync) {
+  const scoreTablesExist = hasTable(database, "match_score_state") && hasTable(database, "match_score_audit");
+
+  if (runtimeConfig.dbReadOnlyMode) {
+    if (!scoreTablesExist) {
+      console.warn("[startup] manual score schema is unavailable in read-only mode; apply the additive schema upgrade before enabling manual scoring.");
+    }
+    return;
+  }
+
+  ensureSchemaVersion(database);
+
+  if (!hasTable(database, "matches") || !hasTable(database, "operator_users")) {
+    throw new Error("[startup] cannot apply manual score schema without matches and operator_users tables.");
+  }
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS match_score_state (
+      id TEXT PRIMARY KEY,
+      match_id TEXT NOT NULL UNIQUE,
+      home_score INTEGER NOT NULL DEFAULT 0,
+      away_score INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'live', 'paused', 'ended', 'cancelled', 'postponed')),
+      final_result_confirmed INTEGER NOT NULL DEFAULT 0,
+      version INTEGER NOT NULL DEFAULT 1,
+      updated_by_operator_id TEXT,
+      last_confirmed_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,
+      FOREIGN KEY (updated_by_operator_id) REFERENCES operator_users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS match_score_audit (
+      id TEXT PRIMARY KEY,
+      match_id TEXT NOT NULL,
+      action TEXT NOT NULL CHECK (action IN ('score_updated', 'score_corrected', 'final_result_confirmed', 'final_result_reopened')),
+      operator_id TEXT,
+      previous_version INTEGER NOT NULL,
+      new_version INTEGER NOT NULL,
+      previous_home_score INTEGER,
+      previous_away_score INTEGER,
+      new_home_score INTEGER,
+      new_away_score INTEGER,
+      previous_status TEXT,
+      new_status TEXT,
+      previous_final_result_confirmed INTEGER,
+      new_final_result_confirmed INTEGER,
+      reason TEXT,
+      metadata TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,
+      FOREIGN KEY (operator_id) REFERENCES operator_users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_match_score_state_match ON match_score_state(match_id);
+    CREATE INDEX IF NOT EXISTS idx_match_score_audit_match ON match_score_audit(match_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_match_score_audit_operator ON match_score_audit(operator_id, created_at DESC);
+  `);
 }
 
 function ensureNewsSchemaColumns(database: DatabaseSync) {

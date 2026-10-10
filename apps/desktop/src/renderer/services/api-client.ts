@@ -74,6 +74,13 @@ export { API_BASE_URL };
 
 const REQUEST_TIMEOUT_MS = 35_000;
 
+export class ApiRequestError extends Error {
+  constructor(message: string, readonly status: number, readonly path: string) {
+    super(message);
+    this.name = "ApiRequestError";
+  }
+}
+
 let currentAccessToken: string | null = null;
 
 export function setAccessToken(nextToken: string | null) {
@@ -141,7 +148,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
       // Keep the status message when the backend cannot return JSON.
     }
 
-    throw new Error(message);
+    throw new ApiRequestError(message, response.status, path);
   }
 
   if (response.status === 204) {
@@ -208,9 +215,72 @@ export const apiClient = {
     });
   },
   login(email: string, password: string) {
-    return request<{ accessToken: string }>("/auth/login", {
+    return request<{ accessToken: string; operator: { id: string; name: string; email: string; role: string } }>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password })
+    });
+  },
+  getManualScoreState(matchId: string, accessToken: string) {
+    return request<{
+      matchId: string;
+      homeScore: number;
+      awayScore: number;
+      status: string;
+      version: number;
+      finalResultConfirmed: boolean;
+      updatedByOperatorId: string | null;
+      updatedAt: string;
+      createdAt: string;
+      lastConfirmedAt: string | null;
+    }>(`/scores/manual/${encodeURIComponent(matchId)}`, {
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+  },
+  getScoreSourceMode(accessToken: string) {
+    return request<{ mode: "manual" | "api"; apiConfigured: boolean; provider: string | null }>("/scores/source-mode", {
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+  },
+  setScoreSourceMode(mode: "manual" | "api", accessToken: string) {
+    return request<{ mode: "manual" | "api"; apiConfigured: boolean; provider: string | null }>("/scores/source-mode", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ mode })
+    });
+  },
+  startManualScore(matchId: string, input: { version: number; homeScore: number; awayScore: number }, accessToken: string) {
+    return request<any>(`/scores/manual/${encodeURIComponent(matchId)}/start`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(input)
+    });
+  },
+  updateManualScore(matchId: string, input: { version: number; homeScore: number; awayScore: number; status: string }, accessToken: string) {
+    return request<any>(`/scores/manual/${encodeURIComponent(matchId)}`, {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(input)
+    });
+  },
+  confirmManualScore(matchId: string, input: { version: number }, accessToken: string) {
+    return request<any>(`/scores/manual/${encodeURIComponent(matchId)}/confirm`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(input)
+    });
+  },
+  correctManualScore(matchId: string, input: { version: number; homeScore: number; awayScore: number; reason: string }, accessToken: string) {
+    return request<any>(`/scores/manual/${encodeURIComponent(matchId)}/correct`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(input)
+    });
+  },
+  reopenManualScore(matchId: string, input: { version: number; reason: string }, accessToken: string) {
+    return request<any>(`/scores/manual/${encodeURIComponent(matchId)}/reopen`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(input)
     });
   },
   listProviders() {
