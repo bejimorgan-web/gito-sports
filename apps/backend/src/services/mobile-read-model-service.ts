@@ -10,6 +10,7 @@ import type { ScoreMatchSummary } from "./score-service.js";
 import { getCachedScoreSnapshot } from "./score-service.js";
 import { getFixtureLineups } from "../repositories/fixture-lineups-repository.js";
 import { getPublishedPublicationDeliveryByMatchId } from "../repositories/publication-artifact-repository.js";
+import { getScoreSourceMode } from "../repositories/score-source-mode-repository.js";
 import { PUBLISHED_NEWS_BRAND } from "./published-news-brand.js";
 
 export type MobileClub = Team & {
@@ -94,9 +95,42 @@ export function mapMobileFixture(fixture: any, suppliedSnapshot?: ScoreMatchSumm
   const home = clubFromRow(fixture.homeTeam, { sport: fixture.sport, country: fixture.country });
   const away = clubFromRow(fixture.awayTeam, { sport: fixture.sport, country: fixture.country });
   const snapshot = suppliedSnapshot ?? getCachedScoreSnapshot(fixture.externalMatchId);
-  const score = snapshot?.score && typeof snapshot.score === "object" ? snapshot.score : null;
+  const manualScore = getScoreSourceMode() === "manual"
+    ? getDatabase().prepare(`SELECT home_score AS homeScore, away_score AS awayScore, status,
+        final_result_confirmed AS finalResultConfirmed, updated_at AS updatedAt
+      FROM match_score_state WHERE match_id=?`).get(fixture.id) as {
+        homeScore: number; awayScore: number; status: string; finalResultConfirmed: number; updatedAt: string;
+      } | undefined
+    : undefined;
+  const manualClock = manualScore && ["live", "paused"].includes(manualScore.status)
+    ? getDatabase().prepare(`SELECT phase, is_running AS running, running_since AS runningSince,
+        elapsed_seconds AS elapsedSeconds FROM match_score_clock_state WHERE match_id=?`).get(fixture.id) as {
+          phase: string; running: number; runningSince: string | null; elapsedSeconds: number;
+        } | undefined
+    : undefined;
+  const score = manualScore
+    ? { home: Number(manualScore.homeScore), away: Number(manualScore.awayScore), winner: Number(manualScore.homeScore) > Number(manualScore.awayScore) ? "home" : Number(manualScore.awayScore) > Number(manualScore.homeScore) ? "away" : null }
+    : snapshot?.score && typeof snapshot.score === "object" ? snapshot.score : null;
+  const manualLiveStatus = manualScore?.status === "live" ? "LIVE" : manualScore?.status === "paused" ? "PAUSED" : null;
+  const liveElapsed = manualClock
+    ? Number(manualClock.elapsedSeconds) + (Number(manualClock.running) === 1 && manualClock.runningSince
+      ? Math.max(0, Math.floor((Date.now() - Date.parse(manualClock.runningSince)) / 1000)) : 0)
+    : null;
+  const fixtureStatus = manualScore
+    ? manualScore.status
+    : snapshot && ["FT", "AET", "PEN", "FINISHED", "ENDED", "COMPLETED"].includes(snapshot.status.toUpperCase())
+      ? "ended" : fixture.status;
   const delivery = getPublishedPublicationDeliveryByMatchId(fixture.id);
-  const liveState = snapshot && score
+  const liveState = manualScore && manualLiveStatus
+    ? {
+        isLive: true,
+        status: manualLiveStatus,
+        homeScore: score?.home ?? null,
+        awayScore: score?.away ?? null,
+        elapsed: liveElapsed === null ? null : Math.floor(liveElapsed / 60),
+        updatedAt: manualScore.updatedAt
+      }
+    : snapshot && score
     ? {
         isLive: ["1H", "2H", "HT", "ET", "BT", "P", "LIVE", "IN_PLAY", "PAUSED", "SUSPENDED"].includes(snapshot.status),
         status: snapshot.status,
@@ -110,7 +144,7 @@ export function mapMobileFixture(fixture: any, suppliedSnapshot?: ScoreMatchSumm
     id: fixture.id,
     startsAt: fixture.startsAt,
     kickoffTimeConfirmed: !/^\d{4}-\d{2}-\d{2}$/.test(fixture.startsAt),
-    status: fixture.status,
+    status: fixtureStatus,
     venue: fixture.venueName ?? null,
     venueImageUrl: fixture.venueImageUrl ?? (!fixture.venueName || fixture.venueName === home.homeStadiumName ? home.homeStadiumPhotoUrl : null) ?? null,
     competition: { id: fixture.competition.id, name: fixture.competition.name, slug: fixture.competition.slug, logoUrl: fixture.competition.logoUrl ?? null },

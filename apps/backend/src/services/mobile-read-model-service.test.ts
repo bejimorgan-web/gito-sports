@@ -146,6 +146,17 @@ test("mobile read model exposes publication delivery without IPTV stream relatio
   assert.ok(byCompetition.some((item) => item.id === article.id));
   assert.equal(mixed.filter((item) => item.id === article.id).length, 1);
   assert.equal(byTeam.filter((item) => item.id === article.id).length, 1);
+  const finishedAt = new Date().toISOString();
+  db.prepare(`INSERT INTO match_score_state
+    (id, match_id, home_score, away_score, status, final_result_confirmed, version, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 'ended', 1, 2, ?, ?)`)
+    .run("manual-result-1", fixture.id, 3, 2, finishedAt, finishedAt);
+  const finishedFixture = mobile.mobileFixture(fixture.id)!;
+  assert.equal(finishedFixture.id, fixture.id);
+  assert.equal(finishedFixture.status, "ended");
+  assert.deepEqual(finishedFixture.score, { home: 3, away: 2, winner: "home" });
+  assert.equal(mobile.mobileClubDetail("team-bayern")?.previousResult?.id, fixture.id);
+  assert.equal(mobile.mobileSeasonFixtures("season-2026")?.fixtures.find((item: any) => item.id === fixture.id)?.status, "ended");
 });
 
 test("mobile competition catalog preserves canonical host ownership", () => {
