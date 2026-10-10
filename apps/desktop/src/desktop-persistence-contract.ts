@@ -411,6 +411,11 @@ export interface DesktopPlaybackApi {
   cancel(sessionId: string): Promise<void>;
 }
 
+export interface DesktopScoreWindowsApi {
+  openMatch(input: { matchId: string; accessToken: string; role: string }): Promise<boolean>;
+  getContext(): Promise<{ matchId: string; accessToken: string; role: string } | null>;
+}
+
 export interface DesktopIptvRuntimeApi {
   validateProvider(input: {
     providerId?: string;
@@ -444,6 +449,7 @@ declare global {
       desktopCredentials?: DesktopCredentialApi;
       desktopIptv?: DesktopIptvRuntimeApi;
       desktopPlayback?: DesktopPlaybackApi;
+      scoreWindows?: DesktopScoreWindowsApi;
     };
   }
 }

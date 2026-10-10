@@ -236,6 +236,18 @@ export const apiClient = {
       headers: { authorization: `Bearer ${accessToken}` }
     });
   },
+  getManualScoreClock(matchId: string, accessToken: string) {
+    return request<any>(`/scores/manual/${encodeURIComponent(matchId)}/clock`, {
+      headers: { authorization: `Bearer ${accessToken}` }
+    });
+  },
+  updateManualScoreClock(matchId: string, input: { version: number; action: string; minutes?: number }, accessToken: string) {
+    return request<any>(`/scores/manual/${encodeURIComponent(matchId)}/clock`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(input)
+    });
+  },
   getScoreSourceMode(accessToken: string) {
     return request<{ mode: "manual" | "api"; apiConfigured: boolean; provider: string | null }>("/scores/source-mode", {
       headers: { authorization: `Bearer ${accessToken}` }

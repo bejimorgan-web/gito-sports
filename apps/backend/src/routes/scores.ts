@@ -23,6 +23,12 @@ export type ManualScoreState = {
   lastConfirmedAt: string | null;
 };
 
+type ClockState = {
+  matchId: string; phase: string; running: boolean; runningSince: string | null;
+  elapsedSeconds: number; firstHalfAddedMinutes: number | null; secondHalfAddedMinutes: number | null;
+  version: number; updatedAt: string;
+};
+
 type ManualScoreInput = {
   homeScore?: number | string;
   awayScore?: number | string;
@@ -113,6 +119,75 @@ function readManualScoreState(matchId: string): ManualScoreState | null {
     createdAt: row.createdAt,
     lastConfirmedAt: row.lastConfirmedAt
   };
+}
+
+function readClockState(matchId: string): ClockState | null {
+  const row = getDatabase().prepare(`SELECT match_id AS matchId, phase, is_running AS running,
+    running_since AS runningSince, elapsed_seconds AS elapsedSeconds,
+    first_half_added_minutes AS firstHalfAddedMinutes, second_half_added_minutes AS secondHalfAddedMinutes,
+    version, updated_at AS updatedAt FROM match_score_clock_state WHERE match_id = ?`).get(matchId) as any;
+  if (!row) return null;
+  const elapsedSeconds = Number(row.elapsedSeconds) + (Number(row.running) === 1 && row.runningSince
+    ? Math.max(0, Math.floor((Date.now() - new Date(row.runningSince).getTime()) / 1000)) : 0);
+  const responseNow = new Date().toISOString();
+  const responseRunningSince = Number(row.running) === 1 && row.runningSince && Date.parse(row.runningSince) > Date.now() ? row.runningSince : responseNow;
+  return { ...row, running: Number(row.running) === 1, runningSince: Number(row.running) === 1 ? responseRunningSince : null, elapsedSeconds, version: Number(row.version) };
+}
+
+function recordClockAction(matchId: string, operatorId: string, action: string, expectedVersion: unknown, value?: unknown) {
+  const db = getDatabase();
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    const current = readClockState(matchId);
+    if (!current) throw scoreError("match_clock_not_started", 409, "match_clock_not_started");
+    if (normalizeExpectedVersion(expectedVersion) !== current.version) throw scoreError("stale_clock_version", 409, "stale_clock_version");
+    const now = new Date().toISOString();
+    let phase = current.phase; let running = current.running; let runningSince = current.runningSince;
+    let elapsed = current.elapsedSeconds; let firstAdded = current.firstHalfAddedMinutes; let secondAdded = current.secondHalfAddedMinutes;
+    const football = Boolean(db.prepare(`SELECT 1 FROM matches m JOIN competitions c ON c.id=m.competition_id JOIN sports s ON s.id=c.sport_id WHERE m.id=? AND lower(s.slug) IN ('football','soccer')`).get(matchId));
+    const elapsedBefore = elapsed;
+    if (action === "set_first_added" || action === "set_second_added") {
+      if (!football) throw scoreError("added_time_is_only_supported_for_soccer", 422, "unsupported_clock_rule");
+      const minutes = normalizeScoreValue(value, "addedMinutes");
+      if (minutes > 30) throw scoreError("added_minutes_must_be_between_0_and_30", 400, "invalid_added_minutes");
+      if (action === "set_first_added" && elapsed < 2700) throw scoreError("first_half_added_time_not_due", 409, "invalid_clock_transition");
+      if (action === "set_second_added" && elapsed < 5400 + (firstAdded ?? 0) * 60) throw scoreError("second_half_added_time_not_due", 409, "invalid_clock_transition");
+      if (action === "set_first_added") firstAdded = minutes; else secondAdded = minutes;
+    } else if (action === "pause" && running) {
+      phase = "paused"; running = false; runningSince = null;
+    } else if (action === "resume" && !running && ["first_half", "second_half", "running", "paused"].includes(phase)) {
+      phase = phase === "paused" ? (football ? (elapsed <= 2700 + (firstAdded ?? 0) * 60 ? "first_half" : "second_half") : "running") : phase;
+      running = true; runningSince = now;
+    } else if (action === "halftime" && football && running && elapsed >= 2700 + (firstAdded ?? 0) * 60) {
+      phase = "halftime"; running = false; runningSince = null; elapsed = Math.max(elapsed, 2700 + (firstAdded ?? 0) * 60);
+    } else if (action === "start_second_half" && football && phase === "halftime") {
+      phase = "second_half"; running = true; runningSince = now;
+    } else if (action === "end" && (football ? elapsed >= 5400 + ((firstAdded ?? 0) + (secondAdded ?? 0)) * 60 : running)) {
+      phase = "ended"; running = false; runningSince = null;
+    } else {
+      throw scoreError("invalid_clock_transition", 409, "invalid_clock_transition");
+    }
+    const version = current.version + 1;
+    if (running) runningSince = now;
+    db.prepare(`UPDATE match_score_clock_state SET phase=?, is_running=?, running_since=?, elapsed_seconds=?, first_half_added_minutes=?, second_half_added_minutes=?, version=?, updated_by_operator_id=?, updated_at=? WHERE match_id=?`)
+      .run(phase, running ? 1 : 0, runningSince, elapsed, firstAdded, secondAdded, version, operatorId, now, matchId);
+    const next = { ...current, phase, running, runningSince, elapsedSeconds: elapsed, firstHalfAddedMinutes: firstAdded, secondHalfAddedMinutes: secondAdded, version, updatedAt: now };
+    db.prepare(`INSERT INTO match_score_clock_audit (id,match_id,action,operator_id,previous_state,new_state,created_at) VALUES (?,?,?,?,?,?,?)`)
+      .run(crypto.randomUUID(), matchId, action, operatorId, JSON.stringify({ ...current, elapsedSeconds: elapsedBefore }), JSON.stringify(next), now);
+    if (["pause", "resume", "halftime", "start_second_half", "end"].includes(action)) {
+      const score = readManualScoreState(matchId);
+      if (score && !score.finalResultConfirmed) {
+        const status = action === "pause" || action === "halftime" ? "paused" : action === "end" ? "ended" : "live";
+        const scoreVersion = score.version + 1;
+        db.prepare("UPDATE match_score_state SET status=?, version=?, updated_by_operator_id=?, updated_at=? WHERE match_id=?")
+          .run(status, scoreVersion, operatorId, now, matchId);
+        db.prepare(`INSERT INTO match_score_audit (id,match_id,action,operator_id,previous_version,new_version,previous_home_score,previous_away_score,new_home_score,new_away_score,previous_status,new_status,previous_final_result_confirmed,new_final_result_confirmed,reason,metadata,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+          .run(crypto.randomUUID(), matchId, "score_updated", operatorId, score.version, scoreVersion, score.homeScore, score.awayScore, score.homeScore, score.awayScore, score.status, status, 0, 0, null, JSON.stringify({ operation: `clock_${action}`, operatorId }), now);
+      }
+    }
+    db.exec("COMMIT;");
+    return next;
+  } catch (error) { db.exec("ROLLBACK;"); throw error; }
 }
 
 function ensureManualFootballMatch(matchId: string): { id: string; status: string } {
@@ -410,7 +485,60 @@ scoresRouter.get("/manual/:id", protectedRoute, requireAdmin, (request, response
 });
 
 scoresRouter.post("/manual/:id/start", protectedRoute, requireAdmin, (request, response) => {
-  runManualScoreOperation(request, response, startManualMatch);
+  runManualScoreOperation(request, response, (matchId, input) => {
+    const state = startManualMatch(matchId, input);
+    const now = new Date().toISOString();
+    const db = getDatabase();
+    const fixtureTime = db.prepare("SELECT starts_at AS startsAt FROM matches WHERE id=?").get(matchId) as { startsAt: string } | undefined;
+    const clockStart = fixtureTime?.startsAt && String(fixtureTime.startsAt).includes("T") ? fixtureTime.startsAt : now;
+    db.prepare(`INSERT OR IGNORE INTO match_score_clock_state (match_id,phase,is_running,running_since,elapsed_seconds,version,updated_by_operator_id,created_at,updated_at) VALUES (?,'first_half',1,?,0,1,?,?,?)`)
+      .run(matchId, clockStart, input.operatorId, now, now);
+    db.prepare(`INSERT INTO match_score_clock_audit (id,match_id,action,operator_id,previous_state,new_state,created_at) VALUES (?,?,?,?,?,?,?)`)
+      .run(crypto.randomUUID(), matchId, "start_first_half", input.operatorId, null, JSON.stringify({ phase: "first_half", running: true, runningSince: clockStart, elapsedSeconds: 0 }), now);
+    return state;
+  });
+});
+
+scoresRouter.get("/manual/:id/clock", protectedRoute, requireAdmin, (request, response) => {
+  const id = request.params.id;
+  if (!id) return response.status(400).json({ error: "match_id_required" });
+  const clock = readClockState(id);
+  if (!clock) return response.status(404).json({ error: "match_clock_not_started" });
+  const fixture = getDatabase().prepare("SELECT starts_at AS startsAt FROM matches WHERE id=?").get(id) as { startsAt: string } | undefined;
+  response.json({ data: { ...clock, startsAt: fixture?.startsAt ?? null } });
+});
+
+scoresRouter.post("/manual/:id/clock", protectedRoute, requireAdmin, (request: AuthenticatedRequest, response) => {
+  const id = request.params.id;
+  const body = request.body && typeof request.body === "object" ? request.body as Record<string, unknown> : {};
+  if (!id || typeof body.action !== "string" || body.version === undefined) return response.status(400).json({ error: "invalid_payload" });
+  if (ScoreService.getSourceMode().mode !== "manual") return response.status(409).json({ error: "score_source_is_api", message: "Switch score source to Manual before changing match clocks." });
+  try {
+    if (body.action === "initialize") {
+      const db = getDatabase();
+      db.exec("BEGIN IMMEDIATE;");
+      try {
+        const score = readManualScoreState(id);
+        if (!score || score.finalResultConfirmed || !["live", "paused"].includes(score.status)) throw scoreError("manual_score_not_started", 409, "manual_score_not_started");
+        const fixture = db.prepare("SELECT starts_at AS startsAt FROM matches WHERE id=?").get(id) as { startsAt: string } | undefined;
+        const now = new Date().toISOString();
+        const scheduled = fixture?.startsAt && String(fixture.startsAt).includes("T") && Date.parse(fixture.startsAt) <= Date.now() ? fixture.startsAt : now;
+        db.prepare(`INSERT INTO match_score_clock_state (match_id,phase,is_running,running_since,elapsed_seconds,version,updated_by_operator_id,created_at,updated_at) VALUES (?,'first_half',1,?,0,1,?,?,?)`)
+          .run(id, scheduled, request.operator!.id, now, now);
+        db.prepare(`INSERT INTO match_score_clock_audit (id,match_id,action,operator_id,previous_state,new_state,created_at) VALUES (?,?,?,?,?,?,?)`)
+          .run(crypto.randomUUID(), id, "initialize_clock", request.operator!.id, null, JSON.stringify({ phase: "first_half", running: true, runningSince: scheduled }), now);
+        db.exec("COMMIT;");
+      } catch (error) { db.exec("ROLLBACK;"); throw error; }
+      response.json({ data: readClockState(id) });
+      return;
+    }
+    const clock = recordClockAction(id, request.operator!.id, body.action, body.version, body.minutes);
+    if (["pause", "resume", "halftime", "start_second_half", "end"].includes(body.action)) {
+      const score = readManualScoreState(id);
+      if (score) ScoreService.notifyManualScoreUpdate(id, score.version);
+    }
+    response.json({ data: clock });
+  } catch (error) { handleScoreError(error, response); }
 });
 
 scoresRouter.patch("/manual/:id", protectedRoute, requireAdmin, (request, response) => {

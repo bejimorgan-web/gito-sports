@@ -13,6 +13,8 @@ const isDev = typeof process.env.VITE_DEV_SERVER_URL !== "undefined";
 
 const desktopErrorReportingEnabled = (process.env.ERROR_REPORTING_ENABLED ?? "true").toLowerCase() === "true";
 const desktopSentryDsn = process.env.SENTRY_DSN ?? "";
+const scoreWindows = new Map<string, BrowserWindow>();
+const scoreWindowContexts = new Map<number, { matchId: string; accessToken: string; role: string }>();
 
 if (desktopErrorReportingEnabled && desktopSentryDsn) {
   Sentry.init({
@@ -199,6 +201,31 @@ function createMainWindow() {
 
   void mainWindow.loadFile(productionIndexFile).catch(() => loadErrorScreen(mainWindow));
 }
+
+ipcMain.handle("score-window:open-match", (event, input: { matchId: string; accessToken: string; role: string }) => {
+  if (input?.role !== "admin" || !input.matchId || !input.accessToken) throw new Error("admin_required");
+  const existing = scoreWindows.get(input.matchId);
+  if (existing && !existing.isDestroyed()) { existing.focus(); return true; }
+  const preloadScript = path.join(currentDirectory, "preload.cjs");
+  const matchWindow = new BrowserWindow({
+    width: 900, height: 680, minWidth: 680, minHeight: 520, maxWidth: 1180, maxHeight: 860,
+    title: "GiTO Match Operations", resizable: true, minimizable: true, maximizable: true, fullscreenable: false,
+    webPreferences: { preload: preloadScript, contextIsolation: true, nodeIntegration: false }
+  });
+  scoreWindows.set(input.matchId, matchWindow);
+  scoreWindowContexts.set(matchWindow.webContents.id, input);
+  matchWindow.on("closed", () => { scoreWindows.delete(input.matchId); scoreWindowContexts.delete(matchWindow.webContents.id); });
+  if (isDev) {
+    const target = new URL(devServerUrl);
+    target.searchParams.set("scoreMatchId", input.matchId);
+    void matchWindow.loadURL(target.toString()).catch((error) => { console.error("[SCORE WINDOW LOAD ERROR]", error); matchWindow.close(); });
+  } else {
+    void matchWindow.loadFile(productionIndexFile, { query: { scoreMatchId: input.matchId } }).catch((error) => { console.error("[SCORE WINDOW LOAD ERROR]", error); matchWindow.close(); });
+  }
+  return true;
+});
+
+ipcMain.handle("score-window:get-context", (event) => scoreWindowContexts.get(event.sender.id) ?? null);
 
 app.whenReady().then(() => {
   registerDesktopPersistenceIpc();

@@ -437,6 +437,8 @@ function renderScreen(
 }
 
 export function App() {
+  const [scoreWindowContext, setScoreWindowContext] = useState<{ matchId: string; accessToken: string; role: string } | null>(null);
+  const [scoreWindowContextLoaded, setScoreWindowContextLoaded] = useState(false);
   // Auth state
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentEmail, setCurrentEmail] = useState<string | null>(null);
@@ -475,6 +477,16 @@ export function App() {
   const liveModeRef = useRef(liveMode);
   const selectedChannelRef = useRef<Channel>();
   const previousSelectedChannelRef = useRef<Channel>();
+
+  useEffect(() => {
+    let active = true;
+    const api = window.gito?.scoreWindows;
+    if (!api) { setScoreWindowContextLoaded(true); return () => { active = false; }; }
+    void api.getContext().then((context) => {
+      if (active) { setScoreWindowContext(context); setScoreWindowContextLoaded(true); }
+    }).catch(() => { if (active) setScoreWindowContextLoaded(true); });
+    return () => { active = false; };
+  }, []);
 
   // Restore auth on mount
   useEffect(() => {
@@ -1356,6 +1368,10 @@ export function App() {
 
   // === RENDER CONDITIONAL CONTENT BASED ON AUTH STATE ===
   // All hooks are initialized above, so this conditional is safe
+  if (!scoreWindowContextLoaded) return <main className="score-window-shell" aria-busy="true">Loading match desk…</main>;
+  if (scoreWindowContext) {
+    return <main className="score-window-shell"><ManualScoreControlScreen accessToken={scoreWindowContext.accessToken} isAdmin={scoreWindowContext.role === "admin"} initialFixtureId={scoreWindowContext.matchId} /></main>;
+  }
   if (!isAuthenticated) {
     return <LoginScreen onLoginSuccess={handleLogin} />;
   }

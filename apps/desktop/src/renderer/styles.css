@@ -3101,3 +3101,26 @@ dd {
 .score-control-denied { max-width: 620px; }
 @media (max-width: 900px) { .score-control-grid { grid-template-columns: 1fr; } }
 @media (max-width: 560px) { .score-control-panel { padding: 16px; } .score-update-actions { grid-template-columns: 1fr; } .score-board { gap: 8px; } }
+.score-window-shell { min-height: 100vh; padding: 22px; background: var(--app-background, #10151d); overflow: auto; }
+.score-window-shell .score-control-screen { max-width: 1060px; margin: 0 auto; }
+.score-filter-row { display: grid; grid-template-columns: repeat(4, minmax(140px, 1fr)); gap: 14px; }
+.score-fixture-list { display: grid; gap: 10px; }
+.score-fixture-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 16px; padding: 14px 16px; border: 1px solid var(--border-subtle, #293241); border-radius: 12px; background: var(--surface-raised, #171f2b); }
+.score-fixture-row-main { display: grid; gap: 5px; }
+.score-fixture-row-main strong { font-size: 15px; }
+.score-fixture-row-main strong span { color: var(--text-muted, #9ba9ba); font-weight: 500; }
+.score-fixture-row-main small { color: var(--text-muted, #9ba9ba); }
+.score-kickoff-alert { color: #f0b65e; font-size: 12px; font-weight: 700; }
+.score-clock-kickoff, .score-clock-panel, .score-clock-alert { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 16px; border: 1px solid var(--border-subtle, #293241); border-radius: 12px; background: var(--surface-raised, #171f2b); }
+.score-clock-kickoff { justify-content: space-between; }
+.score-clock-kickoff span, .score-clock-kickoff small { color: var(--text-muted, #9ba9ba); }
+.score-clock-kickoff strong { font-size: 18px; }
+.score-clock-panel { justify-content: space-between; }
+.score-clock-face { display: grid; gap: 4px; }
+.score-clock-face span { color: var(--text-muted, #9ba9ba); text-transform: uppercase; font-size: 11px; letter-spacing: .08em; }
+.score-clock-face strong { font-size: 32px; font-variant-numeric: tabular-nums; }
+.score-clock-face small { color: var(--text-muted, #9ba9ba); }
+.score-clock-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.score-clock-alert { border-color: #d58e32; background: color-mix(in srgb, #d58e32 12%, var(--surface-raised, #171f2b)); }
+.score-clock-alert strong { color: #f0b65e; }
+@media (max-width: 760px) { .score-filter-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } .score-fixture-row { grid-template-columns: 1fr; justify-items: start; } }

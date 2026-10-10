@@ -462,6 +462,34 @@ export function ensureManualScoreSchema(database: DatabaseSync) {
     CREATE INDEX IF NOT EXISTS idx_match_score_state_match ON match_score_state(match_id);
     CREATE INDEX IF NOT EXISTS idx_match_score_audit_match ON match_score_audit(match_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_match_score_audit_operator ON match_score_audit(operator_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS match_score_clock_state (
+      match_id TEXT PRIMARY KEY,
+      phase TEXT NOT NULL DEFAULT 'not_started' CHECK (phase IN ('not_started', 'first_half', 'halftime', 'second_half', 'running', 'paused', 'ended')),
+      is_running INTEGER NOT NULL DEFAULT 0 CHECK (is_running IN (0, 1)),
+      running_since TEXT,
+      elapsed_seconds INTEGER NOT NULL DEFAULT 0 CHECK (elapsed_seconds >= 0),
+      first_half_added_minutes INTEGER CHECK (first_half_added_minutes BETWEEN 0 AND 30),
+      second_half_added_minutes INTEGER CHECK (second_half_added_minutes BETWEEN 0 AND 30),
+      version INTEGER NOT NULL DEFAULT 1,
+      updated_by_operator_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,
+      FOREIGN KEY (updated_by_operator_id) REFERENCES operator_users(id)
+    );
+    CREATE TABLE IF NOT EXISTS match_score_clock_audit (
+      id TEXT PRIMARY KEY,
+      match_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      operator_id TEXT NOT NULL,
+      previous_state TEXT,
+      new_state TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,
+      FOREIGN KEY (operator_id) REFERENCES operator_users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_match_score_clock_audit_match ON match_score_clock_audit(match_id, created_at DESC);
   `);
 }
 

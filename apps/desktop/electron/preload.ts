@@ -126,6 +126,10 @@ contextBridge.exposeInMainWorld("gito", {
   desktopStorage,
   desktopCredentials,
   desktopIptv,
-  desktopPlayback
+  desktopPlayback,
+  scoreWindows: {
+    openMatch: (input: { matchId: string; accessToken: string; role: string }) => ipcRenderer.invoke("score-window:open-match", input),
+    getContext: () => ipcRenderer.invoke("score-window:get-context")
+  }
 });
 

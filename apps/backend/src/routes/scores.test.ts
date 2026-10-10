@@ -331,6 +331,29 @@ test("manual score API authorization, persistence, audit, notification and read-
 
     await t.test("provider live refresh preserves manual scores while refreshing unrelated fixtures", testProviderRefreshPreservesManualScores);
     await t.test("provider fixture IDs are scoped to their provider identity", testProviderExternalIdCollisionAcrossProviders);
+    await t.test("starts and audits a versioned manual clock with soccer added time", async () => {
+      const timestamp = new Date().toISOString();
+      database.prepare(`INSERT INTO matches (id, competition_id, season_id, home_team_id, away_team_id, starts_at, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run("fixture-clock", "competition-1", "season-1", "team-home", "team-away", timestamp, "scheduled", timestamp, timestamp);
+      const started = await request(baseUrl, "/manual/fixture-clock/start", "POST", { version: 0, homeScore: 0, awayScore: 0 }, adminToken());
+      assert.equal(started.status, 200);
+      const clockRead = await request(baseUrl, "/manual/fixture-clock/clock", "GET", undefined, adminToken());
+      assert.equal(clockRead.status, 200);
+      assert.equal(clockRead.body.data.phase, "first_half");
+      assert.equal(clockRead.body.data.running, true);
+      assert.equal(clockRead.body.data.version, 1);
+
+      const forbidden = await request(baseUrl, "/manual/fixture-clock/clock", "POST", { version: 1, action: "pause" }, operatorToken());
+      assert.equal(forbidden.status, 403);
+      database.prepare("UPDATE match_score_clock_state SET elapsed_seconds = 2700, running_since = ? WHERE match_id = ?")
+        .run(new Date(Date.now() - 1000).toISOString(), "fixture-clock");
+      const addedTime = await request(baseUrl, "/manual/fixture-clock/clock", "POST", { version: 1, action: "set_first_added", minutes: 4 }, adminToken());
+      assert.equal(addedTime.status, 200);
+      assert.equal(addedTime.body.data.firstHalfAddedMinutes, 4);
+      assert.equal(addedTime.body.data.version, 2);
+      assert.equal(Number(database.prepare("SELECT COUNT(*) AS count FROM match_score_clock_audit WHERE match_id = ?").get("fixture-clock")?.count), 2);
+    });
 
   } finally {
     EventBus.off("scores:updated", onManualUpdate);

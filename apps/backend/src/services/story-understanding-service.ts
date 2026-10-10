@@ -72,12 +72,12 @@ export function buildStoryUnderstandingInput(article: NewsArticle): StoryUnderst
     },
     publishedAt: article.publishedAt ?? null,
     contentAvailability: article.contentAvailability ?? null,
-    categories: (article.categories ?? []).map((category) => ({
+    categories: (article.categories ?? []).map((category: NonNullable<NewsArticle["categories"]>[number]) => ({
       entityType: category.categoryType,
       entityId: category.entityId,
       status: category.classificationStatus
     })),
-    tags: Array.isArray(article.tags) ? article.tags.filter((tag): tag is string => typeof tag === "string") : [],
+    tags: Array.isArray(article.tags) ? article.tags.filter((tag: unknown): tag is string => typeof tag === "string") : [],
     canonicalEntities: buildCanonicalEntities(article)
   };
   if (Buffer.byteLength(JSON.stringify(input), "utf8") > MAX_STORY_INPUT_BYTES) throw new StoryUnderstandingInputError("article_input_too_large");

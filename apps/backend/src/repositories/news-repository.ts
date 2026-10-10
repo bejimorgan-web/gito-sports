@@ -1036,7 +1036,7 @@ export class NewsRepository {
 
   private attachRelations(article: NewsArticle): NewsArticle {
     article.categories = this.listArticleCategories(article.id);
-    const approvedHostCategory = article.categories.find((category) => category.categoryType === "host" && category.classificationStatus === "approved");
+    const approvedHostCategory = article.categories.find((category: NewsArticleCategory) => category.categoryType === "host" && category.classificationStatus === "approved");
     article.hostId = approvedHostCategory?.entityId ?? null;
     article.host = approvedHostCategory ? (() => {
       const row = this.db.prepare("SELECT id, name, host_type FROM hosts WHERE id = ?").get(approvedHostCategory.entityId) as { id: string; name: string; host_type: string } | undefined;
