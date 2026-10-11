@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Competition, Host, Season, Sport, Team } from "@gito/shared";
 import { apiClient } from "../../services/api-client";
+import { TeamCrest } from "../../components/TeamCrest";
 import {
   formatFixtureDateTime,
   localDateTimeToUtc,
@@ -552,6 +553,8 @@ export function FixtureWorkspaceScreen({
                 const streamCount = Array.isArray(fixture.streams) ? fixture.streams.length : 0;
                 const homeName = fixture.homeTeam?.name ?? fixture.homeTeamId ?? "Unknown home";
                 const awayName = fixture.awayTeam?.name ?? fixture.awayTeamId ?? "Unknown away";
+                const homeLogoUrl = fixture.homeTeam?.logoUrl;
+                const awayLogoUrl = fixture.awayTeam?.logoUrl;
                 return (
                   <div
                     key={fixture.id}
@@ -583,7 +586,7 @@ export function FixtureWorkspaceScreen({
                     </div>
                     <div>
                       <div style={{ fontSize: 12, opacity: 0.8, textTransform: "uppercase", letterSpacing: 0.6 }}>Fixture</div>
-                      <strong>{homeName} vs {awayName}</strong>
+                      <strong className="canonical-fixture-teams"><span className="canonical-fixture-team"><TeamCrest name={homeName} logoUrl={homeLogoUrl} />{homeName}</span><span className="canonical-fixture-vs">vs</span><span className="canonical-fixture-team"><TeamCrest name={awayName} logoUrl={awayLogoUrl} />{awayName}</span></strong>
                     </div>
                     <div>
                       <div style={{ fontSize: 12, opacity: 0.8, textTransform: "uppercase", letterSpacing: 0.6 }}>Competition</div>

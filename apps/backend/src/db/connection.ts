@@ -509,6 +509,33 @@ export function ensureManualScoreSchema(database: DatabaseSync) {
       FOREIGN KEY (operator_id) REFERENCES operator_users(id)
     );
     CREATE INDEX IF NOT EXISTS idx_match_score_timeline_match ON match_score_timeline(match_id, minute, created_at);
+    CREATE TABLE IF NOT EXISTS match_score_system_audit (
+      id TEXT PRIMARY KEY,
+      match_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      previous_state TEXT,
+      new_state TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_match_score_system_audit_match ON match_score_system_audit(match_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS match_score_operator_notifications (
+      id TEXT PRIMARY KEY,
+      match_id TEXT NOT NULL,
+      event_key TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      event_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      acknowledged_at TEXT,
+      acknowledged_by_operator_id TEXT,
+      UNIQUE (match_id, event_key),
+      FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,
+      FOREIGN KEY (acknowledged_by_operator_id) REFERENCES operator_users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_score_operator_notifications_pending
+      ON match_score_operator_notifications(acknowledged_at, event_at DESC);
   `);
 
   const timelineColumns: Array<[string, string]> = [

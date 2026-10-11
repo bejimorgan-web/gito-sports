@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { Response, Router } from "express";
 
 import { ScoreService } from "../services/score-service.js";
+import { ensureDueManualScoreStartsAtKickoff, ensureManualScoreStartedAtKickoff } from "../services/manual-score-scheduler.js";
 import { getDatabase } from "../db/connection.js";
 import { protectedRoute, type AuthenticatedRequest } from "../middleware/protected.js";
 import { logOperationalEvent } from "../repositories/operational-log-repository.js";
@@ -474,6 +475,7 @@ scoresRouter.get("/manual/:id", protectedRoute, requireAdmin, (request, response
     return;
   }
   try {
+    ensureManualScoreStartedAtKickoff(matchId);
     const state = getManualMatchScoreState(matchId);
     if (!state) {
       response.status(404).json({ error: "manual_score_not_found" });
@@ -764,6 +766,7 @@ function buildScoreMeta(source: string, count: number, ageMs?: number, cachedAt?
 
 scoresRouter.get("/live", async (_request, response) => {
   try {
+    ensureDueManualScoreStartsAtKickoff();
     const result = await ScoreService.listLiveScores();
     response.json({
       data: result.matches.map(attachVenueImage),

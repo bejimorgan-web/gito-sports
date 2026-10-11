@@ -3,6 +3,7 @@ import { env, runtimeConfig } from "./config/env.js";
 import { getDatabase } from "./db/connection.js";
 import validateUploadsAtStartup from "./startup/validateUploads.js";
 import { ScoreService } from "./services/score-service.js";
+import { startManualScoreScheduler } from "./services/manual-score-scheduler.js";
 import { MobileFeatureService } from "./services/mobile-feature-service.js";
 import {
   allCoreReadinessFlagsReady,
@@ -103,6 +104,7 @@ if (runtimeConfig.errorReportingEnabled && runtimeConfig.sentryDsn) {
     // This lets health checks observe a starting state instead of timing out.
     await new Promise<void>((resolve) => setImmediate(resolve));
     markInitialReadiness();
+    startManualScoreScheduler();
 
     const footballReady = await initializeFootballService();
     if (footballReady) {

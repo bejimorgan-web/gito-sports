@@ -118,9 +118,42 @@ test("manual score API authorization, persistence, audit, notification and read-
   const database = seedDatabase();
   const { server, baseUrl } = await startTestServer();
   const manualUpdatedEvents: unknown[] = [];
-  const onManualUpdate = (payload?: unknown) => manualUpdatedEvents.push(payload);
+  const onManualUpdate = (payload?: unknown) => {
+    const event = payload as { matchId?: string } | undefined;
+    if (event?.matchId === "fixture-1") manualUpdatedEvents.push(payload);
+  };
   EventBus.on("scores:updated", onManualUpdate);
   try {
+    await t.test("automatically starts overdue fixture before live score feed response", async () => {
+      ScoreService.setSourceMode("manual");
+      const kickoff = new Date(Date.now() - 60_000).toISOString();
+      const fixture = database.prepare("SELECT starts_at FROM matches WHERE id = ?").get("fixture-1") as { starts_at: string };
+      database.prepare("UPDATE matches SET starts_at = ? WHERE id = ?").run(new Date(Date.now() + 86_400_000).toISOString(), "fixture-1");
+      database.prepare(`INSERT INTO matches (id, competition_id, season_id, home_team_id, away_team_id, starts_at, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run("fixture-auto-kickoff", "competition-1", "season-1", "team-home", "team-away", kickoff, "scheduled", kickoff, kickoff);
+
+      try {
+        const live = await request(baseUrl, "/live", "GET");
+        assert.equal(live.status, 200);
+        const match = live.body.data.find((item: { id: string }) => item.id === "fixture-auto-kickoff");
+        assert.ok(match, "the mobile live-score feed includes the fixture without a desktop start action");
+        assert.equal(match.status, "LIVE");
+        assert.deepEqual(match.score, { home: 0, away: 0, winner: null });
+
+        const clock = database.prepare("SELECT is_running, running_since FROM match_score_clock_state WHERE match_id = ?")
+          .get("fixture-auto-kickoff") as { is_running: number; running_since: string };
+        assert.equal(clock.is_running, 1);
+        assert.equal(clock.running_since, kickoff);
+        const audit = database.prepare("SELECT metadata FROM match_score_audit WHERE match_id = ?")
+          .get("fixture-auto-kickoff") as { metadata: string };
+        assert.equal(JSON.parse(audit.metadata).operation, "automatic_kickoff_start");
+      } finally {
+        database.prepare("DELETE FROM matches WHERE id = ?").run("fixture-auto-kickoff");
+        database.prepare("UPDATE matches SET starts_at = ? WHERE id = ?").run(fixture.starts_at, "fixture-1");
+      }
+    });
+
     await t.test("rejects unauthenticated and non-admin writes without mutation", async () => {
       const missingAuth = await request(baseUrl, "/manual/fixture-1/start", "POST", { version: 0 });
       assert.equal(missingAuth.status, 401);

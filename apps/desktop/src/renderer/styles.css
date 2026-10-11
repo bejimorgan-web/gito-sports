@@ -3124,3 +3124,13 @@ dd {
 .score-clock-alert { border-color: #d58e32; background: color-mix(in srgb, #d58e32 12%, var(--surface-raised, #171f2b)); }
 .score-clock-alert strong { color: #f0b65e; }
 @media (max-width: 760px) { .score-filter-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } .score-fixture-row { grid-template-columns: 1fr; justify-items: start; } }
+
+.team-crest { position: relative; display: inline-grid; place-items: center; flex: 0 0 24px; width: 24px; height: 24px; overflow: hidden; border: 1px solid rgba(190, 208, 221, .24); border-radius: 50%; background: #1b2c38; color: #d5e2eb; font-size: 8px; font-weight: 800; line-height: 1; }
+.team-crest img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #101a22; }
+.canonical-fixture-teams, .canonical-fixture-team, .score-fixture-teams, .score-team-name { display: inline-flex; align-items: center; min-width: 0; gap: 7px; }
+.canonical-fixture-teams, .score-fixture-teams { flex-wrap: wrap; }
+.canonical-fixture-team, .score-team-name { color: inherit; }
+.canonical-fixture-vs, .score-vs { color: #8295a1 !important; font-size: .68rem !important; font-weight: 600; }
+.score-board label > span.score-team-name { justify-content: center; text-align: center; }
+.team-crest > span { color: #d5e2eb; font-size: 8px; font-weight: 800; white-space: normal; }
+.score-fixture-teams .score-team-name { color: #e2eaf3; }

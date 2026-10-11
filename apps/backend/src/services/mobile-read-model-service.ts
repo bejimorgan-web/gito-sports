@@ -12,6 +12,7 @@ import { getFixtureLineups } from "../repositories/fixture-lineups-repository.js
 import { getPublishedPublicationDeliveryByMatchId } from "../repositories/publication-artifact-repository.js";
 import { getScoreSourceMode } from "../repositories/score-source-mode-repository.js";
 import { PUBLISHED_NEWS_BRAND } from "./published-news-brand.js";
+import { ensureManualScoreStartedAtKickoff } from "./manual-score-scheduler.js";
 
 export type MobileClub = Team & {
   sport: Pick<Sport, "id" | "name">;
@@ -92,6 +93,7 @@ function clubFromRow(row: any, fallback?: { sport?: { id: string; name: string }
 }
 
 export function mapMobileFixture(fixture: any, suppliedSnapshot?: ScoreMatchSummary | null): MobileFixture {
+  ensureManualScoreStartedAtKickoff(fixture.id);
   const home = clubFromRow(fixture.homeTeam, { sport: fixture.sport, country: fixture.country });
   const away = clubFromRow(fixture.awayTeam, { sport: fixture.sport, country: fixture.country });
   const snapshot = suppliedSnapshot ?? getCachedScoreSnapshot(fixture.externalMatchId);
