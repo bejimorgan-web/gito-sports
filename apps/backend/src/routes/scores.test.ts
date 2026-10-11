@@ -355,6 +355,45 @@ test("manual score API authorization, persistence, audit, notification and read-
       assert.equal(Number(database.prepare("SELECT COUNT(*) AS count FROM match_score_clock_audit WHERE match_id = ?").get("fixture-clock")?.count), 2);
     });
 
+    await t.test("records named match events, corrects event minute, and exposes timeline to score readers", async () => {
+      const timestamp = new Date().toISOString();
+      database.prepare(`INSERT INTO matches (id, competition_id, season_id, home_team_id, away_team_id, starts_at, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run("fixture-events", "competition-1", "season-1", "team-home", "team-away", timestamp, "scheduled", timestamp, timestamp);
+      for (const [id, teamId, name] of [["event-scorer", "team-home", "Alex Scorer"], ["event-assist", "team-home", "Sam Assist"]]) {
+        database.prepare(`INSERT INTO players (id, team_id, first_name, last_name, display_name, status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`).run(id, teamId, name.split(" ")[0], name.split(" ")[1], name, timestamp, timestamp);
+      }
+      database.prepare(`INSERT INTO season_squads (id, team_id, competition_id, season_id, name, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`)
+        .run("event-squad-home", "team-home", "competition-1", "season-1", "Home squad", timestamp, timestamp);
+      for (const [id, playerId, number] of [["event-member-scorer", "event-scorer", 9], ["event-member-assist", "event-assist", 10]]) {
+        database.prepare(`INSERT INTO squad_players (id, squad_id, player_id, role, jersey_number, status, created_at, updated_at)
+          VALUES (?, 'event-squad-home', ?, 'starter', ?, 'active', ?, ?)`).run(id, playerId, number, timestamp, timestamp);
+      }
+      assert.equal((await request(baseUrl, "/manual/fixture-events/start", "POST", { version: 0 }, adminToken())).status, 200);
+      const added = await request(baseUrl, "/manual/fixture-events/events", "POST", {
+        version: 1, minute: 18, eventType: "goal", teamId: "team-home", playerId: "event-scorer", relatedPlayerId: "event-assist"
+      }, adminToken());
+      assert.equal(added.status, 201);
+      assert.equal(added.body.data.homeScore, 1);
+      assert.equal(added.body.data.scoreState.version, 2);
+      assert.match(added.body.data.description, /Alex Scorer.*Sam Assist/);
+
+      const players = await request(baseUrl, "/manual/fixture-events/players", "GET", undefined, adminToken());
+      assert.equal(players.status, 200);
+      assert.equal(players.body.data.length, 2);
+      const corrected = await request(baseUrl, `/manual/fixture-events/events/${added.body.data.id}`, "PATCH", { version: 2, minute: 21 }, adminToken());
+      assert.equal(corrected.status, 200);
+      assert.equal(corrected.body.data.minute, 21);
+
+      const scoreRead = await ScoreService.getMatch("fixture-events");
+      assert.equal(scoreRead?.match.timeline?.length, 1);
+      assert.equal(scoreRead?.match.timeline?.[0]?.minute, 21);
+      assert.equal(scoreRead?.match.score.home, 1);
+      assert.equal(Number(database.prepare("SELECT COUNT(*) AS count FROM match_score_audit WHERE match_id=? AND action='score_updated'").get("fixture-events")?.count), 2);
+    });
+
   } finally {
     EventBus.off("scores:updated", onManualUpdate);
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -503,6 +542,7 @@ async function testProviderRefreshPreservesManualScores() {
       }
     }
   ];
+  providerFixtures.push({ ...providerFixtures[1]! });
   const scoreUpdateEvents: unknown[] = [];
   const onScoreUpdate = (payload?: unknown) => scoreUpdateEvents.push(payload);
   EventBus.on("scores:updated", onScoreUpdate);
@@ -517,6 +557,8 @@ async function testProviderRefreshPreservesManualScores() {
     assert.equal(providerControlled.score.home, 2);
     assert.equal(providerControlled.score.away, 1);
     assert.equal(providerControlled.status, "2H");
+    assert.equal(result.matches.filter((match) => match.id === "9002").length, 1,
+      "duplicate provider fixtures should produce one score card");
 
     const apiControlledMatch = result.matches.find((match) => match.id === "9001");
     assert.ok(apiControlledMatch, "API mode should expose provider fixture 9001");
@@ -540,7 +582,7 @@ async function testProviderRefreshPreservesManualScores() {
     assert.deepEqual(scoreUpdateEvents[0], {
       cacheKey: "scores:live",
       source: "live",
-      count: 2
+      count: 3
     });
 
     assert.equal(result.matches.some((match) => match.id === "9001"), true,

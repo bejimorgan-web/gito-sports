@@ -1236,6 +1236,23 @@ class MobileFeedService {
   }
 }
 
+class ScoreTimelineEvent {
+  const ScoreTimelineEvent({required this.id, required this.minute, required this.description, required this.homeScore, required this.awayScore});
+  final String id;
+  final int minute;
+  final String description;
+  final int homeScore;
+  final int awayScore;
+
+  factory ScoreTimelineEvent.fromJson(Map<String, Object?> json) => ScoreTimelineEvent(
+    id: (json['id'] ?? '').toString(),
+    minute: _jsonInt(json['minute']) ?? 0,
+    description: (json['description'] ?? '').toString(),
+    homeScore: _jsonInt(json['homeScore']) ?? 0,
+    awayScore: _jsonInt(json['awayScore']) ?? 0,
+  );
+}
+
 class ScoreMatch {
   const ScoreMatch({
     required this.id,
@@ -1250,6 +1267,7 @@ class ScoreMatch {
     this.competitionLogoUrl,
     this.homeTeamLogoUrl,
     this.awayTeamLogoUrl,
+    this.timeline = const [],
   });
 
   final String id;
@@ -1264,6 +1282,7 @@ class ScoreMatch {
   final String? competitionLogoUrl;
   final String? homeTeamLogoUrl;
   final String? awayTeamLogoUrl;
+  final List<ScoreTimelineEvent> timeline;
 
   String get scoreLabel {
     if (homeScore == null || awayScore == null) {
@@ -1307,6 +1326,10 @@ class ScoreMatch {
       competitionLogoUrl: normalizeMediaUrl(competition['logoUrl']),
       homeTeamLogoUrl: normalizeMediaUrl(homeTeam['logoUrl']),
       awayTeamLogoUrl: normalizeMediaUrl(awayTeam['logoUrl']),
+      timeline: (json['timeline'] is List ? json['timeline'] as List : const [])
+          .whereType<Map>()
+          .map((event) => ScoreTimelineEvent.fromJson(Map<String, Object?>.from(event)))
+          .toList(growable: false),
     );
   }
 }
@@ -2308,6 +2331,19 @@ class MatchScoreDetailsScreen extends StatelessWidget {
                       ? _formatKickoff(match.utcDate!)
                       : 'TBD',
                 ),
+                if (match.timeline.isNotEmpty) ...[
+                  const SizedBox(height: 24),
+                  Text('Match events', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
+                  const SizedBox(height: 8),
+                  ...match.timeline.map((event) => Card(
+                    color: const Color(0xFF101418),
+                    child: ListTile(
+                      leading: CircleAvatar(backgroundColor: const Color(0xFF20D37B), child: Text("${event.minute}′", style: const TextStyle(color: Color(0xFF07130D), fontWeight: FontWeight.w900))),
+                      title: Text(event.description, style: const TextStyle(fontWeight: FontWeight.w700)),
+                      trailing: Text('${event.homeScore}–${event.awayScore}', style: const TextStyle(fontWeight: FontWeight.w900)),
+                    ),
+                  )),
+                ],
               ],
             );
           },

@@ -490,7 +490,39 @@ export function ensureManualScoreSchema(database: DatabaseSync) {
       FOREIGN KEY (operator_id) REFERENCES operator_users(id)
     );
     CREATE INDEX IF NOT EXISTS idx_match_score_clock_audit_match ON match_score_clock_audit(match_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS match_score_timeline (
+      id TEXT PRIMARY KEY,
+      match_id TEXT NOT NULL,
+      minute INTEGER NOT NULL CHECK (minute BETWEEN 0 AND 150),
+      description TEXT NOT NULL,
+      event_type TEXT NOT NULL DEFAULT 'note',
+      team_id TEXT,
+      player_id TEXT,
+      related_player_id TEXT,
+      home_score INTEGER NOT NULL CHECK (home_score >= 0),
+      away_score INTEGER NOT NULL CHECK (away_score >= 0),
+      operator_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT '',
+      FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,
+      FOREIGN KEY (operator_id) REFERENCES operator_users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_match_score_timeline_match ON match_score_timeline(match_id, minute, created_at);
   `);
+
+  const timelineColumns: Array<[string, string]> = [
+    ["event_type", "TEXT NOT NULL DEFAULT 'note'"],
+    ["team_id", "TEXT"],
+    ["player_id", "TEXT"],
+    ["related_player_id", "TEXT"],
+    ["updated_at", "TEXT NOT NULL DEFAULT ''"]
+  ];
+  for (const [column, definition] of timelineColumns) {
+    if (!hasColumn(database, "match_score_timeline", column)) {
+      database.exec(`ALTER TABLE match_score_timeline ADD COLUMN ${column} ${definition}`);
+    }
+  }
 }
 
 function ensureNewsSchemaColumns(database: DatabaseSync) {

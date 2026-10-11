@@ -9,6 +9,7 @@ import { logOperationalEvent } from "../repositories/operational-log-repository.
 export const scoresRouter = Router();
 
 const manualScoreStatuses = new Set(["scheduled", "live", "paused", "ended", "postponed", "cancelled"]);
+const manualMatchEventTypes = new Set(["note", "goal", "yellow_card", "red_card", "penalty_scored", "penalty_missed", "var_goal_disallowed", "injury", "substitution"]);
 
 export type ManualScoreState = {
   matchId: string;
@@ -480,6 +481,141 @@ scoresRouter.get("/manual/:id", protectedRoute, requireAdmin, (request, response
     }
     response.json({ data: state });
   } catch (error) {
+    handleScoreError(error, response);
+  }
+});
+
+scoresRouter.get("/manual/:id/events", protectedRoute, requireAdmin, (request, response) => {
+  const id = request.params.id;
+  if (!id) return response.status(400).json({ error: "match_id_required" });
+  const rows = getDatabase().prepare(`SELECT id, minute, description, event_type AS eventType,
+      team_id AS teamId, player_id AS playerId, related_player_id AS relatedPlayerId,
+      home_score AS homeScore, away_score AS awayScore, created_at AS createdAt, updated_at AS updatedAt
+    FROM match_score_timeline WHERE match_id=? ORDER BY minute, created_at`).all(id);
+  response.json({ data: rows });
+});
+
+scoresRouter.get("/manual/:id/players", protectedRoute, requireAdmin, (request, response) => {
+  const matchId = request.params.id;
+  if (!matchId) return response.status(400).json({ error: "match_id_required" });
+  const players = getDatabase().prepare(`
+    SELECT DISTINCT p.id, COALESCE(NULLIF(p.display_name, ''), p.first_name || ' ' || p.last_name) AS name,
+      t.id AS teamId, t.name AS teamName, member.jersey_number AS jerseyNumber
+    FROM matches m
+    JOIN teams t ON t.id IN (m.home_team_id, m.away_team_id)
+    JOIN season_squads squad ON squad.team_id=t.id AND squad.status='active'
+      AND (squad.competition_id IS NULL OR squad.competition_id=m.competition_id)
+      AND (m.season_id IS NULL OR squad.season_id IS NULL OR squad.season_id=m.season_id)
+    JOIN squad_players member ON member.squad_id=squad.id AND member.status='active'
+    JOIN players p ON p.id=member.player_id AND p.status='active'
+    WHERE m.id=? ORDER BY t.name, member.jersey_number, name
+  `).all(matchId);
+  response.json({ data: players });
+});
+
+scoresRouter.post("/manual/:id/events", protectedRoute, requireAdmin, (request: AuthenticatedRequest, response) => {
+  const matchId = request.params.id;
+  const body = request.body && typeof request.body === "object" && !Array.isArray(request.body)
+    ? request.body as Record<string, unknown> : {};
+  const eventType = typeof body.eventType === "string" ? body.eventType : "note";
+  if (!matchId || !Number.isSafeInteger(body.minute) || Number(body.minute) < 0 || Number(body.minute) > 150
+    || !manualMatchEventTypes.has(eventType) || body.version === undefined
+    || (eventType === "note" && (typeof body.description !== "string" || !body.description.trim() || body.description.trim().length > 240))
+    || (eventType === "note" && (body.homeScore === undefined || body.awayScore === undefined))
+    || (eventType !== "note" && (typeof body.teamId !== "string" || !body.teamId || typeof body.playerId !== "string" || !body.playerId))
+    || (eventType === "substitution" && (typeof body.relatedPlayerId !== "string" || !body.relatedPlayerId))) {
+    return response.status(400).json({ error: "invalid_event_payload" });
+  }
+  if (ScoreService.getSourceMode().mode !== "manual") return response.status(409).json({ error: "score_source_is_api" });
+  const db = getDatabase();
+  try {
+    db.exec("BEGIN IMMEDIATE;");
+    const current = readManualScoreState(matchId);
+    if (!current || current.finalResultConfirmed || !["live", "paused"].includes(current.status)) {
+      throw scoreError("only a live or paused match can receive events", 409, "invalid_match_transition");
+    }
+    if (normalizeExpectedVersion(body.version) !== current.version) throw scoreError("stale_score_version", 409, "stale_score_version");
+    const fixture = db.prepare("SELECT home_team_id AS homeTeamId, away_team_id AS awayTeamId FROM matches WHERE id=?").get(matchId) as { homeTeamId: string; awayTeamId: string } | undefined;
+    if (!fixture) throw scoreError("match_not_found", 404, "match_not_found");
+    const teamId = eventType === "note" ? null : String(body.teamId);
+    let player: { id: string; name: string; teamId: string } | undefined;
+    let relatedPlayer: { id: string; name: string; teamId: string } | undefined;
+    let description = typeof body.description === "string" ? body.description.trim() : "";
+    if (eventType !== "note") {
+      if (![fixture.homeTeamId, fixture.awayTeamId].includes(teamId!)) throw scoreError("event_team_not_in_fixture", 422, "event_team_not_in_fixture");
+      const findRosterPlayer = (playerId: string) => db.prepare(`
+        SELECT p.id, COALESCE(NULLIF(p.display_name, ''), p.first_name || ' ' || p.last_name) AS name, p.team_id AS teamId
+        FROM players p JOIN squad_players member ON member.player_id=p.id AND member.status='active'
+        JOIN season_squads squad ON squad.id=member.squad_id AND squad.team_id=p.team_id AND squad.status='active'
+        JOIN matches m ON m.id=?
+        WHERE p.id=? AND p.team_id=? AND p.status='active'
+          AND (squad.competition_id IS NULL OR squad.competition_id=m.competition_id)
+          AND (m.season_id IS NULL OR squad.season_id IS NULL OR squad.season_id=m.season_id)
+        LIMIT 1
+      `).get(matchId, playerId, teamId!) as { id: string; name: string; teamId: string } | undefined;
+      player = findRosterPlayer(String(body.playerId));
+      if (!player) throw scoreError("event_player_not_in_fixture_squad", 422, "event_player_not_in_fixture_squad");
+      if (body.relatedPlayerId !== undefined && body.relatedPlayerId !== null && body.relatedPlayerId !== "") {
+        relatedPlayer = findRosterPlayer(String(body.relatedPlayerId));
+        if (!relatedPlayer) throw scoreError("related_event_player_not_in_fixture_squad", 422, "related_event_player_not_in_fixture_squad");
+        if (relatedPlayer.id === player.id) throw scoreError("event_players_must_be_different", 422, "event_players_must_be_different");
+      }
+      if (["goal", "penalty_scored"].includes(eventType) && relatedPlayer) description = `${player.name} · Assist: ${relatedPlayer.name}`;
+      else if (eventType === "substitution" && relatedPlayer) description = `${player.name} off · ${relatedPlayer.name} on`;
+      else description = `${player.name} · ${({ yellow_card: "Yellow card", red_card: "Red card", penalty_missed: "Penalty missed", var_goal_disallowed: "Goal disallowed by VAR", injury: "Injury", goal: "Goal", penalty_scored: "Penalty scored" } as Record<string, string>)[eventType] ?? eventType}`;
+    }
+    const homeScore = eventType === "note"
+      ? normalizeScoreValue(body.homeScore, "homeScore")
+      : current.homeScore + (teamId === fixture.homeTeamId && ["goal", "penalty_scored"].includes(eventType) ? 1 : 0);
+    const awayScore = eventType === "note"
+      ? normalizeScoreValue(body.awayScore, "awayScore")
+      : current.awayScore + (teamId === fixture.awayTeamId && ["goal", "penalty_scored"].includes(eventType) ? 1 : 0);
+    const now = new Date().toISOString();
+    const version = current.version + 1;
+    const eventId = crypto.randomUUID();
+    db.prepare(`UPDATE match_score_state SET home_score=?, away_score=?, version=?, updated_by_operator_id=?, updated_at=? WHERE match_id=?`)
+      .run(homeScore, awayScore, version, request.operator!.id, now, matchId);
+    db.prepare(`INSERT INTO match_score_audit (id,match_id,action,operator_id,previous_version,new_version,previous_home_score,previous_away_score,new_home_score,new_away_score,previous_status,new_status,previous_final_result_confirmed,new_final_result_confirmed,reason,metadata,created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(crypto.randomUUID(), matchId, "score_updated", request.operator!.id, current.version, version, current.homeScore, current.awayScore,
+        homeScore, awayScore, current.status, current.status, 0, 0, null,
+        JSON.stringify({ operation: "record_match_event", eventId, eventType, minute: body.minute, description }), now);
+    db.prepare(`INSERT INTO match_score_timeline (id,match_id,minute,description,event_type,team_id,player_id,related_player_id,home_score,away_score,operator_id,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(eventId, matchId, body.minute, description, eventType, teamId, player?.id ?? null, relatedPlayer?.id ?? null, homeScore, awayScore, request.operator!.id, now, now);
+    db.exec("COMMIT;");
+    const state = readManualScoreState(matchId)!;
+    ScoreService.notifyManualScoreUpdate(matchId, version);
+    response.status(201).json({ data: { id: eventId, minute: Number(body.minute), description, eventType, teamId, playerId: player?.id ?? null, relatedPlayerId: relatedPlayer?.id ?? null, homeScore, awayScore, createdAt: now, updatedAt: now, scoreState: state } });
+  } catch (error) {
+    try { db.exec("ROLLBACK;"); } catch { /* transaction may already be committed */ }
+    handleScoreError(error, response);
+  }
+});
+
+scoresRouter.patch("/manual/:id/events/:eventId", protectedRoute, requireAdmin, (request: AuthenticatedRequest, response) => {
+  const matchId = request.params.id;
+  const eventId = request.params.eventId;
+  const body = request.body && typeof request.body === "object" && !Array.isArray(request.body) ? request.body as Record<string, unknown> : {};
+  if (!matchId || !eventId || !Number.isSafeInteger(body.minute) || Number(body.minute) < 0 || Number(body.minute) > 150 || body.version === undefined) {
+    return response.status(400).json({ error: "invalid_event_payload" });
+  }
+  if (ScoreService.getSourceMode().mode !== "manual") return response.status(409).json({ error: "score_source_is_api" });
+  const db = getDatabase();
+  try {
+    db.exec("BEGIN IMMEDIATE;");
+    const current = readManualScoreState(matchId);
+    if (!current || current.finalResultConfirmed || !["live", "paused"].includes(current.status)) throw scoreError("only a live or paused match can edit events", 409, "invalid_match_transition");
+    if (normalizeExpectedVersion(body.version) !== current.version) throw scoreError("stale_score_version", 409, "stale_score_version");
+    const event = db.prepare("SELECT id, minute, description FROM match_score_timeline WHERE id=? AND match_id=?").get(eventId, matchId) as { id: string; minute: number; description: string } | undefined;
+    if (!event) throw scoreError("match_event_not_found", 404, "match_event_not_found");
+    const updatedAt = new Date().toISOString();
+    db.prepare("UPDATE match_score_timeline SET minute=?, updated_at=? WHERE id=? AND match_id=?").run(body.minute, updatedAt, eventId, matchId);
+    db.exec("COMMIT;");
+    ScoreService.notifyManualScoreUpdate(matchId, current.version);
+    response.json({ data: { id: event.id, minute: Number(body.minute), description: event.description, updatedAt } });
+  } catch (error) {
+    try { db.exec("ROLLBACK;"); } catch { /* transaction may already be committed */ }
     handleScoreError(error, response);
   }
 });

@@ -253,6 +253,22 @@ export const apiClient = {
       headers: { authorization: `Bearer ${accessToken}` }
     });
   },
+  listManualScoreEvents(matchId: string, accessToken: string) {
+    return request<Array<{ id: string; minute: number; description: string; eventType: string; teamId: string | null; playerId: string | null; relatedPlayerId: string | null; homeScore: number; awayScore: number }>>(`/scores/manual/${encodeURIComponent(matchId)}/events`, { headers: { authorization: `Bearer ${accessToken}` } });
+  },
+  listManualScorePlayers(matchId: string, accessToken: string) {
+    return request<Array<{ id: string; name: string; teamId: string; teamName: string; jerseyNumber: number | null }>>(`/scores/manual/${encodeURIComponent(matchId)}/players`, { headers: { authorization: `Bearer ${accessToken}` } });
+  },
+  recordManualScoreEvent(matchId: string, input: { version: number; minute: number; eventType: string; teamId: string; playerId: string; relatedPlayerId?: string | null }, accessToken: string) {
+    return request<any>(`/scores/manual/${encodeURIComponent(matchId)}/events`, {
+      method: "POST", headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" }, body: JSON.stringify(input)
+    });
+  },
+  updateManualScoreEventMinute(matchId: string, eventId: string, input: { version: number; minute: number }, accessToken: string) {
+    return request<any>(`/scores/manual/${encodeURIComponent(matchId)}/events/${encodeURIComponent(eventId)}`, {
+      method: "PATCH", headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" }, body: JSON.stringify(input)
+    });
+  },
   setScoreSourceMode(mode: "manual" | "api", accessToken: string) {
     return request<{ mode: "manual" | "api"; apiConfigured: boolean; provider: string | null }>("/scores/source-mode", {
       method: "PUT",

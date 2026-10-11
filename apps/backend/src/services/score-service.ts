@@ -73,6 +73,7 @@ export type ScoreMatchSummary = {
     version: number;
     finalResultConfirmed: boolean;
   };
+  timeline?: Array<{ id: string; minute: number; description: string; homeScore: number; awayScore: number; createdAt: string }>;
   events: ScoreEventDescriptor[];
 };
 
@@ -520,6 +521,10 @@ function toManualScoreSummary(row: ManualScoreReadRow): ScoreMatchSummary {
           : row.status === "cancelled" ? "CANC"
             : "NS";
 
+  const timeline = getDatabase().prepare(`SELECT id, minute, description, home_score AS homeScore,
+    away_score AS awayScore, created_at AS createdAt FROM match_score_timeline
+    WHERE match_id=? ORDER BY minute, created_at`).all(row.matchId) as Array<{ id: string; minute: number; description: string; homeScore: number; awayScore: number; createdAt: string }>;
+
   return {
     id: row.matchId,
     utcDate: row.utcDate,
@@ -549,6 +554,7 @@ function toManualScoreSummary(row: ManualScoreReadRow): ScoreMatchSummary {
       version: Number(row.version),
       finalResultConfirmed: Number(row.finalResultConfirmed) === 1
     },
+    timeline,
     events: notificationDescriptors()
   };
 }
@@ -592,12 +598,21 @@ function applyManualScoreToProviderMatch(match: ScoreMatchSummary, providerIdent
       logoUrl: manual.awayTeam.logoUrl ?? match.awayTeam.logoUrl
     },
     score: manual.score,
-    manualScore: manual.manualScore
+    manualScore: manual.manualScore,
+    timeline: manual.timeline
   };
 }
 
 function withManualLiveScores(matches: ScoreMatchSummary[]): ScoreMatchSummary[] {
-  if (getScoreSourceMode() === "api") return matches;
+  const uniqueByFixtureId = (items: ScoreMatchSummary[]) => {
+    const seen = new Set<string>();
+    return items.filter((match) => {
+      if (seen.has(match.id)) return false;
+      seen.add(match.id);
+      return true;
+    });
+  };
+  if (getScoreSourceMode() === "api") return uniqueByFixtureId(matches);
   const providerIdentity = getFootballProviderIdentity();
   const providerIds = new Set(matches.map((match) => match.id));
   const providerMatches = matches
@@ -612,7 +627,7 @@ function withManualLiveScores(matches: ScoreMatchSummary[]): ScoreMatchSummary[]
       return canonicalMatches.length !== 1 || canonicalMatches[0] !== row.matchId;
     })
     .map(toManualScoreSummary);
-  return [...providerMatches, ...manualLive];
+  return uniqueByFixtureId([...providerMatches, ...manualLive]);
 }
 
 const serviceStatus: {
