@@ -106,18 +106,27 @@ export function mapMobileFixture(fixture: any, suppliedSnapshot?: ScoreMatchSumm
     : undefined;
   const manualClock = manualScore && ["live", "paused"].includes(manualScore.status)
     ? getDatabase().prepare(`SELECT phase, is_running AS running, running_since AS runningSince,
-        elapsed_seconds AS elapsedSeconds FROM match_score_clock_state WHERE match_id=?`).get(fixture.id) as {
-          phase: string; running: number; runningSince: string | null; elapsedSeconds: number;
+        elapsed_seconds AS elapsedSeconds, first_half_added_minutes AS firstHalfAddedMinutes
+        FROM match_score_clock_state WHERE match_id=?`).get(fixture.id) as {
+          phase: string; running: number; runningSince: string | null; elapsedSeconds: number; firstHalfAddedMinutes: number | null;
         } | undefined
     : undefined;
   const score = manualScore
     ? { home: Number(manualScore.homeScore), away: Number(manualScore.awayScore), winner: Number(manualScore.homeScore) > Number(manualScore.awayScore) ? "home" : Number(manualScore.awayScore) > Number(manualScore.homeScore) ? "away" : null }
     : snapshot?.score && typeof snapshot.score === "object" ? snapshot.score : null;
-  const manualLiveStatus = manualScore?.status === "live" ? "LIVE" : manualScore?.status === "paused" ? "PAUSED" : null;
   const liveElapsed = manualClock
     ? Number(manualClock.elapsedSeconds) + (Number(manualClock.running) === 1 && manualClock.runningSince
       ? Math.max(0, Math.floor((Date.now() - Date.parse(manualClock.runningSince)) / 1000)) : 0)
     : null;
+  const firstHalfEnd = 45 * 60 + Number(manualClock?.firstHalfAddedMinutes ?? 0) * 60;
+  const inSecondHalf = manualClock?.phase === "second_half" || (manualClock?.phase === "paused" && liveElapsed !== null && liveElapsed > firstHalfEnd);
+  const displayedLiveElapsed = liveElapsed === null ? null : inSecondHalf
+    ? 45 * 60 + Math.max(0, liveElapsed - firstHalfEnd)
+    : liveElapsed;
+  const manualLiveStatus = manualScore?.status === "live"
+    ? manualClock?.phase === "second_half" ? "2H" : manualClock?.phase === "halftime" ? "HT" : manualClock?.phase === "first_half" ? "1H" : "LIVE"
+    : manualScore?.status === "paused" ? manualClock?.phase === "halftime" ? "HT" : "PAUSED"
+      : null;
   const fixtureStatus = manualScore
     ? manualScore.status
     : snapshot && ["FT", "AET", "PEN", "FINISHED", "ENDED", "COMPLETED"].includes(snapshot.status.toUpperCase())
@@ -129,7 +138,7 @@ export function mapMobileFixture(fixture: any, suppliedSnapshot?: ScoreMatchSumm
         status: manualLiveStatus,
         homeScore: score?.home ?? null,
         awayScore: score?.away ?? null,
-        elapsed: liveElapsed === null ? null : Math.floor(liveElapsed / 60),
+        elapsed: displayedLiveElapsed === null || manualClock?.phase === "halftime" ? null : Math.floor(displayedLiveElapsed / 60),
         updatedAt: manualScore.updatedAt
       }
     : snapshot && score
@@ -163,6 +172,35 @@ export function mapMobileFixture(fixture: any, suppliedSnapshot?: ScoreMatchSumm
     ...(delivery?.playbackHeaders ? { playbackHeaders: delivery.playbackHeaders } : {})
     ,lineups: fixtureLineups(fixture.id)
   };
+}
+
+function dedupeCanonicalFixtureRows(fixtures: any[]) {
+  const database = getDatabase();
+  const scorePriority = new Map((database.prepare("SELECT match_id AS matchId, status FROM match_score_state").all() as Array<{ matchId: string; status: string }>).map((row) => [row.matchId, ["live", "paused"].includes(row.status) ? 2 : 1]));
+  const unique: any[] = [];
+  for (const fixture of [...fixtures].sort((left, right) => String(left.startsAt).localeCompare(String(right.startsAt)))) {
+    const kickoff = Date.parse(String(fixture.startsAt));
+    const duplicateIndex = unique.findIndex((existing) => {
+      const sameProviderFixture = Boolean(fixture.externalProvider && fixture.externalMatchId
+        && existing.externalProvider?.trim().toLowerCase() === fixture.externalProvider.trim().toLowerCase()
+        && existing.externalMatchId === fixture.externalMatchId);
+      const sameCanonicalFixture = fixture.competition?.id === existing.competition?.id
+        && (fixture.season?.id ?? null) === (existing.season?.id ?? null)
+        && fixture.homeTeam?.id === existing.homeTeam?.id
+        && fixture.awayTeam?.id === existing.awayTeam?.id
+        && Number.isFinite(kickoff)
+        && Number.isFinite(Date.parse(String(existing.startsAt)))
+        && Math.abs(kickoff - Date.parse(String(existing.startsAt))) <= 2 * 60 * 60 * 1000;
+      return fixture.id === existing.id || sameProviderFixture || sameCanonicalFixture;
+    });
+    if (duplicateIndex < 0) {
+      unique.push(fixture);
+      continue;
+    }
+    const existing = unique[duplicateIndex]!;
+    if ((scorePriority.get(fixture.id) ?? 0) > (scorePriority.get(existing.id) ?? 0)) unique[duplicateIndex] = fixture;
+  }
+  return unique;
 }
 
 export function mobileSports() {
@@ -255,11 +293,11 @@ export function mobileFixtures(filters?: {
       ]
     : [listCanonicalFixtures({ ...common, sportId: selectedSportId, competitionIds, teamIds })];
   const seen = new Set<string>();
-  const fixtures = fixtureSets.flat().filter((fixture): fixture is NonNullable<typeof fixture> => {
+  const fixtures = dedupeCanonicalFixtureRows(fixtureSets.flat().filter((fixture): fixture is NonNullable<typeof fixture> => {
     if (!fixture || seen.has(fixture.id)) return false;
     seen.add(fixture.id);
     return true;
-  });
+  }));
   const offset = Math.max(filters?.offset ?? 0, 0);
   const limit = Math.min(Math.max(filters?.limit ?? 100, 1), 100);
   return fixtures.slice(offset, offset + limit).map((fixture) => mapMobileFixture(fixture));
@@ -268,19 +306,19 @@ export function mobileFixtures(filters?: {
 export function mobileClubDetail(clubId: string) {
   const detail = getClubDetailById(clubId);
   if (!detail || detail.type !== "club") return undefined;
-  const fixtures = listCanonicalFixturesForTeam(clubId).map((fixture) => mapMobileFixture(fixture));
+  const fixtures = dedupeCanonicalFixtureRows(listCanonicalFixturesForTeam(clubId)).map((fixture) => mapMobileFixture(fixture));
   const nextFixture = fixtures.find((fixture) => !["ended", "completed", "cancelled"].includes(fixture.status) && Date.parse(fixture.startsAt) >= Date.now()) ?? null;
   const previousResult = [...fixtures].filter((fixture) => ["ended", "completed"].includes(fixture.status)).sort((a, b) => Date.parse(b.startsAt) - Date.parse(a.startsAt))[0] ?? null;
   return { club: clubFromRow(detail), competitions: detail.competitions, seasons: detail.seasons, nextFixture, previousResult };
 }
 
 function fixtureOptions(filters?: { seasonId?: string; competitionId?: string; status?: string; from?: string; to?: string }) {
-  const fixtures = listCanonicalFixtures({ competitionId: filters?.competitionId, seasonId: filters?.seasonId }).map((fixture) => mapMobileFixture(fixture));
+  const fixtures = dedupeCanonicalFixtureRows(listCanonicalFixtures({ competitionId: filters?.competitionId, seasonId: filters?.seasonId })).map((fixture) => mapMobileFixture(fixture));
   return fixtures.filter((fixture) => (!filters?.status || fixture.status === filters.status) && (!filters?.from || fixture.startsAt >= filters.from) && (!filters?.to || fixture.startsAt <= filters.to));
 }
 
 export function mobileClubFixtures(clubId: string, filters?: { seasonId?: string; competitionId?: string; status?: string; from?: string; to?: string }) {
-  return listCanonicalFixturesForTeam(clubId, { seasonId: filters?.seasonId, competitionId: filters?.competitionId }).map((fixture) => mapMobileFixture(fixture)).filter((fixture) => (!filters?.status || fixture.status === filters.status) && (!filters?.from || fixture.startsAt >= filters.from) && (!filters?.to || fixture.startsAt <= filters.to));
+  return dedupeCanonicalFixtureRows(listCanonicalFixturesForTeam(clubId, { seasonId: filters?.seasonId, competitionId: filters?.competitionId })).map((fixture) => mapMobileFixture(fixture)).filter((fixture) => (!filters?.status || fixture.status === filters.status) && (!filters?.from || fixture.startsAt >= filters.from) && (!filters?.to || fixture.startsAt <= filters.to));
 }
 
 export function mobileFixture(fixtureId: string, clubId?: string) {

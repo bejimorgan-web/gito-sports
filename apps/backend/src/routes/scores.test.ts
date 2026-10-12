@@ -138,7 +138,7 @@ test("manual score API authorization, persistence, audit, notification and read-
         assert.equal(live.status, 200);
         const match = live.body.data.find((item: { id: string }) => item.id === "fixture-auto-kickoff");
         assert.ok(match, "the mobile live-score feed includes the fixture without a desktop start action");
-        assert.equal(match.status, "LIVE");
+        assert.equal(match.status, "1H");
         assert.deepEqual(match.score, { home: 0, away: 0, winner: null });
 
         const clock = database.prepare("SELECT is_running, running_since FROM match_score_clock_state WHERE match_id = ?")
@@ -385,7 +385,36 @@ test("manual score API authorization, persistence, audit, notification and read-
       assert.equal(addedTime.status, 200);
       assert.equal(addedTime.body.data.firstHalfAddedMinutes, 4);
       assert.equal(addedTime.body.data.version, 2);
-      assert.equal(Number(database.prepare("SELECT COUNT(*) AS count FROM match_score_clock_audit WHERE match_id = ?").get("fixture-clock")?.count), 2);
+      database.prepare("UPDATE match_score_clock_state SET elapsed_seconds = 2940, running_since = ? WHERE match_id = ?")
+        .run(new Date(Date.now() + 60_000).toISOString(), "fixture-clock");
+      const halfTime = await request(baseUrl, "/manual/fixture-clock/clock", "POST", { version: 2, action: "halftime" }, adminToken());
+      assert.equal(halfTime.status, 200);
+      assert.equal(halfTime.body.data.phase, "halftime");
+      assert.equal(halfTime.body.data.elapsedSeconds, 2940);
+      const atHalfTime = (await ScoreService.listLiveScores()).matches.find((match) => match.id === "fixture-clock");
+      assert.equal(atHalfTime?.status, "HT");
+      assert.equal(atHalfTime?.minute, null);
+
+      const secondHalf = await request(baseUrl, "/manual/fixture-clock/clock", "POST", { version: 3, action: "start_second_half" }, adminToken());
+      assert.equal(secondHalf.status, 200);
+      assert.equal(secondHalf.body.data.phase, "second_half");
+      const duringSecondHalf = (await ScoreService.listLiveScores()).matches.find((match) => match.id === "fixture-clock");
+      assert.equal(duringSecondHalf?.status, "2H");
+      assert.equal(duringSecondHalf?.minute, 45);
+
+      database.prepare("UPDATE match_score_clock_state SET elapsed_seconds = 5640, running_since = ? WHERE match_id = ?")
+        .run(new Date(Date.now() + 60_000).toISOString(), "fixture-clock");
+      const secondAddedTime = await request(baseUrl, "/manual/fixture-clock/clock", "POST", { version: 4, action: "set_second_added", minutes: 3 }, adminToken());
+      assert.equal(secondAddedTime.status, 200);
+      assert.equal(secondAddedTime.body.data.secondHalfAddedMinutes, 3);
+
+      database.prepare("UPDATE match_score_clock_state SET elapsed_seconds = 5820, running_since = ? WHERE match_id = ?")
+        .run(new Date(Date.now() + 60_000).toISOString(), "fixture-clock");
+      const ended = await request(baseUrl, "/manual/fixture-clock/clock", "POST", { version: 5, action: "end" }, adminToken());
+      assert.equal(ended.status, 200);
+      assert.equal(ended.body.data.phase, "ended");
+      assert.equal((await ScoreService.listLiveScores()).matches.some((match) => match.id === "fixture-clock"), false);
+      assert.equal(Number(database.prepare("SELECT COUNT(*) AS count FROM match_score_clock_audit WHERE match_id = ?").get("fixture-clock")?.count), 6);
     });
 
     await t.test("records named match events, corrects event minute, and exposes timeline to score readers", async () => {

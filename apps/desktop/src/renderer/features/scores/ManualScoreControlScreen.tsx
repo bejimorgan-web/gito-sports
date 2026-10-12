@@ -28,7 +28,7 @@ type ManualScoreState = {
   lastConfirmedAt: string | null;
 };
 type ScoreSourceMode = { mode: "manual" | "api"; apiConfigured: boolean; provider: string | null };
-type ScoreClock = { matchId: string; phase: string; running: boolean; runningSince: string | null; elapsedSeconds: number; firstHalfAddedMinutes: number | null; secondHalfAddedMinutes: number | null; version: number; startsAt?: string | null };
+type ScoreClock = { matchId: string; phase: string; running: boolean; runningSince: string | null; elapsedSeconds: number; firstHalfAddedMinutes: number | null; secondHalfAddedMinutes: number | null; version: number; updatedAt?: string; startsAt?: string | null };
 
 const pageSize = 100;
 const startableFixtureStatuses = new Set(["scheduled", "approved", "published"]);
@@ -226,13 +226,26 @@ export function ManualScoreControlScreen({ accessToken, isAdmin, initialFixtureI
 
   const elapsed = clock ? clock.elapsedSeconds + (clock.running && clock.runningSince ? Math.max(0, Math.floor((clockNow - new Date(clock.runningSince).getTime()) / 1000)) : 0) : 0;
   const isSoccer = Boolean(selectedSport && ["football", "soccer"].includes((selectedSport.slug ?? selectedSport.name).trim().toLowerCase()));
-  const firstAddedDue = Boolean(isSoccer && (clock?.phase === "first_half" || (clock?.phase === "paused" && elapsed < 5400)) && elapsed >= 45 * 60 && clock.firstHalfAddedMinutes === null);
-  const secondHalfRegulationEnd = 5400 + (clock?.firstHalfAddedMinutes ?? 0) * 60;
-  const secondAddedDue = Boolean(isSoccer && (clock?.phase === "second_half" || clock?.phase === "paused") && elapsed >= secondHalfRegulationEnd && clock.secondHalfAddedMinutes === null);
-  const halfTimeDue = Boolean(isSoccer && (clock?.phase === "first_half" || clock?.phase === "paused") && !firstAddedDue && elapsed >= (45 + (clock?.firstHalfAddedMinutes ?? 0)) * 60 && elapsed < secondHalfRegulationEnd);
-  const fullTimeDue = Boolean(isSoccer && (clock?.phase === "second_half" || clock?.phase === "paused") && !secondAddedDue && elapsed >= 5400 + ((clock?.firstHalfAddedMinutes ?? 0) + (clock?.secondHalfAddedMinutes ?? 0)) * 60);
-  const clockMinutes = Math.floor(elapsed / 60);
-  const clockLabel = isSoccer && clockMinutes > 45 && clock?.phase === "first_half" ? `45+${clockMinutes - 45}` : isSoccer && clockMinutes > 90 ? `90+${clockMinutes - 90}` : `${String(clockMinutes).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
+  const firstHalfEnd = 45 * 60 + (clock?.firstHalfAddedMinutes ?? 0) * 60;
+  const secondHalfRegulationEnd = firstHalfEnd + 45 * 60;
+  const firstHalfPhase = clock?.phase === "first_half" || (clock?.phase === "paused" && elapsed <= firstHalfEnd);
+  const secondHalfPhase = clock?.phase === "second_half" || (clock?.phase === "paused" && elapsed > firstHalfEnd);
+  const firstAddedDue = Boolean(isSoccer && firstHalfPhase && elapsed >= 45 * 60 && clock?.firstHalfAddedMinutes === null);
+  const secondAddedDue = Boolean(isSoccer && secondHalfPhase && elapsed >= secondHalfRegulationEnd && clock?.secondHalfAddedMinutes === null);
+  const halfTimeDue = Boolean(isSoccer && firstHalfPhase && !firstAddedDue && clock?.firstHalfAddedMinutes !== null && elapsed >= firstHalfEnd);
+  const fullTimeDue = Boolean(isSoccer && secondHalfPhase && !secondAddedDue && clock?.secondHalfAddedMinutes !== null && elapsed >= secondHalfRegulationEnd + clock.secondHalfAddedMinutes * 60);
+  const firstHalfReminder = Boolean(isSoccer && firstHalfPhase && clock?.firstHalfAddedMinutes === null && elapsed >= 35 * 60 && elapsed < 45 * 60);
+  const secondHalfReminder = Boolean(isSoccer && secondHalfPhase && clock?.secondHalfAddedMinutes === null && elapsed >= secondHalfRegulationEnd - 10 * 60 && elapsed < secondHalfRegulationEnd);
+  const displayedElapsed = isSoccer && secondHalfPhase ? 45 * 60 + Math.max(0, elapsed - firstHalfEnd) : elapsed;
+  const clockMinutes = Math.floor(displayedElapsed / 60);
+  const clockLabel = isSoccer && clock?.phase === "halftime" ? "HT"
+    : isSoccer && clockMinutes > 45 && firstHalfPhase ? `45+${clockMinutes - 45}`
+      : isSoccer && clockMinutes > 90 && secondHalfPhase ? `90+${clockMinutes - 90}`
+        : `${String(clockMinutes).padStart(2, "0")}:${String(displayedElapsed % 60).padStart(2, "0")}`;
+  const halftimeBreakRemaining = clock?.phase === "halftime"
+    ? Math.max(0, 15 * 60 - Math.floor((clockNow - Date.parse(clock.updatedAt ?? "")) / 1000))
+    : null;
+  const halftimeBreakLabel = halftimeBreakRemaining === null ? null : `${String(Math.floor(halftimeBreakRemaining / 60)).padStart(2, "0")}:${String(halftimeBreakRemaining % 60).padStart(2, "0")}`;
 
   const mutate = useCallback(async (operation: () => Promise<ManualScoreState>, successMessage: string) => {
     if (!isAdmin || accessDenied || !accessToken || !fixtureId || pending) return;
@@ -330,15 +343,16 @@ export function ManualScoreControlScreen({ accessToken, isAdmin, initialFixtureI
           {sourceMode.mode === "api" ? <div className="score-control-info" role="status"><strong>API source is active</strong><span>Manual score controls are disabled until you switch the source back to Manual.</span></div> : !selectedFixture ? <p className="field-note">Loading the canonical fixture…</p> : !supportedSport ? <div className="score-control-info" role="status"><strong>Read only for this sport</strong><span>The existing manual score API currently validates football and soccer fixtures only. No score controls are shown for other sports.</span></div> : loadingScore ? <p role="status">Loading authoritative score state…</p> : <>
             {selectedFixture && !clock && !scoreState && selectedFixture.startsAt ? <div className="score-clock-kickoff"><span>Scheduled kickoff</span><strong>{formatKickoff(selectedFixture.startsAt)}</strong><small>{Date.parse(selectedFixture.startsAt) > clockNow ? `Kickoff in ${Math.ceil((Date.parse(selectedFixture.startsAt) - clockNow) / 60000)} minutes` : "Kickoff time reached · start the clock when play begins"}</small></div> : null}
             {scoreState && !clock && ["live", "paused"].includes(scoreState.status) ? <div className="score-control-info"><strong>Match clock not initialized</strong><span>Start a clock for this existing live match. Its canonical scheduled kickoff time is used when available.</span><button className="button-primary" type="button" disabled={pending} onClick={async () => { setPending(true); try { setClock(await apiClient.updateManualScoreClock(fixtureId, { version: 0, action: "initialize" }, accessToken) as ScoreClock); } catch (clockError) { setError(describeScoreError(clockError)); } finally { setPending(false); } }}>Initialize match clock</button></div> : null}
-            {clock ? <section className="score-clock-panel" aria-label="Match clock"><div className="score-clock-face"><span>{clock.phase.replaceAll("_", " ")}</span><strong>{clockLabel}</strong><small>{clock.running ? "Clock running" : "Clock stopped"} · clock version {clock.version}</small></div><div className="score-clock-actions">
+            {clock ? <section className="score-clock-panel" aria-label="Match clock"><div className="score-clock-face"><span>{clock.phase.replaceAll("_", " ")}</span><strong>{clockLabel}</strong><small>{clock.phase === "halftime" ? `15-minute halftime break · ${halftimeBreakLabel ?? "15:00"} remaining` : `${clock.running ? "Clock running" : "Clock stopped"} · clock version ${clock.version}`}</small></div><div className="score-clock-actions">
               {clock.running ? <button className="button-secondary" type="button" disabled={pending} onClick={() => void runClockAction("pause")}>Pause clock</button> : null}
               {!clock.running && ["first_half", "second_half", "paused"].includes(clock.phase) ? <button className="button-primary" type="button" disabled={pending} onClick={() => void runClockAction("resume")}>Resume clock</button> : null}
               {clock.phase === "halftime" ? <button className="button-primary" type="button" disabled={pending} onClick={() => void runClockAction("start_second_half")}>Start second half</button> : null}
               {halfTimeDue && clock.running ? <button className="button-primary" type="button" disabled={pending} onClick={() => void runClockAction("halftime")}>End first half</button> : null}
-              {fullTimeDue ? <button className="button-primary" type="button" disabled={pending} onClick={() => void runClockAction("end")}>End match</button> : null}
               {!isSoccer && clock.running ? <button className="button-primary" type="button" disabled={pending} onClick={() => void runClockAction("end")}>End match</button> : null}
+              {isSoccer && clock.phase !== "ended" ? <button className="button-danger" type="button" disabled={pending || !fullTimeDue} title={fullTimeDue ? "End the match and stop the clock" : "Available after the second-half regulation and added time"} onClick={() => void runClockAction("end")}>End match</button> : null}
             </div></section> : null}
-            {firstAddedDue || secondAddedDue ? <div className="score-clock-alert" role="alert"><strong>Match needs attention</strong><span>{firstAddedDue ? "The first 45 minutes are complete. Set first-half added time." : "The second 45 minutes are complete. Set second-half added time."}</span><label>Added minutes<input type="number" min="0" max="30" value={addedMinutes} onChange={(event) => setAddedMinutes(Number(event.target.value))} /></label><button className="button-primary" type="button" disabled={pending || !Number.isInteger(addedMinutes) || addedMinutes < 0 || addedMinutes > 30} onClick={() => void runClockAction(firstAddedDue ? "set_first_added" : "set_second_added", addedMinutes)}>Save added time</button></div> : null}
+            {firstHalfReminder || secondHalfReminder ? <div className="score-clock-alert" role="status"><strong>Added-time reminder</strong><span>{firstHalfReminder ? `First half reaches 45 minutes in ${Math.ceil((45 * 60 - elapsed) / 60)} minutes.` : `Second half reaches 90 minutes in ${Math.ceil((secondHalfRegulationEnd - elapsed) / 60)} minutes.`} Prepare to enter added time.</span></div> : null}
+            {firstAddedDue || secondAddedDue ? <div className="score-clock-alert" role="alert"><strong>Match needs attention</strong><span>{firstAddedDue ? "The first 45 minutes are complete. Set first-half added time." : "The second half has reached 90 minutes. Set second-half added time."}</span><label>Added minutes<input type="number" min="0" max="30" value={addedMinutes} onChange={(event) => setAddedMinutes(Number(event.target.value))} /></label><button className="button-primary" type="button" disabled={pending || !Number.isInteger(addedMinutes) || addedMinutes < 0 || addedMinutes > 30} onClick={() => void runClockAction(firstAddedDue ? "set_first_added" : "set_second_added", addedMinutes)}>Save added time</button></div> : null}
             <div className="score-board">
               <label><span className="score-team-name"><TeamCrest name={selectedFixture.homeTeam.name} logoUrl={selectedFixture.homeTeam.logoUrl} />{selectedFixture.homeTeam.name}</span><input aria-label="Home score" type="number" min="0" step="1" value={homeScore} disabled={pending || (!canStart && !canUpdate && !canCorrectOrReopen)} onChange={(event) => setHomeScore(event.target.value === "" ? 0 : Number(event.target.value))} /></label>
               <b>—</b>

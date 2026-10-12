@@ -1256,6 +1256,7 @@ class ScoreTimelineEvent {
 class ScoreMatch {
   const ScoreMatch({
     required this.id,
+    this.canonicalMatchId,
     required this.competitionName,
     required this.homeTeamName,
     required this.awayTeamName,
@@ -1271,6 +1272,7 @@ class ScoreMatch {
   });
 
   final String id;
+  final String? canonicalMatchId;
   final String competitionName;
   final String homeTeamName;
   final String awayTeamName;
@@ -1302,6 +1304,7 @@ class ScoreMatch {
       'SCHEDULED' =>
         'KO ${utcDate != null ? _formatKickoff(utcDate!) : 'TBD'}',
       'PAUSED' => 'HT',
+      'HT' => 'HT',
       'FINISHED' => 'FT',
       _ => '--',
     };
@@ -1315,6 +1318,7 @@ class ScoreMatch {
 
     return ScoreMatch(
       id: (json['id'] ?? 'match').toString(),
+      canonicalMatchId: json['canonicalMatchId']?.toString(),
       competitionName: (competition['name'] ?? 'Competition').toString(),
       homeTeamName: (homeTeam['name'] ?? 'Home').toString(),
       awayTeamName: (awayTeam['name'] ?? 'Away').toString(),

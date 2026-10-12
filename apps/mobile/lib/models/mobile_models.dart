@@ -542,6 +542,11 @@ class MobileFixture {
   String get liveStatusLabel {
     final elapsed = liveState?['elapsed'];
     if (liveState?['isLive'] == true) {
+      final status = liveState?['status']?.toString();
+      if (status == 'HT') return 'HALF-TIME · 15 MIN BREAK';
+      if (status == '1H') return elapsed is num ? "1ST HALF · ${elapsed.toInt()}'" : '1ST HALF';
+      if (status == '2H') return elapsed is num ? "2ND HALF · ${elapsed.toInt()}'" : '2ND HALF';
+      if (status == 'PAUSED') return 'MATCH PAUSED';
       return elapsed is num ? "${elapsed.toInt()}' LIVE" : 'LIVE';
     }
     if (liveState?['status'] == 'FT' ||

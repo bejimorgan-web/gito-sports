@@ -157,6 +157,15 @@ test("mobile read model exposes publication delivery without IPTV stream relatio
   assert.deepEqual(finishedFixture.score, { home: 3, away: 2, winner: "home" });
   assert.equal(mobile.mobileClubDetail("team-bayern")?.previousResult?.id, fixture.id);
   assert.equal(mobile.mobileSeasonFixtures("season-2026")?.fixtures.find((item: any) => item.id === fixture.id)?.status, "ended");
+
+  // Simulate a second saved row for the same canonical pairing and kickoff.
+  // Mobile fixture lists should show one match card even if duplicate rows exist.
+  db.prepare(`INSERT INTO matches (id, competition_id, season_id, home_team_id, away_team_id, starts_at, venue_name, status, created_at, updated_at)
+    SELECT 'fixture-duplicate', competition_id, season_id, home_team_id, away_team_id, starts_at, venue_name, status, created_at, updated_at
+    FROM matches WHERE id = ?`).run(fixture.id);
+  assert.equal(mobile.mobileCompetitionFixtures("competition-bundesliga", { seasonId: "season-2026" }).filter((item) => item.homeClub.id === "team-bayern" && item.awayClub.id === "team-dortmund").length, 1);
+  assert.equal(mobile.mobileClubFixtures("team-bayern", { seasonId: "season-2026" }).filter((item) => item.homeClub.id === "team-bayern" && item.awayClub.id === "team-dortmund").length, 1);
+  assert.equal(mobile.mobileClubDetail("team-bayern")?.previousResult?.id, fixture.id);
 });
 
 test("mobile competition catalog preserves canonical host ownership", () => {
