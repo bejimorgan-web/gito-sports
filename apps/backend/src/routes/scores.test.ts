@@ -362,6 +362,36 @@ test("manual score API authorization, persistence, audit, notification and read-
       assert.equal(read.body.data.version, 7);
     });
 
+    await t.test("lists pending operator notifications and acknowledges each notification once", async () => {
+      const now = new Date().toISOString();
+      database.prepare(`
+        INSERT INTO match_score_operator_notifications
+          (id, match_id, event_key, event_type, title, message, event_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run("notification-1", "fixture-1", "kickoff_0_minutes", "kickoff_0_minutes",
+        "Kickoff time", "Home vs Away · Local Cup", now, now);
+
+      assert.equal((await request(baseUrl, "/operator-notifications", "GET")).status, 401);
+      assert.equal((await request(baseUrl, "/operator-notifications", "GET", undefined, operatorToken())).status, 403);
+      const listed = await request(baseUrl, "/operator-notifications", "GET", undefined, adminToken());
+      assert.equal(listed.status, 200);
+      const notification = listed.body.data.find((item: { id: string }) => item.id === "notification-1");
+      assert.ok(notification);
+      assert.equal(notification.matchId, "fixture-1");
+      assert.equal(notification.homeName, "Home");
+      assert.equal(notification.awayName, "Away");
+      assert.equal(notification.competitionName, "Local Cup");
+
+      assert.equal((await request(baseUrl, "/operator-notifications/notification-1/acknowledge", "POST", {}, operatorToken())).status, 403);
+      const acknowledged = await request(baseUrl, "/operator-notifications/notification-1/acknowledge", "POST", {}, adminToken());
+      assert.equal(acknowledged.status, 200);
+      assert.equal(acknowledged.body.data.id, "notification-1");
+      assert.ok(acknowledged.body.data.acknowledgedAt);
+      const pending = await request(baseUrl, "/operator-notifications", "GET", undefined, adminToken());
+      assert.equal(pending.body.data.some((item: { id: string }) => item.id === "notification-1"), false);
+      const duplicateAcknowledgement = await request(baseUrl, "/operator-notifications/notification-1/acknowledge", "POST", {}, adminToken());
+      assert.equal(duplicateAcknowledgement.status, 404);
+    });
     await t.test("provider live refresh preserves manual scores while refreshing unrelated fixtures", testProviderRefreshPreservesManualScores);
     await t.test("provider fixture IDs are scoped to their provider identity", testProviderExternalIdCollisionAcrossProviders);
     await t.test("starts and audits a versioned manual clock with soccer added time", async () => {

@@ -467,6 +467,37 @@ scoresRouter.get("/source-mode", protectedRoute, requireAdmin, (_request, respon
   response.json({ data: ScoreService.getSourceMode() });
 });
 
+scoresRouter.get("/operator-notifications", protectedRoute, requireAdmin, (_request, response) => {
+  const rows = getDatabase().prepare(`
+    SELECT n.id, n.match_id AS matchId, n.event_type AS eventType, n.title, n.message,
+      n.event_at AS eventAt, n.created_at AS createdAt,
+      h.name AS homeName, a.name AS awayName, c.name AS competitionName
+    FROM match_score_operator_notifications n
+    JOIN matches m ON m.id=n.match_id
+    JOIN teams h ON h.id=m.home_team_id
+    JOIN teams a ON a.id=m.away_team_id
+    JOIN competitions c ON c.id=m.competition_id
+    WHERE n.acknowledged_at IS NULL
+    ORDER BY n.event_at DESC, n.created_at DESC
+    LIMIT 200
+  `).all();
+  response.json({ data: rows });
+});
+
+scoresRouter.post("/operator-notifications/:id/acknowledge", protectedRoute, requireAdmin, (request: AuthenticatedRequest, response) => {
+  const id = request.params.id;
+  if (!id) return response.status(400).json({ error: "notification_id_required" });
+  const acknowledgedAt = new Date().toISOString();
+  const result = getDatabase().prepare(`
+    UPDATE match_score_operator_notifications
+    SET acknowledged_at=?, acknowledged_by_operator_id=?
+    WHERE id=? AND acknowledged_at IS NULL
+  `).run(acknowledgedAt, request.operator!.id, id);
+  if (result.changes === 0) {
+    return response.status(404).json({ error: "notification_not_found_or_already_acknowledged" });
+  }
+  response.json({ data: { id, acknowledgedAt } });
+});
 scoresRouter.put("/source-mode", protectedRoute, requireAdmin, (request, response) => {
   const mode = request.body && typeof request.body === "object" ? (request.body as Record<string, unknown>).mode : undefined;
   if (mode !== "manual" && mode !== "api") {
