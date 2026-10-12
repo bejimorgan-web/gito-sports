@@ -34,6 +34,7 @@ export type MobileFixture = {
   homeClub: MobileClub;
   awayClub: MobileClub;
   score: { home: number | null; away: number | null; winner: string | null } | null;
+  timeline: Array<{ minute: number; description: string; homeScore: number; awayScore: number; createdAt: string }>;
   liveState: { isLive: boolean; status: string; homeScore: number | null; awayScore: number | null; elapsed: number | null; updatedAt: string | null } | null;
   live: boolean;
   playbackUrl: string | null;
@@ -114,6 +115,10 @@ export function mapMobileFixture(fixture: any, suppliedSnapshot?: ScoreMatchSumm
   const score = manualScore
     ? { home: Number(manualScore.homeScore), away: Number(manualScore.awayScore), winner: Number(manualScore.homeScore) > Number(manualScore.awayScore) ? "home" : Number(manualScore.awayScore) > Number(manualScore.homeScore) ? "away" : null }
     : snapshot?.score && typeof snapshot.score === "object" ? snapshot.score : null;
+  const timeline = manualScore
+    ? getDatabase().prepare(`SELECT minute, description, home_score AS homeScore, away_score AS awayScore, created_at AS createdAt
+        FROM match_score_timeline WHERE match_id=? ORDER BY minute, created_at`).all(fixture.id) as Array<{ minute: number; description: string; homeScore: number; awayScore: number; createdAt: string }>
+    : snapshot?.timeline ?? [];
   const liveElapsed = manualClock
     ? Number(manualClock.elapsedSeconds) + (Number(manualClock.running) === 1 && manualClock.runningSince
       ? Math.max(0, Math.floor((Date.now() - Date.parse(manualClock.runningSince)) / 1000)) : 0)
@@ -165,6 +170,7 @@ export function mapMobileFixture(fixture: any, suppliedSnapshot?: ScoreMatchSumm
     homeClub: home,
     awayClub: away,
     score,
+    timeline,
     liveState,
     live: liveState?.isLive ?? fixture.status === "live",
     playbackUrl: delivery?.playbackUrl ?? null,

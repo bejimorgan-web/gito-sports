@@ -164,7 +164,7 @@ function recordClockAction(matchId: string, operatorId: string, action: string, 
       phase = "halftime"; running = false; runningSince = null; elapsed = Math.max(elapsed, 2700 + (firstAdded ?? 0) * 60);
     } else if (action === "start_second_half" && football && phase === "halftime") {
       phase = "second_half"; running = true; runningSince = now;
-    } else if (action === "end" && (football ? (elapsed >= 5400 + ((firstAdded ?? 0) + (secondAdded ?? 0)) * 60 || (!running && phase === "paused")) : running || (!running && phase === "paused"))) {
+    } else if (action === "end" && (football ? ["first_half", "halftime", "second_half", "paused"].includes(phase) : running || (!running && phase === "paused"))) {
       phase = "ended"; running = false; runningSince = null;
     } else {
       throw scoreError("invalid_clock_transition", 409, "invalid_clock_transition");
@@ -245,8 +245,8 @@ function persistManualScoreChange(matchId: string, input: ManualScoreInput, oper
     switch (operation) {
       case "start":
         if ((current && current.status !== "scheduled")
-            || !["scheduled", "approved", "published"].includes(fixture.status)) {
-          throw scoreError("only a scheduled match can be started.", 409, "invalid_match_transition");
+            || !["scheduled", "approved", "published", "ended"].includes(fixture.status)) {
+          throw scoreError("only a scheduled fixture or an ended fixture without a manual result can be started.", 409, "invalid_match_transition");
         }
         nextHomeScore = normalizeScoreValue(input.homeScore ?? nextHomeScore, "homeScore");
         nextAwayScore = normalizeScoreValue(input.awayScore ?? nextAwayScore, "awayScore");
@@ -312,6 +312,8 @@ function persistManualScoreChange(matchId: string, input: ManualScoreInput, oper
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(crypto.randomUUID(), matchId, nextHomeScore, nextAwayScore, nextStatus, nextVersion, nextConfirmed ? 1 : 0, input.operatorId, nextConfirmedAt, now, now);
     }
+
+    if (operation === "start") db.prepare("UPDATE matches SET status='live', updated_at=? WHERE id=?").run(now, matchId);
 
     db.prepare(`
       INSERT INTO match_score_audit (
@@ -535,8 +537,8 @@ scoresRouter.post("/manual/:id/events", protectedRoute, requireAdmin, (request: 
   try {
     db.exec("BEGIN IMMEDIATE;");
     const current = readManualScoreState(matchId);
-    if (!current || current.finalResultConfirmed || !["live", "paused"].includes(current.status)) {
-      throw scoreError("only a live or paused match can receive events", 409, "invalid_match_transition");
+    if (!current || current.finalResultConfirmed || !["live", "paused", "ended"].includes(current.status)) {
+      throw scoreError("only an unconfirmed match can receive events", 409, "invalid_match_transition");
     }
     if (normalizeExpectedVersion(body.version) !== current.version) throw scoreError("stale_score_version", 409, "stale_score_version");
     const fixture = db.prepare("SELECT home_team_id AS homeTeamId, away_team_id AS awayTeamId FROM matches WHERE id=?").get(matchId) as { homeTeamId: string; awayTeamId: string } | undefined;
@@ -609,7 +611,7 @@ scoresRouter.patch("/manual/:id/events/:eventId", protectedRoute, requireAdmin, 
   try {
     db.exec("BEGIN IMMEDIATE;");
     const current = readManualScoreState(matchId);
-    if (!current || current.finalResultConfirmed || !["live", "paused"].includes(current.status)) throw scoreError("only a live or paused match can edit events", 409, "invalid_match_transition");
+    if (!current || current.finalResultConfirmed || !["live", "paused", "ended"].includes(current.status)) throw scoreError("only an unconfirmed match can edit events", 409, "invalid_match_transition");
     if (normalizeExpectedVersion(body.version) !== current.version) throw scoreError("stale_score_version", 409, "stale_score_version");
     const event = db.prepare("SELECT id, minute, description FROM match_score_timeline WHERE id=? AND match_id=?").get(eventId, matchId) as { id: string; minute: number; description: string } | undefined;
     if (!event) throw scoreError("match_event_not_found", 404, "match_event_not_found");
