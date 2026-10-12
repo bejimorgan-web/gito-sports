@@ -12,6 +12,7 @@ process.env.AUTO_RESTORE_BACKUP = "false";
 const { getDatabase } = await import("../db/connection.js");
 const { createCanonicalFixture, deleteCanonicalFixture } = await import("../repositories/fixtures-repository.js");
 const { NewsRepository } = await import("../repositories/news-repository.js");
+const { setScoreSourceMode } = await import("../repositories/score-source-mode-repository.js");
 const mobile = await import("./mobile-read-model-service.js");
 
 function seed() {
@@ -52,6 +53,7 @@ function seed() {
 test("mobile read model exposes publication delivery without IPTV stream relationships", () => {
   const db = getDatabase();
   const { fixture, article } = seed();
+  const finalizedAt = new Date().toISOString();
   const clubs = mobile.mobileClubs({ sportId: "sport-football" });
   assert.equal(clubs.length, 3);
   assert.equal(clubs.find((club) => club.id === "team-bayern")?.country?.id, "country-germany");
@@ -114,6 +116,32 @@ test("mobile read model exposes publication delivery without IPTV stream relatio
     events: []
   }).liveState?.isLive, false);
 
+  db.prepare("INSERT INTO competition_season_teams (id, competition_id, season_id, team_id, membership_status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)")
+    .run("membership-other-ft-test", "competition-bundesliga", "season-2026", "team-other", finalizedAt, finalizedAt);
+  const finalFixture = createCanonicalFixture({ competitionId: "competition-bundesliga", seasonId: "season-2026", homeTeamId: "team-dortmund", awayTeamId: "team-other", startsAt: "2099-08-19T15:00:00.000Z", venueName: "Arena" });
+  assert.ok(finalFixture);
+  setScoreSourceMode("manual");
+  db.prepare(`INSERT INTO match_score_state (
+    id, match_id, home_score, away_score, status, version, final_result_confirmed,
+    updated_by_operator_id, last_confirmed_at, created_at, updated_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(`manual-ft-${finalFixture.id}`, finalFixture.id, 3, 2, "ended", 7, 1, null, finalizedAt, finalizedAt, finalizedAt);
+  const manuallyFinalized = mobile.mapMobileFixture(finalFixture, {
+    id: "provider-fixture-1",
+    utcDate: finalFixture.startsAt,
+    status: "2H",
+    minute: 88,
+    competition: { id: "competition-bundesliga", name: "Bundesliga", logoUrl: null },
+    homeTeam: { id: "team-dortmund", name: "Borussia Dortmund", logoUrl: null },
+    awayTeam: { id: "team-other", name: "Another Club", logoUrl: null },
+    score: { home: 4, away: 0, winner: "home" },
+    events: []
+  });
+  assert.equal(manuallyFinalized.status, "ended");
+  assert.equal(manuallyFinalized.live, false);
+  assert.deepEqual(manuallyFinalized.score, { home: 3, away: 2, winner: "home" });
+  assert.equal(manuallyFinalized.liveState?.status, "FT");
+  assert.equal(manuallyFinalized.liveState?.isLive, false);
   const dateWindow = { from: "2099-08-20T00:00:00.000Z", to: "2099-08-21T00:00:00.000Z" };
   assert.equal(mobile.mobileFixtures({ mode: "all", sportId: "sport-football", ...dateWindow }).filter((item) => item.id === fixture.id).length, 1);
   assert.equal(mobile.mobileFixtures({ mode: "following", sportId: "sport-football", teamIds: ["team-bayern"], ...dateWindow }).filter((item) => item.id === fixture.id).length, 1);

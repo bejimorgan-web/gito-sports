@@ -137,10 +137,14 @@ export function mapMobileFixture(fixture: any, suppliedSnapshot?: ScoreMatchSumm
     : snapshot && ["FT", "AET", "PEN", "FINISHED", "ENDED", "COMPLETED"].includes(snapshot.status.toUpperCase())
       ? "ended" : fixture.status;
   const delivery = getPublishedPublicationDeliveryByMatchId(fixture.id);
-  const liveState = manualScore && manualLiveStatus
+  const liveState = manualScore
     ? {
-        isLive: true,
-        status: manualLiveStatus,
+        // Manual scoring is authoritative for the whole lifecycle. In particular,
+        // do not fall back to a stale provider snapshot after a manual FT result.
+        isLive: manualScore.status === "live",
+        status: manualLiveStatus ?? (manualScore.status === "ended"
+          ? Number(manualScore.finalResultConfirmed) === 1 ? "FT" : "ENDED"
+          : manualScore.status.toUpperCase()),
         homeScore: score?.home ?? null,
         awayScore: score?.away ?? null,
         elapsed: displayedLiveElapsed === null || manualClock?.phase === "halftime" ? null : Math.floor(displayedLiveElapsed / 60),
