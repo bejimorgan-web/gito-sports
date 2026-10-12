@@ -267,6 +267,7 @@ function validateFixtureFilterIds(filters: { sportIds: string[]; competitionIds:
 export function mobileFixtures(filters?: {
   mode?: "all" | "following";
   sportId?: string;
+  hostId?: string;
   sportIds?: string[];
   competitionId?: string;
   competitionIds?: string[];
@@ -285,8 +286,15 @@ export function mobileFixtures(filters?: {
   const teamIds = uniqueIds([...(filters?.teamIds ?? []), ...(filters?.teamId ? [filters.teamId] : [])]);
   validateFixtureFilterIds({ sportIds, competitionIds, teamIds });
 
-  const common = { status: filters?.status, from: filters?.from, to: filters?.to, limit: 100, offset: 0 };
   const following = filters?.mode === "following";
+  const common = {
+    status: filters?.status,
+    from: filters?.from,
+    to: filters?.to,
+    hostId: filters?.hostId,
+    limit: following ? undefined : filters?.limit,
+    offset: following ? 0 : filters?.offset
+  };
   if (following && !sportIds.length && !competitionIds.length && !teamIds.length) return [];
 
   const fixtureSets = following
@@ -306,7 +314,10 @@ export function mobileFixtures(filters?: {
   }));
   const offset = Math.max(filters?.offset ?? 0, 0);
   const limit = Math.min(Math.max(filters?.limit ?? 100, 1), 100);
-  return fixtures.slice(offset, offset + limit).map((fixture) => mapMobileFixture(fixture));
+  // The all-fixtures branch is one ordered SQL query, so pagination is already
+  // applied there. Re-slicing it would apply offset twice and hide later pages.
+  const page = following ? fixtures.slice(offset, offset + limit) : fixtures;
+  return page.map((fixture) => mapMobileFixture(fixture));
 }
 
 export function mobileClubDetail(clubId: string) {

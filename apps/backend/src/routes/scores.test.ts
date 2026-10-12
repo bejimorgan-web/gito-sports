@@ -568,12 +568,42 @@ test("manual score API authorization, persistence, audit, notification and read-
       const corrected = await request(baseUrl, `/manual/fixture-events/events/${added.body.data.id}`, "PATCH", { version: 2, minute: 21 }, adminToken());
       assert.equal(corrected.status, 200);
       assert.equal(corrected.body.data.minute, 21);
+      assert.equal(corrected.body.data.scoreState.version, 3);
+
+      const ended = await request(baseUrl, "/manual/fixture-events", "PATCH", { version: 3, status: "ended" }, adminToken());
+      assert.equal(ended.status, 200);
+      const confirmed = await request(baseUrl, "/manual/fixture-events/confirm", "POST", { version: 4 }, adminToken());
+      assert.equal(confirmed.status, 200);
+      const missingCorrectionReason = await request(baseUrl, `/manual/fixture-events/events/${added.body.data.id}`, "PATCH", {
+        version: 5, minute: 23
+      }, adminToken());
+      assert.equal(missingCorrectionReason.status, 400);
+      assert.equal(missingCorrectionReason.body.error, "correction_reason_required");
+      const confirmedEventCorrection = await request(baseUrl, `/manual/fixture-events/events/${added.body.data.id}`, "PATCH", {
+        version: 5, minute: 23, reason: "Official match report confirms the stoppage-time minute"
+      }, adminToken());
+      assert.equal(confirmedEventCorrection.status, 200);
+      assert.equal(confirmedEventCorrection.body.data.minute, 23);
+      assert.equal(confirmedEventCorrection.body.data.scoreState.version, 6);
+      assert.equal(confirmedEventCorrection.body.data.scoreState.status, "ended");
+      assert.equal(confirmedEventCorrection.body.data.scoreState.finalResultConfirmed, true);
 
       const scoreRead = await ScoreService.getMatch("fixture-events");
       assert.equal(scoreRead?.match.timeline?.length, 1);
-      assert.equal(scoreRead?.match.timeline?.[0]?.minute, 21);
+      assert.equal(scoreRead?.match.timeline?.[0]?.minute, 23);
       assert.equal(scoreRead?.match.score.home, 1);
-      assert.equal(Number(database.prepare("SELECT COUNT(*) AS count FROM match_score_audit WHERE match_id=? AND action='score_updated'").get("fixture-events")?.count), 2);
+      assert.equal(Number(database.prepare("SELECT COUNT(*) AS count FROM match_score_audit WHERE match_id=? AND action='score_updated'").get("fixture-events")?.count), 5);
+      const eventTimeAudit = database.prepare("SELECT reason,metadata,previous_final_result_confirmed,new_final_result_confirmed FROM match_score_audit WHERE match_id=? ORDER BY new_version DESC LIMIT 1")
+        .get("fixture-events") as { reason: string; metadata: string; previous_final_result_confirmed: number; new_final_result_confirmed: number };
+      assert.equal(eventTimeAudit.reason, "Official match report confirms the stoppage-time minute");
+      assert.equal(eventTimeAudit.previous_final_result_confirmed, 1);
+      assert.equal(eventTimeAudit.new_final_result_confirmed, 1);
+      assert.deepEqual(JSON.parse(eventTimeAudit.metadata), {
+        operation: "correct_match_event_time",
+        eventId: added.body.data.id,
+        previousMinute: 21,
+        newMinute: 23
+      });
     });
 
   } finally {

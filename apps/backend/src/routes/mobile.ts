@@ -221,6 +221,7 @@ mobileRouter.get("/fixtures", (request, response) => {
     response.json({ data: mobileFixtures({
       mode: request.query.mode === "following" ? "following" : "all",
       ...(typeof request.query.sportId === "string" ? { sportId: request.query.sportId } : {}),
+      ...(typeof request.query.hostId === "string" ? { hostId: request.query.hostId } : {}),
       ...(request.query.sportIds !== undefined ? { sportIds } : {}),
       ...(competitionIds.length ? { competitionIds } : {}),
       ...(teamIds.length ? { teamIds } : {}),

@@ -10,7 +10,7 @@ process.env.DATABASE_PATH = databasePath;
 process.env.AUTO_RESTORE_BACKUP = "false";
 
 const { getDatabase } = await import("../db/connection.js");
-const { createCanonicalFixture } = await import("../repositories/fixtures-repository.js");
+const { createCanonicalFixture, deleteCanonicalFixture } = await import("../repositories/fixtures-repository.js");
 const { NewsRepository } = await import("../repositories/news-repository.js");
 const mobile = await import("./mobile-read-model-service.js");
 
@@ -122,6 +122,15 @@ test("mobile read model exposes publication delivery without IPTV stream relatio
   assert.equal(mobile.mobileFixtures({ mode: "following", sportId: "sport-football", teamIds: ["team-bayern"], competitionIds: ["competition-bundesliga"], ...dateWindow }).filter((item) => item.id === fixture.id).length, 1);
   assert.equal(mobile.mobileClubFixtures("team-bayern").filter((item) => item.id === fixture.id).length, 1);
   assert.equal(mobile.mobileClubFixtures("team-dortmund").filter((item) => item.id === fixture.id).length, 1);
+
+  const laterFixture = createCanonicalFixture({ competitionId: "competition-bundesliga", seasonId: "season-2026", homeTeamId: "team-bayern", awayTeamId: "team-dortmund", startsAt: "2099-08-20T18:00:00.000Z", venueName: "Arena" });
+  const latestFixture = createCanonicalFixture({ competitionId: "competition-bundesliga", seasonId: "season-2026", homeTeamId: "team-bayern", awayTeamId: "team-dortmund", startsAt: "2099-08-20T21:00:00.000Z", venueName: "Arena" });
+  assert.ok(laterFixture);
+  assert.ok(latestFixture);
+  const fixturePage = mobile.mobileFixtures({ mode: "all", sportId: "sport-football", hostId: "host-germany", ...dateWindow, limit: 1, offset: 1 });
+  assert.deepEqual(fixturePage.map((item) => item.id), [laterFixture.id]);
+  assert.equal(deleteCanonicalFixture(laterFixture.id), true);
+  assert.equal(deleteCanonicalFixture(latestFixture.id), true);
 
   const byTeam = mobile.mobileNews({
     mode: "following",

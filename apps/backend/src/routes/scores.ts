@@ -648,7 +648,9 @@ scoresRouter.patch("/manual/:id/events/:eventId", protectedRoute, requireAdmin, 
   const matchId = request.params.id;
   const eventId = request.params.eventId;
   const body = request.body && typeof request.body === "object" && !Array.isArray(request.body) ? request.body as Record<string, unknown> : {};
-  if (!matchId || !eventId || !Number.isSafeInteger(body.minute) || Number(body.minute) < 0 || Number(body.minute) > 150 || body.version === undefined) {
+  const correctionReason = typeof body.reason === "string" ? body.reason.trim() : "";
+  if (!matchId || !eventId || !Number.isSafeInteger(body.minute) || Number(body.minute) < 0 || Number(body.minute) > 150
+    || body.version === undefined || (body.reason !== undefined && (typeof body.reason !== "string" || correctionReason.length > 500))) {
     return response.status(400).json({ error: "invalid_event_payload" });
   }
   if (ScoreService.getSourceMode().mode !== "manual") return response.status(409).json({ error: "score_source_is_api" });
@@ -656,15 +658,30 @@ scoresRouter.patch("/manual/:id/events/:eventId", protectedRoute, requireAdmin, 
   try {
     db.exec("BEGIN IMMEDIATE;");
     const current = readManualScoreState(matchId);
-    if (!current || current.finalResultConfirmed || !["live", "paused", "ended"].includes(current.status)) throw scoreError("only an unconfirmed match can edit events", 409, "invalid_match_transition");
+    if (!current || !["live", "paused", "ended"].includes(current.status)
+      || (current.finalResultConfirmed && current.status !== "ended")) throw scoreError("only a live or ended match can edit event times", 409, "invalid_match_transition");
+    if (current.finalResultConfirmed && !correctionReason) throw scoreError("correction_reason_required", 400, "correction_reason_required");
     if (normalizeExpectedVersion(body.version) !== current.version) throw scoreError("stale_score_version", 409, "stale_score_version");
     const event = db.prepare("SELECT id, minute, description FROM match_score_timeline WHERE id=? AND match_id=?").get(eventId, matchId) as { id: string; minute: number; description: string } | undefined;
     if (!event) throw scoreError("match_event_not_found", 404, "match_event_not_found");
     const updatedAt = new Date().toISOString();
+    const nextVersion = current.version + 1;
     db.prepare("UPDATE match_score_timeline SET minute=?, updated_at=? WHERE id=? AND match_id=?").run(body.minute, updatedAt, eventId, matchId);
+    db.prepare("UPDATE match_score_state SET version=?, updated_by_operator_id=?, updated_at=? WHERE match_id=?")
+      .run(nextVersion, request.operator!.id, updatedAt, matchId);
+    db.prepare(`INSERT INTO match_score_audit (id,match_id,action,operator_id,previous_version,new_version,
+      previous_home_score,previous_away_score,new_home_score,new_away_score,previous_status,new_status,
+      previous_final_result_confirmed,new_final_result_confirmed,reason,metadata,created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(crypto.randomUUID(), matchId, "score_updated", request.operator!.id, current.version, nextVersion,
+        current.homeScore, current.awayScore, current.homeScore, current.awayScore, current.status, current.status,
+        current.finalResultConfirmed ? 1 : 0, current.finalResultConfirmed ? 1 : 0, correctionReason || null,
+        JSON.stringify({ operation: "correct_match_event_time", eventId, previousMinute: event.minute, newMinute: body.minute }), updatedAt);
     db.exec("COMMIT;");
-    ScoreService.notifyManualScoreUpdate(matchId, current.version);
-    response.json({ data: { id: event.id, minute: Number(body.minute), description: event.description, updatedAt } });
+    const updatedState = readManualScoreState(matchId)!;
+    ScoreService.clearCache("scores:");
+    ScoreService.notifyManualScoreUpdate(matchId, nextVersion);
+    response.json({ data: { id: event.id, minute: Number(body.minute), description: event.description, updatedAt, scoreState: updatedState } });
   } catch (error) {
     try { db.exec("ROLLBACK;"); } catch { /* transaction may already be committed */ }
     handleScoreError(error, response);

@@ -264,7 +264,7 @@ export const apiClient = {
       method: "POST", headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" }, body: JSON.stringify(input)
     });
   },
-  updateManualScoreEventMinute(matchId: string, eventId: string, input: { version: number; minute: number }, accessToken: string) {
+  updateManualScoreEventMinute(matchId: string, eventId: string, input: { version: number; minute: number; reason?: string }, accessToken: string) {
     return request<any>(`/scores/manual/${encodeURIComponent(matchId)}/events/${encodeURIComponent(eventId)}`, {
       method: "PATCH", headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" }, body: JSON.stringify(input)
     });
