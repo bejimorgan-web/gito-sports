@@ -136,7 +136,7 @@ function readClockState(matchId: string): ClockState | null {
   return { ...row, running: Number(row.running) === 1, runningSince: Number(row.running) === 1 ? responseRunningSince : null, elapsedSeconds, version: Number(row.version) };
 }
 
-function recordClockAction(matchId: string, operatorId: string, action: string, expectedVersion: unknown, value?: unknown) {
+function recordClockAction(matchId: string, operatorId: string, action: string, expectedVersion: unknown, value?: unknown, reason?: unknown) {
   const db = getDatabase();
   db.exec("BEGIN IMMEDIATE;");
   try {
@@ -148,10 +148,16 @@ function recordClockAction(matchId: string, operatorId: string, action: string, 
     let elapsed = current.elapsedSeconds; let firstAdded = current.firstHalfAddedMinutes; let secondAdded = current.secondHalfAddedMinutes;
     const football = Boolean(db.prepare(`SELECT 1 FROM matches m JOIN competitions c ON c.id=m.competition_id JOIN sports s ON s.id=c.sport_id WHERE m.id=? AND lower(s.slug) IN ('football','soccer')`).get(matchId));
     const elapsedBefore = elapsed;
+    let auditReason: string | null = null;
     if (action === "correct_elapsed") {
       const score = readManualScoreState(matchId);
-      if (phase !== "ended" || running || !score || score.status !== "ended" || score.finalResultConfirmed) {
-        throw scoreError("only an ended, unconfirmed match can have its duration corrected.", 409, "invalid_clock_transition");
+      if (phase !== "ended" || running || !score || score.status !== "ended") {
+        throw scoreError("only an ended match can have its duration corrected.", 409, "invalid_clock_transition");
+      }
+      if (score.finalResultConfirmed) {
+        auditReason = typeof reason === "string" ? reason.trim() : "";
+        if (!auditReason) throw scoreError("a reason is required to correct the duration of a confirmed result.", 400, "correction_reason_required");
+        if (auditReason.length > 500) throw scoreError("reason must be 500 characters or fewer.", 400, "invalid_reason");
       }
       const minutes = normalizeScoreValue(value, "minutes");
       if (minutes > 240) throw scoreError("match duration must be between 0 and 240 minutes.", 400, "invalid_match_duration");
@@ -183,7 +189,7 @@ function recordClockAction(matchId: string, operatorId: string, action: string, 
       .run(phase, running ? 1 : 0, runningSince, elapsed, firstAdded, secondAdded, version, operatorId, now, matchId);
     const next = { ...current, phase, running, runningSince, elapsedSeconds: elapsed, firstHalfAddedMinutes: firstAdded, secondHalfAddedMinutes: secondAdded, version, updatedAt: now };
     db.prepare(`INSERT INTO match_score_clock_audit (id,match_id,action,operator_id,previous_state,new_state,created_at) VALUES (?,?,?,?,?,?,?)`)
-      .run(crypto.randomUUID(), matchId, action, operatorId, JSON.stringify({ ...current, elapsedSeconds: elapsedBefore }), JSON.stringify(next), now);
+      .run(crypto.randomUUID(), matchId, action, operatorId, JSON.stringify({ ...current, elapsedSeconds: elapsedBefore }), JSON.stringify({ ...next, ...(auditReason ? { correctionReason: auditReason } : {}) }), now);
     if (["pause", "resume", "halftime", "start_second_half", "end"].includes(action)) {
       const score = readManualScoreState(matchId);
       if (score && !score.finalResultConfirmed) {
@@ -714,7 +720,7 @@ scoresRouter.post("/manual/:id/clock", protectedRoute, requireAdmin, (request: A
       response.json({ data: readClockState(id) });
       return;
     }
-    const clock = recordClockAction(id, request.operator!.id, body.action, body.version, body.minutes);
+    const clock = recordClockAction(id, request.operator!.id, body.action, body.version, body.minutes, body.reason);
     if (["pause", "resume", "halftime", "start_second_half", "end", "correct_elapsed"].includes(body.action)) {
       const score = readManualScoreState(id);
       if (score) ScoreService.notifyManualScoreUpdate(id, score.version);

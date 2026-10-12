@@ -241,7 +241,7 @@ export const apiClient = {
       headers: { authorization: `Bearer ${accessToken}` }
     });
   },
-  updateManualScoreClock(matchId: string, input: { version: number; action: string; minutes?: number }, accessToken: string) {
+  updateManualScoreClock(matchId: string, input: { version: number; action: string; minutes?: number; reason?: string }, accessToken: string) {
     return request<any>(`/scores/manual/${encodeURIComponent(matchId)}/clock`, {
       method: "POST",
       headers: { authorization: `Bearer ${accessToken}` },

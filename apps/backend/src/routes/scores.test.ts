@@ -485,8 +485,26 @@ test("manual score API authorization, persistence, audit, notification and read-
       assert.equal(JSON.parse(audit[2]!.new_state).elapsedSeconds, 6180);
       const confirmed = await request(baseUrl, "/manual/fixture-past/confirm", "POST", { version: 2 }, adminToken());
       assert.equal(confirmed.status, 200);
-      const confirmedDurationEdit = await request(baseUrl, "/manual/fixture-past/clock", "POST", { version: 3, action: "correct_elapsed", minutes: 99 }, adminToken());
-      assert.equal(confirmedDurationEdit.status, 409);
+      const confirmedDurationWithoutReason = await request(baseUrl, "/manual/fixture-past/clock", "POST", { version: 3, action: "correct_elapsed", minutes: 99 }, adminToken());
+      assert.equal(confirmedDurationWithoutReason.status, 400);
+      assert.equal(confirmedDurationWithoutReason.body.error, "correction_reason_required");
+      const confirmedDurationEdit = await request(baseUrl, "/manual/fixture-past/clock", "POST", {
+        version: 3, action: "correct_elapsed", minutes: 99, reason: "Corrected from the official match report"
+      }, adminToken());
+      assert.equal(confirmedDurationEdit.status, 200);
+      assert.equal(confirmedDurationEdit.body.data.elapsedSeconds, 99 * 60);
+      assert.equal(confirmedDurationEdit.body.data.version, 4);
+      const scoreAfterDurationEdit = await request(baseUrl, "/manual/fixture-past", "GET", undefined, adminToken());
+      assert.deepEqual(
+        [scoreAfterDurationEdit.body.data.homeScore, scoreAfterDurationEdit.body.data.awayScore,
+          scoreAfterDurationEdit.body.data.status, scoreAfterDurationEdit.body.data.finalResultConfirmed],
+        [2, 1, "ended", true]
+      );
+      const durationAudit = database.prepare("SELECT previous_state, new_state FROM match_score_clock_audit WHERE match_id = ? ORDER BY rowid DESC LIMIT 1")
+        .get("fixture-past") as { previous_state: string; new_state: string };
+      assert.equal(JSON.parse(durationAudit.previous_state).elapsedSeconds, 6180);
+      assert.equal(JSON.parse(durationAudit.new_state).elapsedSeconds, 99 * 60);
+      assert.equal(JSON.parse(durationAudit.new_state).correctionReason, "Corrected from the official match report");
     });
 
     await t.test("records named match events, corrects event minute, and exposes timeline to score readers", async () => {
