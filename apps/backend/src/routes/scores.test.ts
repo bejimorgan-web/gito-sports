@@ -59,7 +59,7 @@ function seedDatabase() {
   database.prepare(`
     INSERT INTO matches (id, competition_id, season_id, home_team_id, away_team_id, starts_at, status, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run("fixture-1", "competition-1", "season-1", "team-home", "team-away", timestamp, "scheduled", timestamp, timestamp);
+  `).run("fixture-1", "competition-1", "season-1", "team-home", "team-away", new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), "scheduled", timestamp, timestamp);
 
   for (const [id, role] of [["operator-admin", "admin"], ["operator-basic", "operator"]]) {
     database.prepare(`
@@ -365,7 +365,7 @@ test("manual score API authorization, persistence, audit, notification and read-
     await t.test("provider live refresh preserves manual scores while refreshing unrelated fixtures", testProviderRefreshPreservesManualScores);
     await t.test("provider fixture IDs are scoped to their provider identity", testProviderExternalIdCollisionAcrossProviders);
     await t.test("starts and audits a versioned manual clock with soccer added time", async () => {
-      const timestamp = new Date().toISOString();
+      const timestamp = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
       database.prepare(`INSERT INTO matches (id, competition_id, season_id, home_team_id, away_team_id, starts_at, status, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run("fixture-clock", "competition-1", "season-1", "team-home", "team-away", timestamp, "scheduled", timestamp, timestamp);
@@ -417,8 +417,50 @@ test("manual score API authorization, persistence, audit, notification and read-
       assert.equal(Number(database.prepare("SELECT COUNT(*) AS count FROM match_score_clock_audit WHERE match_id = ?").get("fixture-clock")?.count), 6);
     });
 
+    await t.test("records historical fixtures paused and audits full-time duration corrections", async () => {
+      const kickoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      database.prepare(`INSERT INTO matches (id, competition_id, season_id, home_team_id, away_team_id, starts_at, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run("fixture-past", "competition-1", "season-1", "team-home", "team-away", kickoff, "scheduled", kickoff, kickoff);
+
+      const started = await request(baseUrl, "/manual/fixture-past/start", "POST", { version: 0, homeScore: 2, awayScore: 1 }, adminToken());
+      assert.equal(started.status, 200);
+      assert.equal(started.body.data.status, "paused");
+      const initialClock = await request(baseUrl, "/manual/fixture-past/clock", "GET", undefined, adminToken());
+      assert.equal(initialClock.status, 200);
+      assert.equal(initialClock.body.data.phase, "paused");
+      assert.equal(initialClock.body.data.running, false);
+      assert.equal(initialClock.body.data.elapsedSeconds, 0);
+
+      const ended = await request(baseUrl, "/manual/fixture-past/clock", "POST", { version: 1, action: "end" }, adminToken());
+      assert.equal(ended.status, 200);
+      assert.equal(ended.body.data.phase, "ended");
+      const corrected = await request(baseUrl, "/manual/fixture-past/clock", "POST", { version: 2, action: "correct_elapsed", minutes: 103 }, adminToken());
+      assert.equal(corrected.status, 200);
+      assert.equal(corrected.body.data.phase, "ended");
+      assert.equal(corrected.body.data.running, false);
+      assert.equal(corrected.body.data.elapsedSeconds, 6180);
+      assert.equal(corrected.body.data.version, 3);
+
+      const score = await request(baseUrl, "/manual/fixture-past", "GET", undefined, adminToken());
+      assert.equal(score.status, 200);
+      assert.equal(score.body.data.matchId, "fixture-past");
+      assert.equal(score.body.data.homeScore, 2);
+      assert.equal(score.body.data.awayScore, 1);
+      assert.equal(score.body.data.status, "ended");
+      assert.equal(score.body.data.finalResultConfirmed, false);
+      const audit = database.prepare("SELECT action, previous_state, new_state FROM match_score_clock_audit WHERE match_id = ? ORDER BY rowid").all("fixture-past") as Array<{ action: string; previous_state: string | null; new_state: string }>;
+      assert.deepEqual(audit.map((entry) => entry.action), ["record_historical_fixture", "end", "correct_elapsed"]);
+      assert.equal(JSON.parse(audit[2]!.previous_state!).elapsedSeconds, 0);
+      assert.equal(JSON.parse(audit[2]!.new_state).elapsedSeconds, 6180);
+      const confirmed = await request(baseUrl, "/manual/fixture-past/confirm", "POST", { version: 2 }, adminToken());
+      assert.equal(confirmed.status, 200);
+      const confirmedDurationEdit = await request(baseUrl, "/manual/fixture-past/clock", "POST", { version: 3, action: "correct_elapsed", minutes: 99 }, adminToken());
+      assert.equal(confirmedDurationEdit.status, 409);
+    });
+
     await t.test("records named match events, corrects event minute, and exposes timeline to score readers", async () => {
-      const timestamp = new Date().toISOString();
+      const timestamp = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
       database.prepare(`INSERT INTO matches (id, competition_id, season_id, home_team_id, away_team_id, starts_at, status, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run("fixture-events", "competition-1", "season-1", "team-home", "team-away", timestamp, "scheduled", timestamp, timestamp);

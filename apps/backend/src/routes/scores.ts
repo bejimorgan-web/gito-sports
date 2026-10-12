@@ -148,7 +148,15 @@ function recordClockAction(matchId: string, operatorId: string, action: string, 
     let elapsed = current.elapsedSeconds; let firstAdded = current.firstHalfAddedMinutes; let secondAdded = current.secondHalfAddedMinutes;
     const football = Boolean(db.prepare(`SELECT 1 FROM matches m JOIN competitions c ON c.id=m.competition_id JOIN sports s ON s.id=c.sport_id WHERE m.id=? AND lower(s.slug) IN ('football','soccer')`).get(matchId));
     const elapsedBefore = elapsed;
-    if (action === "set_first_added" || action === "set_second_added") {
+    if (action === "correct_elapsed") {
+      const score = readManualScoreState(matchId);
+      if (phase !== "ended" || running || !score || score.status !== "ended" || score.finalResultConfirmed) {
+        throw scoreError("only an ended, unconfirmed match can have its duration corrected.", 409, "invalid_clock_transition");
+      }
+      const minutes = normalizeScoreValue(value, "minutes");
+      if (minutes > 240) throw scoreError("match duration must be between 0 and 240 minutes.", 400, "invalid_match_duration");
+      elapsed = minutes * 60;
+    } else if (action === "set_first_added" || action === "set_second_added") {
       if (!football) throw scoreError("added_time_is_only_supported_for_soccer", 422, "unsupported_clock_rule");
       const minutes = normalizeScoreValue(value, "addedMinutes");
       if (minutes > 30) throw scoreError("added_minutes_must_be_between_0_and_30", 400, "invalid_added_minutes");
@@ -194,9 +202,9 @@ function recordClockAction(matchId: string, operatorId: string, action: string, 
   } catch (error) { db.exec("ROLLBACK;"); throw error; }
 }
 
-function ensureManualFootballMatch(matchId: string): { id: string; status: string } {
+function ensureManualFootballMatch(matchId: string): { id: string; status: string; startsAt: string | null } {
   const row = getDatabase().prepare(`
-    SELECT m.id, m.status
+    SELECT m.id, m.status, m.starts_at AS startsAt
     FROM matches m
     JOIN competitions c ON c.id = m.competition_id
     JOIN sports s ON s.id = c.sport_id
@@ -208,7 +216,7 @@ function ensureManualFootballMatch(matchId: string): { id: string; status: strin
       AND h.sport_id = c.sport_id
       AND a.sport_id = c.sport_id
       AND (m.season_id IS NULL OR se.competition_id = m.competition_id)
-  `).get(matchId) as { id: string; status: string } | undefined;
+  `).get(matchId) as { id: string; status: string; startsAt: string | null } | undefined;
   if (!row) {
     const exists = getDatabase().prepare("SELECT id FROM matches WHERE id = ?").get(matchId);
     if (!exists) {
@@ -250,7 +258,7 @@ function persistManualScoreChange(matchId: string, input: ManualScoreInput, oper
         }
         nextHomeScore = normalizeScoreValue(input.homeScore ?? nextHomeScore, "homeScore");
         nextAwayScore = normalizeScoreValue(input.awayScore ?? nextAwayScore, "awayScore");
-        nextStatus = "live";
+        nextStatus = fixture.status === "ended" || (fixture.startsAt && Date.parse(fixture.startsAt) < Date.now()) ? "paused" : "live";
         action = "score_updated";
         break;
       case "update":
@@ -313,7 +321,7 @@ function persistManualScoreChange(matchId: string, input: ManualScoreInput, oper
       `).run(crypto.randomUUID(), matchId, nextHomeScore, nextAwayScore, nextStatus, nextVersion, nextConfirmed ? 1 : 0, input.operatorId, nextConfirmedAt, now, now);
     }
 
-    if (operation === "start") db.prepare("UPDATE matches SET status='live', updated_at=? WHERE id=?").run(now, matchId);
+    if (operation === "start" && nextStatus === "live") db.prepare("UPDATE matches SET status='live', updated_at=? WHERE id=?").run(now, matchId);
 
     db.prepare(`
       INSERT INTO match_score_audit (
@@ -632,11 +640,12 @@ scoresRouter.post("/manual/:id/start", protectedRoute, requireAdmin, (request, r
     const now = new Date().toISOString();
     const db = getDatabase();
     const fixtureTime = db.prepare("SELECT starts_at AS startsAt FROM matches WHERE id=?").get(matchId) as { startsAt: string } | undefined;
-    const clockStart = fixtureTime?.startsAt && String(fixtureTime.startsAt).includes("T") ? fixtureTime.startsAt : now;
-    db.prepare(`INSERT OR IGNORE INTO match_score_clock_state (match_id,phase,is_running,running_since,elapsed_seconds,version,updated_by_operator_id,created_at,updated_at) VALUES (?,'first_half',1,?,0,1,?,?,?)`)
-      .run(matchId, clockStart, input.operatorId, now, now);
+    const historical = state.status === "paused";
+    const clockStart = historical ? now : fixtureTime?.startsAt && String(fixtureTime.startsAt).includes("T") ? fixtureTime.startsAt : now;
+    db.prepare(`INSERT OR IGNORE INTO match_score_clock_state (match_id,phase,is_running,running_since,elapsed_seconds,version,updated_by_operator_id,created_at,updated_at) VALUES (?,?,?,?,0,1,?,?,?)`)
+      .run(matchId, historical ? "paused" : "first_half", historical ? 0 : 1, historical ? null : clockStart, input.operatorId, now, now);
     db.prepare(`INSERT INTO match_score_clock_audit (id,match_id,action,operator_id,previous_state,new_state,created_at) VALUES (?,?,?,?,?,?,?)`)
-      .run(crypto.randomUUID(), matchId, "start_first_half", input.operatorId, null, JSON.stringify({ phase: "first_half", running: true, runningSince: clockStart, elapsedSeconds: 0 }), now);
+      .run(crypto.randomUUID(), matchId, historical ? "record_historical_fixture" : "start_first_half", input.operatorId, null, JSON.stringify({ phase: historical ? "paused" : "first_half", running: !historical, runningSince: historical ? null : clockStart, elapsedSeconds: 0 }), now);
     return state;
   });
 });
@@ -675,7 +684,7 @@ scoresRouter.post("/manual/:id/clock", protectedRoute, requireAdmin, (request: A
       return;
     }
     const clock = recordClockAction(id, request.operator!.id, body.action, body.version, body.minutes);
-    if (["pause", "resume", "halftime", "start_second_half", "end"].includes(body.action)) {
+    if (["pause", "resume", "halftime", "start_second_half", "end", "correct_elapsed"].includes(body.action)) {
       const score = readManualScoreState(id);
       if (score) ScoreService.notifyManualScoreUpdate(id, score.version);
     }

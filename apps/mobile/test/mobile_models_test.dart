@@ -42,7 +42,8 @@ defaultFixture() => <String, dynamic>{
       'competition': {
         'id': 'competition-1',
         'name': 'Bundesliga',
-        'slug': 'bundesliga'
+        'slug': 'bundesliga',
+        'hostId': 'host-1'
       },
       'season': {
         'id': 'season-1',
@@ -94,6 +95,19 @@ void main() {
     expect(fixture.id, 'match-1');
     expect(fixture.score, isNull);
     expect(fixture.scoreLabel, 'scheduled');
+  });
+
+  test('keeps ended manual fixtures visible as full-time results with host identity', () {
+    final fixture = MobileFixture.fromJson({
+      ...defaultFixture(),
+      'status': 'ended',
+      'score': {'home': 2, 'away': 1},
+      'liveState': {'isLive': false, 'status': 'PAUSED'},
+    });
+    expect(fixture.status, 'ended');
+    expect(fixture.scoreLabel, '2 - 1');
+    expect(fixture.liveStatusLabel, 'FULL TIME');
+    expect(fixture.competition.hostId, 'host-1');
   });
 
   test('preserves fixture and stream IDs', () {

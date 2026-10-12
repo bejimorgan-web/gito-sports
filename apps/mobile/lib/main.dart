@@ -1793,12 +1793,18 @@ class _LiveScoresScreenState extends State<LiveScoresScreen> {
   final _fixtures = <MobileFixture>[];
   final _publishedPublications = <MobilePublishedPublication>[];
   List<MobileSport> _sports = const <MobileSport>[];
+  List<MobileHost> _hosts = const <MobileHost>[];
+  List<MobileCompetition> _competitions = const <MobileCompetition>[];
   String? _selectedSportId;
+  String? _selectedHostId;
+  String? _selectedCompetitionId;
   DateTime _selectedDate = DateTime.now();
-  bool _following = true;
+  bool _followsCurrentDate = true;
+  bool _following = false;
   Timer? _refreshTimer;
   FeedConnectionState _connectionState = FeedConnectionState.reconnecting;
   bool _firstLoad = true;
+  String? _loadedScoreFilterKey;
 
   @override
   void initState() {
@@ -1818,11 +1824,19 @@ class _LiveScoresScreenState extends State<LiveScoresScreen> {
     debugPrint('[MobileDebug] _refreshScores START');
     try {
       final sports = await _mobileApi.getSports();
-      final selectedSportId =
-          _selectedSportId ?? (sports.isNotEmpty ? sports.first.id : null);
-      final following = await resolveMobileFollowingIds(_mobileApi);
-      final day = DateTime.utc(
-          _selectedDate.year, _selectedDate.month, _selectedDate.day);
+      final selectedSportId = _selectedSportId;
+      final today = DateTime.now();
+      final selectedDate = _followsCurrentDate ? today : _selectedDate;
+      if (_followsCurrentDate && !_isSameDay(_selectedDate, today) && mounted) {
+        setState(() => _selectedDate = today);
+      }
+      final following = _following
+          ? await resolveMobileFollowingIds(_mobileApi)
+          : const MobileFollowingIds(
+              sports: <String>[], competitions: <String>[], teams: <String>[]);
+      final day = DateTime(selectedDate.year, selectedDate.month, selectedDate.day);
+      final nextDay = day.add(const Duration(days: 1));
+      unawaited(_loadScoreFilters(selectedSportId, _selectedHostId));
       final fixturesFuture = () async {
         debugPrint('[MobileDebug] getFixtures START');
         final fixtures = await _mobileApi.getFixtures(
@@ -1832,8 +1846,8 @@ class _LiveScoresScreenState extends State<LiveScoresScreen> {
           teamIds: _following ? following.teams : const <String>[],
           competitionIds:
               _following ? following.competitions : const <String>[],
-          from: day.toIso8601String(),
-          to: day.add(const Duration(days: 1)).toIso8601String(),
+          from: day.toUtc().toIso8601String(),
+          to: nextDay.toUtc().toIso8601String(),
         );
         debugPrint(
             '[MobileDebug] getFixtures SUCCESS count=${fixtures.length}');
@@ -1888,6 +1902,46 @@ class _LiveScoresScreenState extends State<LiveScoresScreen> {
         _firstLoad = false;
       });
     }
+  }
+
+  Future<void> _loadScoreFilters(String? sportId, String? hostId) async {
+    final key = '${sportId ?? 'all'}|${hostId ?? 'all'}';
+    if (_loadedScoreFilterKey == key) return;
+    _loadedScoreFilterKey = key;
+    try {
+      final values = await Future.wait([
+        if (sportId == null)
+          Future.value(const <MobileHost>[])
+        else
+          _mobileApi.getHosts(sportId: sportId),
+        _mobileApi.getCompetitions(sportId: sportId, hostId: hostId),
+      ]);
+      if (!mounted || sportId != _selectedSportId || hostId != _selectedHostId) return;
+      setState(() {
+        _hosts = values[0] as List<MobileHost>;
+        _competitions = values[1] as List<MobileCompetition>;
+      });
+    } catch (error) {
+      _loadedScoreFilterKey = null;
+      debugPrint('[MobileDebug] score filter loading failed: $error');
+    }
+  }
+
+  Future<void> _chooseScoreDate() async {
+    final today = DateTime.now();
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(today.year - 10),
+      lastDate: DateTime(today.year + 5),
+      helpText: 'Choose fixture date',
+    );
+    if (selected == null || !mounted) return;
+    setState(() {
+      _selectedDate = selected;
+      _followsCurrentDate = _isSameDay(selected, today);
+    });
+    unawaited(_refreshScores());
   }
 
   @override
@@ -1946,19 +2000,38 @@ class _LiveScoresScreenState extends State<LiveScoresScreen> {
                       const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
                   scrollDirection: Axis.horizontal,
                   child: Row(
-                    children: _sports
-                        .map((sport) => Padding(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: ChoiceChip(
+                          label: const Text('All sports'),
+                          selected: _selectedSportId == null,
+                          onSelected: (_) {
+                            setState(() {
+                              _selectedSportId = null;
+                              _selectedHostId = null;
+                              _selectedCompetitionId = null;
+                            });
+                            unawaited(_refreshScores());
+                          },
+                        ),
+                      ),
+                      ..._sports.map((sport) => Padding(
                               padding: const EdgeInsets.only(right: 8),
                               child: ChoiceChip(
                                 label: Text(sport.name),
                                 selected: sport.id == _selectedSportId,
                                 onSelected: (_) {
-                                  setState(() => _selectedSportId = sport.id);
+                                  setState(() {
+                                    _selectedSportId = sport.id;
+                                    _selectedHostId = null;
+                                    _selectedCompetitionId = null;
+                                  });
                                   unawaited(_refreshScores());
                                 },
                               ),
                             ))
-                        .toList(),
+                    ],
                   ),
                 ),
               ),
@@ -1969,8 +2042,7 @@ class _LiveScoresScreenState extends State<LiveScoresScreen> {
                   scrollDirection: Axis.horizontal,
                   child: Row(
                     children: List.generate(3, (index) {
-                      final date =
-                          DateTime.now().add(Duration(days: index - 1));
+                      final date = DateTime.now().add(Duration(days: index - 1));
                       return Padding(
                         padding: const EdgeInsets.only(right: 8),
                         child: ChoiceChip(
@@ -1981,13 +2053,73 @@ class _LiveScoresScreenState extends State<LiveScoresScreen> {
                                   : 'Tomorrow'),
                           selected: _isSameDay(date, _selectedDate),
                           onSelected: (_) {
-                            setState(() => _selectedDate = date);
+                            setState(() {
+                              _selectedDate = date;
+                              _followsCurrentDate = index == 1;
+                            });
                             unawaited(_refreshScores());
                           },
                         ),
                       );
                     }),
                   ),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  child: Row(children: [
+                    Text(
+                      '${_selectedDate.day.toString().padLeft(2, '0')}/${_selectedDate.month.toString().padLeft(2, '0')}/${_selectedDate.year}',
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                    const Spacer(),
+                    TextButton.icon(
+                      onPressed: _chooseScoreDate,
+                      icon: const Icon(Icons.calendar_month_outlined),
+                      label: const Text('Choose date'),
+                    ),
+                  ]),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 2),
+                  child: Row(children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String?>(
+                        key: ValueKey('live-score-host-$_selectedSportId-$_selectedHostId'),
+                        initialValue: _selectedHostId,
+                        isExpanded: true,
+                        decoration: const InputDecoration(labelText: 'Host', isDense: true),
+                        items: [
+                          const DropdownMenuItem<String?>(value: null, child: Text('All hosts')),
+                          ..._hosts.map((host) => DropdownMenuItem<String?>(value: host.id, child: Text(host.name, overflow: TextOverflow.ellipsis))),
+                        ],
+                        onChanged: (value) {
+                          setState(() { _selectedHostId = value; _selectedCompetitionId = null; });
+                          unawaited(_refreshScores());
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: DropdownButtonFormField<String?>(
+                        key: ValueKey('live-score-competition-$_selectedSportId-$_selectedHostId-$_selectedCompetitionId'),
+                        initialValue: _selectedCompetitionId,
+                        isExpanded: true,
+                        decoration: const InputDecoration(labelText: 'Competition', isDense: true),
+                        items: [
+                          const DropdownMenuItem<String?>(value: null, child: Text('All competitions')),
+                          ..._competitions.map((competition) => DropdownMenuItem<String?>(value: competition.id, child: Text(competition.name, overflow: TextOverflow.ellipsis))),
+                        ],
+                        onChanged: (value) {
+                          setState(() => _selectedCompetitionId = value);
+                          unawaited(_refreshScores());
+                        },
+                      ),
+                    ),
+                  ]),
                 ),
               ),
               SliverToBoxAdapter(
@@ -2020,7 +2152,7 @@ class _LiveScoresScreenState extends State<LiveScoresScreen> {
                   hasScrollBody: false,
                   child: Center(child: CircularProgressIndicator()),
                 )
-              else if (_fixtures.isEmpty)
+              else if (_visibleFixtures.isEmpty)
                 const SliverFillRemaining(
                   hasScrollBody: false,
                   child: Center(
@@ -2064,10 +2196,16 @@ class _LiveScoresScreenState extends State<LiveScoresScreen> {
       left.month == right.month &&
       left.day == right.day;
 
+  List<MobileFixture> get _visibleFixtures => _fixtures.where((fixture) {
+        if (_selectedHostId != null && fixture.competition.hostId != _selectedHostId) return false;
+        if (_selectedCompetitionId != null && fixture.competition.id != _selectedCompetitionId) return false;
+        return true;
+      }).toList();
+
   List<_FixtureGroupEntry> get _groupedFixtures {
     final entries = <_FixtureGroupEntry>[];
     String? current;
-    for (final fixture in _fixtures) {
+    for (final fixture in _visibleFixtures) {
       final competitionName = fixture.competition.name;
       if (competitionName != current) {
         current = competitionName;

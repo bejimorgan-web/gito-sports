@@ -31,7 +31,7 @@ type ScoreSourceMode = { mode: "manual" | "api"; apiConfigured: boolean; provide
 type ScoreClock = { matchId: string; phase: string; running: boolean; runningSince: string | null; elapsedSeconds: number; firstHalfAddedMinutes: number | null; secondHalfAddedMinutes: number | null; version: number; updatedAt?: string; startsAt?: string | null };
 
 const pageSize = 100;
-const startableFixtureStatuses = new Set(["scheduled", "approved", "published"]);
+const startableFixtureStatuses = new Set(["scheduled", "approved", "published", "ended"]);
 
 function describeScoreError(error: unknown): string {
   if (error instanceof ApiRequestError) {
@@ -63,6 +63,7 @@ export function ManualScoreControlScreen({ accessToken, isAdmin, initialFixtureI
   const [clock, setClock] = useState<ScoreClock | null>(null);
   const [clockNow, setClockNow] = useState(Date.now());
   const [addedMinutes, setAddedMinutes] = useState(3);
+  const [correctedDurationMinutes, setCorrectedDurationMinutes] = useState<number | null>(null);
   const [sourceMode, setSourceMode] = useState<ScoreSourceMode>({ mode: "manual", apiConfigured: false, provider: null });
   const [sourceModeAvailable, setSourceModeAvailable] = useState(false);
   const [sourceModePending, setSourceModePending] = useState(false);
@@ -135,7 +136,7 @@ export function ManualScoreControlScreen({ accessToken, isAdmin, initialFixtureI
   }, [accessToken, isAdmin, sourceMode.mode, sourceModePending]);
 
   const loadFixtures = useCallback(async (nextOffset: number, append: boolean) => {
-    if (!sportId || !competitionId || !isAdmin) {
+    if (!sportId || !isAdmin) {
       setFixtures([]);
       setHasMoreFixtures(false);
       return;
@@ -145,7 +146,7 @@ export function ManualScoreControlScreen({ accessToken, isAdmin, initialFixtureI
     try {
       const from = new Date(`${matchDate}T00:00:00`).toISOString();
       const to = new Date(`${matchDate}T23:59:59.999`).toISOString();
-      const rows = await apiClient.listFixtures({ sportId, competitionId, from, to, limit: pageSize, offset: nextOffset }) as Fixture[];
+      const rows = await apiClient.listFixtures({ sportId, ...(hostId ? { hostId } : {}), ...(competitionId ? { competitionId } : {}), from, to, limit: pageSize, offset: nextOffset }) as Fixture[];
       setFixtures((current) => append ? [...current, ...rows] : rows);
       setOffset(nextOffset);
       setHasMoreFixtures(rows.length === pageSize);
@@ -154,15 +155,15 @@ export function ManualScoreControlScreen({ accessToken, isAdmin, initialFixtureI
     } finally {
       setLoadingCatalog(false);
     }
-  }, [competitionId, isAdmin, matchDate, sportId]);
+  }, [competitionId, hostId, isAdmin, matchDate, sportId]);
 
   useEffect(() => {
     if (initialFixtureId) return;
     setFixtureId("");
     setScoreState(null);
-    if (sportId && competitionId) void loadFixtures(0, false);
+    if (sportId) void loadFixtures(0, false);
     else setFixtures([]);
-  }, [competitionId, loadFixtures, matchDate, sportId, initialFixtureId]);
+  }, [competitionId, hostId, loadFixtures, matchDate, sportId, initialFixtureId]);
 
   const refreshScore = useCallback(async (id = fixtureId) => {
     if (!id || !accessToken) return null;
@@ -173,7 +174,7 @@ export function ManualScoreControlScreen({ accessToken, isAdmin, initialFixtureI
       setScoreState(state);
       setHomeScore(state.homeScore);
       setAwayScore(state.awayScore);
-      setNextStatus("live");
+      setNextStatus(state.status === "paused" ? "paused" : "live");
       return state;
     } catch (loadError) {
       if (loadError instanceof ApiRequestError && loadError.status === 404) {
@@ -219,7 +220,7 @@ export function ManualScoreControlScreen({ accessToken, isAdmin, initialFixtureI
     setPending(true); setError(null); setNotice(null);
     try {
       const updated = await apiClient.updateManualScoreClock(fixtureId, { version: clock.version, action, ...(minutes !== undefined ? { minutes } : {}) }, accessToken) as ScoreClock;
-      setClock(updated); setNotice("Match clock updated."); await refreshScore(fixtureId);
+      setClock(updated); if (action === "correct_elapsed") setCorrectedDurationMinutes(null); setNotice(action === "correct_elapsed" ? "Recorded match duration corrected and audited." : "Match clock updated."); await refreshScore(fixtureId);
     } catch (clockError) { setError(describeScoreError(clockError)); await refreshClock(); await refreshScore(fixtureId); }
     finally { setPending(false); }
   }, [accessToken, clock, fixtureId, pending, refreshClock, refreshScore, sourceMode.mode]);
@@ -284,7 +285,7 @@ export function ManualScoreControlScreen({ accessToken, isAdmin, initialFixtureI
 
   const effectiveStatus = scoreState?.status ?? selectedFixture?.status ?? "scheduled";
   const kickoffReached = Boolean(selectedFixture?.startsAt.includes("T") && Date.parse(selectedFixture.startsAt) <= clockNow);
-  const canStart = Boolean(sourceMode.mode === "manual" && selectedFixture && !scoreState && !kickoffReached && startableFixtureStatuses.has(selectedFixture.status));
+  const canStart = Boolean(sourceMode.mode === "manual" && selectedFixture && !scoreState && startableFixtureStatuses.has(selectedFixture.status));
   const canUpdate = Boolean(sourceMode.mode === "manual" && scoreState && !scoreState.finalResultConfirmed && ["live", "paused"].includes(scoreState.status));
   const canConfirm = Boolean(sourceMode.mode === "manual" && scoreState && scoreState.status === "ended" && !scoreState.finalResultConfirmed);
   const canCorrectOrReopen = Boolean(sourceMode.mode === "manual" && scoreState?.finalResultConfirmed);
@@ -304,7 +305,7 @@ export function ManualScoreControlScreen({ accessToken, isAdmin, initialFixtureI
         <div className="score-filter-row"><label>Match date<input type="date" value={matchDate} onChange={(event) => setMatchDate(event.target.value)} /></label><label>Sport<select value={sportId} onChange={(event) => { setSportId(event.target.value); setHostId(""); setCompetitionId(""); }}><option value="">Choose sport</option>{sports.map((sport) => <option key={sport.id} value={sport.id}>{sport.name}</option>)}</select></label><label>Host<select value={hostId} disabled={!sportId} onChange={(event) => { setHostId(event.target.value); setCompetitionId(""); }}><option value="">All hosts</option>{hosts.map((host) => <option key={host.id} value={host.id}>{host.name}</option>)}</select></label><label>Competition<select value={competitionId} disabled={!sportId} onChange={(event) => setCompetitionId(event.target.value)}><option value="">Choose competition</option>{filteredCompetitions.map((competition) => <option key={competition.id} value={competition.id}>{competition.name}</option>)}</select></label></div>
       </section>
       <section className="score-control-panel"><div className="score-panel-heading"><div><span className="card-label">{matchDate}</span><h3>Fixtures</h3></div><span>{fixtures.length} listed</span></div>
-        {!sportId || !competitionId ? <p className="field-note">Select a sport and competition to show this day’s matches. Use Host to narrow the competition list.</p> : loadingCatalog ? <p role="status">Loading matchday fixtures…</p> : fixtures.length ? <div className="score-fixture-list">{fixtures.map((fixture) => { const kickoffReached = fixture.startsAt.includes("T") && Date.parse(fixture.startsAt) <= clockNow && startableFixtureStatuses.has(fixture.status); return <article className="score-fixture-row" key={fixture.id}><div className="score-fixture-row-main"><strong className="score-fixture-teams"><span className="score-team-name"><TeamCrest name={fixture.homeTeam.name} logoUrl={fixture.homeTeam.logoUrl} />{fixture.homeTeam.name}</span><span className="score-vs">vs</span><span className="score-team-name"><TeamCrest name={fixture.awayTeam.name} logoUrl={fixture.awayTeam.logoUrl} />{fixture.awayTeam.name}</span></strong><small>{fixture.competition.name} · {formatKickoff(fixture.startsAt)}</small>{kickoffReached ? <span className="score-kickoff-alert" role="status">Kickoff reached · backend starts match automatically</span> : null}</div><span className={`score-status-chip status-${fixture.status}`}>{fixture.status}</span><button className="button-primary" type="button" onClick={() => openFixture(fixture.id)}>Open match desk</button></article>; })}</div> : <p className="field-note">No fixtures are scheduled for this sport, competition, and date.</p>}
+        {!sportId ? <p className="field-note">Select a sport to show all of its fixtures for this date. Host and competition can narrow the list.</p> : loadingCatalog ? <p role="status">Loading matchday fixtures…</p> : fixtures.length ? <div className="score-fixture-list">{fixtures.map((fixture) => { const kickoffReached = fixture.startsAt.includes("T") && Date.parse(fixture.startsAt) <= clockNow && startableFixtureStatuses.has(fixture.status); return <article className="score-fixture-row" key={fixture.id}><div className="score-fixture-row-main"><strong className="score-fixture-teams"><span className="score-team-name"><TeamCrest name={fixture.homeTeam.name} logoUrl={fixture.homeTeam.logoUrl} />{fixture.homeTeam.name}</span><span className="score-vs">vs</span><span className="score-team-name"><TeamCrest name={fixture.awayTeam.name} logoUrl={fixture.awayTeam.logoUrl} />{fixture.awayTeam.name}</span></strong><small>{fixture.competition.name} · {formatKickoff(fixture.startsAt)}</small>{kickoffReached ? <span className="score-kickoff-alert" role="status">Kickoff reached · backend starts match automatically</span> : null}</div><span className={`score-status-chip status-${fixture.status}`}>{fixture.status}</span><button className="button-primary" type="button" onClick={() => openFixture(fixture.id)}>Open match desk</button></article>; })}</div> : <p className="field-note">No fixtures are scheduled for this sport and selected filters on this date.</p>}
         {hasMoreFixtures ? <button className="button-quiet" type="button" disabled={loadingCatalog} onClick={() => void loadFixtures(offset + pageSize, true)}>Load more fixtures</button> : null}
       </section>
       {error ? <p className="score-control-error" role="alert">{error}</p> : null}
@@ -343,7 +344,7 @@ export function ManualScoreControlScreen({ accessToken, isAdmin, initialFixtureI
           {sourceMode.mode === "api" ? <div className="score-control-info" role="status"><strong>API source is active</strong><span>Manual score controls are disabled until you switch the source back to Manual.</span></div> : !selectedFixture ? <p className="field-note">Loading the canonical fixture…</p> : !supportedSport ? <div className="score-control-info" role="status"><strong>Read only for this sport</strong><span>The existing manual score API currently validates football and soccer fixtures only. No score controls are shown for other sports.</span></div> : loadingScore ? <p role="status">Loading authoritative score state…</p> : <>
             {selectedFixture && !clock && !scoreState && selectedFixture.startsAt ? <div className="score-clock-kickoff"><span>Scheduled kickoff</span><strong>{formatKickoff(selectedFixture.startsAt)}</strong><small>{Date.parse(selectedFixture.startsAt) > clockNow ? `Kickoff in ${Math.ceil((Date.parse(selectedFixture.startsAt) - clockNow) / 60000)} minutes` : "Kickoff time reached · start the clock when play begins"}</small></div> : null}
             {scoreState && !clock && ["live", "paused"].includes(scoreState.status) ? <div className="score-control-info"><strong>Match clock not initialized</strong><span>Start a clock for this existing live match. Its canonical scheduled kickoff time is used when available.</span><button className="button-primary" type="button" disabled={pending} onClick={async () => { setPending(true); try { setClock(await apiClient.updateManualScoreClock(fixtureId, { version: 0, action: "initialize" }, accessToken) as ScoreClock); } catch (clockError) { setError(describeScoreError(clockError)); } finally { setPending(false); } }}>Initialize match clock</button></div> : null}
-            {clock ? <section className="score-clock-panel" aria-label="Match clock"><div className="score-clock-face"><span>{clock.phase.replaceAll("_", " ")}</span><strong>{clockLabel}</strong><small>{clock.phase === "halftime" ? `15-minute halftime break · ${halftimeBreakLabel ?? "15:00"} remaining` : `${clock.running ? "Clock running" : "Clock stopped"} · clock version ${clock.version}`}</small></div><div className="score-clock-actions">
+              {clock ? <section className="score-clock-panel" aria-label="Match clock"><div className="score-clock-face"><span>{clock.phase.replaceAll("_", " ")}</span><strong>{clockLabel}</strong><small>{clock.phase === "halftime" ? `15-minute halftime break · ${halftimeBreakLabel ?? "15:00"} remaining` : `${clock.running ? "Clock running" : "Clock stopped"} · clock version ${clock.version}`}</small></div><div className="score-clock-actions">
               {clock.running ? <button className="button-secondary" type="button" disabled={pending} onClick={() => void runClockAction("pause")}>Pause clock</button> : null}
               {!clock.running && ["first_half", "second_half", "paused"].includes(clock.phase) ? <button className="button-primary" type="button" disabled={pending} onClick={() => void runClockAction("resume")}>Resume clock</button> : null}
               {clock.phase === "halftime" ? <button className="button-primary" type="button" disabled={pending} onClick={() => void runClockAction("start_second_half")}>Start second half</button> : null}
@@ -359,13 +360,14 @@ export function ManualScoreControlScreen({ accessToken, isAdmin, initialFixtureI
               <label><span className="score-team-name"><TeamCrest name={selectedFixture.awayTeam.name} logoUrl={selectedFixture.awayTeam.logoUrl} />{selectedFixture.awayTeam.name}</span><input aria-label="Away score" type="number" min="0" step="1" value={awayScore} disabled={pending || (!canStart && !canUpdate && !canCorrectOrReopen)} onChange={(event) => setAwayScore(event.target.value === "" ? 0 : Number(event.target.value))} /></label>
             </div>
             <div className="score-state-meta"><span>Manual state</span><strong>{scoreState ? scoreState.status : "Not started"}</strong><span>Version</span><strong>{scoreState?.version ?? 0}</strong><span>Final result</span><strong>{scoreState?.finalResultConfirmed ? "Confirmed" : "Not confirmed"}</strong><span>Updated</span><strong>{scoreState?.updatedAt ? formatKickoff(scoreState.updatedAt) : "—"}</strong></div>
-            {scoreState && ["live", "paused"].includes(scoreState.status) && !scoreState.finalResultConfirmed && sourceMode.mode === "manual" ? <ManualScoreEventsPanel matchId={fixtureId} version={scoreState.version} homeTeam={selectedFixture.homeTeam} awayTeam={selectedFixture.awayTeam} accessToken={accessToken} onScoreChanged={() => { void refreshScore(fixtureId); }} /> : null}
-            {canStart ? <button className="button-primary" type="button" disabled={pending || !scoreValuesValid} onClick={() => void mutate(() => apiClient.startManualScore(fixtureId, { version: 0, homeScore, awayScore }, accessToken), "Fixture started. Server state refreshed.")}>{pending ? "Saving…" : "Start fixture"}</button> : null}
+            {clock?.phase === "ended" && scoreState?.status === "ended" && !scoreState.finalResultConfirmed && sourceMode.mode === "manual" ? <div className="score-clock-alert"><strong>Correct recorded duration</strong><span>Available for unconfirmed full-time results. Changes are versioned and written to the clock audit history.</span><label>Match duration in minutes<input aria-label="Corrected match duration in minutes" type="number" min="0" max="240" step="1" value={correctedDurationMinutes ?? Math.round(clock.elapsedSeconds / 60)} disabled={pending} onChange={(event) => setCorrectedDurationMinutes(event.target.value === "" ? 0 : Number(event.target.value))} /></label><button className="button-primary" type="button" disabled={pending || !Number.isSafeInteger(correctedDurationMinutes ?? Math.round(clock.elapsedSeconds / 60)) || (correctedDurationMinutes ?? Math.round(clock.elapsedSeconds / 60)) < 0 || (correctedDurationMinutes ?? Math.round(clock.elapsedSeconds / 60)) > 240} onClick={() => void runClockAction("correct_elapsed", correctedDurationMinutes ?? Math.round(clock.elapsedSeconds / 60))}>Save corrected duration</button></div> : null}
+            {scoreState && ["live", "paused", "ended"].includes(scoreState.status) && !scoreState.finalResultConfirmed && sourceMode.mode === "manual" ? <ManualScoreEventsPanel matchId={fixtureId} version={scoreState.version} homeTeam={selectedFixture.homeTeam} awayTeam={selectedFixture.awayTeam} accessToken={accessToken} onScoreChanged={() => { void refreshScore(fixtureId); }} /> : null}
+            {canStart ? <button className="button-primary" type="button" disabled={pending || !scoreValuesValid} onClick={() => void mutate(() => apiClient.startManualScore(fixtureId, { version: 0, homeScore, awayScore }, accessToken), kickoffReached ? "Past fixture recorded. Add its events, then end and confirm the result." : "Fixture started. Server state refreshed.")}>{pending ? "Saving…" : kickoffReached ? "Record past fixture" : "Start fixture"}</button> : null}
             {canUpdate ? <div className="score-update-actions"><label>Next status<select value={nextStatus} disabled={pending} onChange={(event) => setNextStatus(event.target.value)}><option value="live">Live / resume</option><option value="paused">Paused</option><option value="ended">Ended</option></select></label><button className="button-primary" type="button" disabled={pending || !scoreValuesValid} onClick={() => void mutate(() => apiClient.updateManualScore(fixtureId, { version: scoreState!.version, homeScore, awayScore, status: nextStatus }, accessToken), "Score updated. Server state refreshed.")}>{pending ? "Saving…" : "Save score and status"}</button></div> : null}
             {canConfirm ? <button className="button-primary" type="button" disabled={pending} onClick={() => { if (window.confirm("Confirm this final result? Ordinary score edits will be locked.")) void mutate(() => apiClient.confirmManualScore(fixtureId, { version: scoreState!.version }, accessToken), "Final result confirmed by the server."); }}>{pending ? "Saving…" : "Confirm final result"}</button> : null}
             {canCorrectOrReopen ? <div className="score-final-actions"><label>Reason<textarea value={reason} maxLength={500} disabled={pending} onChange={(event) => setReason(event.target.value)} placeholder="Required for correction or reopening" /></label><div><button type="button" className="button-secondary" disabled={pending || !scoreValuesValid || !reason.trim()} onClick={() => { if (window.confirm("Correct this confirmed result? The reason and previous score will be audited.")) void mutate(() => apiClient.correctManualScore(fixtureId, { version: scoreState!.version, homeScore, awayScore, reason: reason.trim() }, accessToken), "Confirmed result corrected and refreshed."); }}>{pending ? "Saving…" : "Correct result"}</button><button type="button" className="button-danger" disabled={pending || !reason.trim()} onClick={() => { if (window.confirm("Reopen this confirmed result? It will no longer be a confirmed final.")) void mutate(() => apiClient.reopenManualScore(fixtureId, { version: scoreState!.version, reason: reason.trim() }, accessToken), "Result reopened and refreshed."); }}>{pending ? "Saving…" : "Reopen result"}</button></div></div> : null}
             {scoreState && !scoreState.finalResultConfirmed && !["live", "paused", "ended"].includes(scoreState.status) ? <div className="score-control-info" role="status"><strong>No recovery action available</strong><span>This fixture is {scoreState.status}. Rescheduling or recovery requires a separately defined lifecycle policy; no score mutation is offered here.</span></div> : null}
-            {!scoreState && kickoffReached && selectedFixture && startableFixtureStatuses.has(selectedFixture.status) ? <div className="score-control-info" role="status"><strong>Kickoff reached · syncing automatic start</strong><span>The backend starts the manual match clock at scheduled kickoff. This desk loads the live state automatically.</span></div> : null}{!scoreState && !canStart && !kickoffReached ? <div className="score-control-info" role="status"><strong>Fixture cannot be started</strong><span>The canonical fixture must be scheduled, approved, or published before manual scoring can begin.</span></div> : null}
+            {!scoreState && kickoffReached && selectedFixture && startableFixtureStatuses.has(selectedFixture.status) ? <div className="score-control-info" role="status"><strong>Kickoff has passed</strong><span>Starting this historical fixture records an editable paused score without starting a live clock. Add events at their original minutes, then end and confirm its result.</span></div> : null}{!scoreState && !canStart ? <div className="score-control-info" role="status"><strong>Fixture cannot be started</strong><span>The canonical fixture must be scheduled, approved, published, or ended without a manual score before scoring can begin.</span></div> : null}
           </>}
         </section>
       </div>

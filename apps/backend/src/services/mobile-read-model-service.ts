@@ -27,7 +27,7 @@ export type MobileFixture = {
   status: string;
   venue: string | null;
   venueImageUrl: string | null;
-  competition: { id: string; name: string; slug: string; logoUrl: string | null };
+  competition: { id: string; name: string; slug: string; logoUrl: string | null; hostId?: string };
   season: { id: string; name: string } | null;
   sport: { id: string; name: string } | null;
   country: { id: string; name: string } | null;
@@ -163,7 +163,7 @@ export function mapMobileFixture(fixture: any, suppliedSnapshot?: ScoreMatchSumm
     status: fixtureStatus,
     venue: fixture.venueName ?? null,
     venueImageUrl: fixture.venueImageUrl ?? (!fixture.venueName || fixture.venueName === home.homeStadiumName ? home.homeStadiumPhotoUrl : null) ?? null,
-    competition: { id: fixture.competition.id, name: fixture.competition.name, slug: fixture.competition.slug, logoUrl: fixture.competition.logoUrl ?? null },
+    competition: { id: fixture.competition.id, name: fixture.competition.name, slug: fixture.competition.slug, logoUrl: fixture.competition.logoUrl ?? null, ...(fixture.host?.id ? { hostId: fixture.host.id } : {}) },
     season: fixture.season ? { id: fixture.season.id, name: fixture.season.name } : null,
     sport: fixture.sport ? { id: fixture.sport.id, name: fixture.sport.name } : null,
     country: fixture.country ? { id: fixture.country.id, name: fixture.country.name } : null,
