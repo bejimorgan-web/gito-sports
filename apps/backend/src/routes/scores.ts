@@ -707,14 +707,17 @@ scoresRouter.post("/manual/:id/clock", protectedRoute, requireAdmin, (request: A
       db.exec("BEGIN IMMEDIATE;");
       try {
         const score = readManualScoreState(id);
-        if (!score || score.finalResultConfirmed || !["live", "paused"].includes(score.status)) throw scoreError("manual_score_not_started", 409, "manual_score_not_started");
+        const endedResult = score?.status === "ended";
+        if (!score || (!endedResult && (score.finalResultConfirmed || !["live", "paused"].includes(score.status)))) throw scoreError("manual_score_not_started", 409, "manual_score_not_started");
         const fixture = db.prepare("SELECT starts_at AS startsAt FROM matches WHERE id=?").get(id) as { startsAt: string } | undefined;
         const now = new Date().toISOString();
         const scheduled = fixture?.startsAt && String(fixture.startsAt).includes("T") && Date.parse(fixture.startsAt) <= Date.now() ? fixture.startsAt : now;
-        db.prepare(`INSERT INTO match_score_clock_state (match_id,phase,is_running,running_since,elapsed_seconds,version,updated_by_operator_id,created_at,updated_at) VALUES (?,'first_half',1,?,0,1,?,?,?)`)
-          .run(id, scheduled, request.operator!.id, now, now);
+        const phase = endedResult ? "ended" : "first_half";
+        const running = !endedResult;
+        db.prepare(`INSERT INTO match_score_clock_state (match_id,phase,is_running,running_since,elapsed_seconds,version,updated_by_operator_id,created_at,updated_at) VALUES (?,?,?,?,0,1,?,?,?)`)
+          .run(id, phase, running ? 1 : 0, running ? scheduled : null, request.operator!.id, now, now);
         db.prepare(`INSERT INTO match_score_clock_audit (id,match_id,action,operator_id,previous_state,new_state,created_at) VALUES (?,?,?,?,?,?,?)`)
-          .run(crypto.randomUUID(), id, "initialize_clock", request.operator!.id, null, JSON.stringify({ phase: "first_half", running: true, runningSince: scheduled }), now);
+          .run(crypto.randomUUID(), id, endedResult ? "initialize_ended_clock" : "initialize_clock", request.operator!.id, null, JSON.stringify({ phase, running, runningSince: running ? scheduled : null, elapsedSeconds: 0 }), now);
         db.exec("COMMIT;");
       } catch (error) { db.exec("ROLLBACK;"); throw error; }
       response.json({ data: readClockState(id) });

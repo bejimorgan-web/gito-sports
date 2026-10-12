@@ -505,6 +505,36 @@ test("manual score API authorization, persistence, audit, notification and read-
       assert.equal(JSON.parse(durationAudit.previous_state).elapsedSeconds, 6180);
       assert.equal(JSON.parse(durationAudit.new_state).elapsedSeconds, 99 * 60);
       assert.equal(JSON.parse(durationAudit.new_state).correctionReason, "Corrected from the official match report");
+
+      const legacyKickoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+      database.prepare(`INSERT INTO matches (id, competition_id, season_id, home_team_id, away_team_id, starts_at, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run("fixture-legacy-ended", "competition-1", "season-1", "team-home", "team-away", legacyKickoff, "scheduled", legacyKickoff, legacyKickoff);
+      const legacyStarted = await request(baseUrl, "/manual/fixture-legacy-ended/start", "POST", { version: 0, homeScore: 4, awayScore: 3 }, adminToken());
+      assert.equal(legacyStarted.status, 200);
+      const legacyEnded = await request(baseUrl, "/manual/fixture-legacy-ended/clock", "POST", { version: 1, action: "end" }, adminToken());
+      assert.equal(legacyEnded.status, 200);
+      const legacyConfirmed = await request(baseUrl, "/manual/fixture-legacy-ended/confirm", "POST", { version: 2 }, adminToken());
+      assert.equal(legacyConfirmed.status, 200);
+      database.prepare("DELETE FROM match_score_clock_state WHERE match_id=?").run("fixture-legacy-ended");
+      database.prepare("DELETE FROM match_score_clock_audit WHERE match_id=?").run("fixture-legacy-ended");
+
+      const initializedLegacyClock = await request(baseUrl, "/manual/fixture-legacy-ended/clock", "POST", { version: 0, action: "initialize" }, adminToken());
+      assert.equal(initializedLegacyClock.status, 200);
+      assert.equal(initializedLegacyClock.body.data.phase, "ended");
+      assert.equal(initializedLegacyClock.body.data.running, false);
+      const legacyDuration = await request(baseUrl, "/manual/fixture-legacy-ended/clock", "POST", {
+        version: 1, action: "correct_elapsed", minutes: 101, reason: "Reconstructed from the archived match report"
+      }, adminToken());
+      assert.equal(legacyDuration.status, 200);
+      assert.equal(legacyDuration.body.data.elapsedSeconds, 101 * 60);
+      const legacyScore = await request(baseUrl, "/manual/fixture-legacy-ended", "GET", undefined, adminToken());
+      assert.deepEqual(
+        [legacyScore.body.data.homeScore, legacyScore.body.data.awayScore, legacyScore.body.data.status, legacyScore.body.data.finalResultConfirmed],
+        [4, 3, "ended", true]
+      );
+      const legacyAudit = database.prepare("SELECT action, new_state FROM match_score_clock_audit WHERE match_id=? ORDER BY rowid").all("fixture-legacy-ended") as Array<{ action: string; new_state: string }>;
+      assert.deepEqual(legacyAudit.map((entry) => entry.action), ["initialize_ended_clock", "correct_elapsed"]);
+      assert.equal(JSON.parse(legacyAudit[1]!.new_state).correctionReason, "Reconstructed from the archived match report");
     });
 
     await t.test("records named match events, corrects event minute, and exposes timeline to score readers", async () => {
