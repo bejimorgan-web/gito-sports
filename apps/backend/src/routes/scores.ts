@@ -164,7 +164,7 @@ function recordClockAction(matchId: string, operatorId: string, action: string, 
       phase = "halftime"; running = false; runningSince = null; elapsed = Math.max(elapsed, 2700 + (firstAdded ?? 0) * 60);
     } else if (action === "start_second_half" && football && phase === "halftime") {
       phase = "second_half"; running = true; runningSince = now;
-    } else if (action === "end" && (football ? elapsed >= 5400 + ((firstAdded ?? 0) + (secondAdded ?? 0)) * 60 : running)) {
+    } else if (action === "end" && (football ? (elapsed >= 5400 + ((firstAdded ?? 0) + (secondAdded ?? 0)) * 60 || (!running && phase === "paused")) : running || (!running && phase === "paused"))) {
       phase = "ended"; running = false; runningSince = null;
     } else {
       throw scoreError("invalid_clock_transition", 409, "invalid_clock_transition");
@@ -187,6 +187,8 @@ function recordClockAction(matchId: string, operatorId: string, action: string, 
           .run(crypto.randomUUID(), matchId, "score_updated", operatorId, score.version, scoreVersion, score.homeScore, score.awayScore, score.homeScore, score.awayScore, score.status, status, 0, 0, null, JSON.stringify({ operation: `clock_${action}`, operatorId }), now);
       }
     }
+    if (action === "end") db.prepare("UPDATE matches SET status='ended', updated_at=? WHERE id=?").run(now, matchId);
+
     db.exec("COMMIT;");
     return next;
   } catch (error) { db.exec("ROLLBACK;"); throw error; }
