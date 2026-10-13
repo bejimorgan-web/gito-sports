@@ -658,7 +658,12 @@ scoresRouter.patch("/manual/:id/events/:eventId", protectedRoute, requireAdmin, 
   const body = request.body && typeof request.body === "object" && !Array.isArray(request.body) ? request.body as Record<string, unknown> : {};
   const correctionReason = typeof body.reason === "string" ? body.reason.trim() : "";
   if (!matchId || !eventId || !Number.isSafeInteger(body.minute) || Number(body.minute) < 0 || Number(body.minute) > 150
-    || body.version === undefined || (body.reason !== undefined && (typeof body.reason !== "string" || correctionReason.length > 500))) {
+    || body.version === undefined || (body.reason !== undefined && (typeof body.reason !== "string" || correctionReason.length > 500))
+    || (body.eventType !== undefined && (typeof body.eventType !== "string" || !manualMatchEventTypes.has(body.eventType)))
+    || (body.teamId !== undefined && body.teamId !== null && (typeof body.teamId !== "string" || !body.teamId))
+    || (body.playerId !== undefined && body.playerId !== null && (typeof body.playerId !== "string" || !body.playerId))
+    || (body.description !== undefined && (typeof body.description !== "string" || !body.description.trim() || body.description.trim().length > 240))
+    || (body.relatedPlayerId !== undefined && body.relatedPlayerId !== null && typeof body.relatedPlayerId !== "string")) {
     return response.status(400).json({ error: "invalid_event_payload" });
   }
   if (ScoreService.getSourceMode().mode !== "manual") return response.status(409).json({ error: "score_source_is_api" });
@@ -670,11 +675,61 @@ scoresRouter.patch("/manual/:id/events/:eventId", protectedRoute, requireAdmin, 
       || (current.finalResultConfirmed && current.status !== "ended")) throw scoreError("only a live or ended match can edit event times", 409, "invalid_match_transition");
     if (current.finalResultConfirmed && !correctionReason) throw scoreError("correction_reason_required", 400, "correction_reason_required");
     if (normalizeExpectedVersion(body.version) !== current.version) throw scoreError("stale_score_version", 409, "stale_score_version");
-    const event = db.prepare("SELECT id, minute, description FROM match_score_timeline WHERE id=? AND match_id=?").get(eventId, matchId) as { id: string; minute: number; description: string } | undefined;
+    const event = db.prepare(`SELECT id, minute, description, event_type AS eventType, team_id AS teamId,
+        player_id AS playerId, related_player_id AS relatedPlayerId
+      FROM match_score_timeline WHERE id=? AND match_id=?`).get(eventId, matchId) as {
+        id: string; minute: number; description: string; eventType: string; teamId: string | null;
+        playerId: string | null; relatedPlayerId: string | null;
+      } | undefined;
     if (!event) throw scoreError("match_event_not_found", 404, "match_event_not_found");
+    const nextEventType = (body.eventType as string | undefined) ?? event.eventType;
+    const nextTeamId = body.teamId !== undefined ? body.teamId as string | null : event.teamId;
+    const nextPlayerId = body.playerId !== undefined ? body.playerId as string | null : event.playerId;
+    const nextRelatedPlayerId = body.relatedPlayerId !== undefined ? body.relatedPlayerId as string | null : event.relatedPlayerId;
+    const editsEventDetails = body.eventType !== undefined || body.teamId !== undefined || body.playerId !== undefined
+      || body.relatedPlayerId !== undefined || body.description !== undefined;
+    let description = event.description;
+    if (nextEventType === "note" && editsEventDetails) {
+      description = typeof body.description === "string" ? body.description.trim() : event.description;
+      if (!description) throw scoreError("event_description_required", 400, "invalid_event_payload");
+    } else if (nextEventType !== "note" && editsEventDetails) {
+      const fixture = db.prepare("SELECT home_team_id AS homeTeamId, away_team_id AS awayTeamId FROM matches WHERE id=?").get(matchId) as { homeTeamId: string; awayTeamId: string } | undefined;
+      if (!fixture) throw scoreError("match_not_found", 404, "match_not_found");
+      if (!nextTeamId || ![fixture.homeTeamId, fixture.awayTeamId].includes(nextTeamId)) throw scoreError("event_team_not_in_fixture", 422, "event_team_not_in_fixture");
+      if (!nextPlayerId) throw scoreError("event_player_required", 400, "invalid_event_payload");
+      const findRosterPlayer = (playerId: string) => db.prepare(`
+        SELECT p.id, COALESCE(NULLIF(p.display_name, ''), p.first_name || ' ' || p.last_name) AS name
+        FROM players p JOIN squad_players member ON member.player_id=p.id AND member.status='active'
+        JOIN season_squads squad ON squad.id=member.squad_id AND squad.team_id=p.team_id AND squad.status='active'
+        JOIN matches m ON m.id=?
+        WHERE p.id=? AND p.team_id=? AND p.status='active'
+          AND (squad.competition_id IS NULL OR squad.competition_id=m.competition_id)
+          AND (m.season_id IS NULL OR squad.season_id IS NULL OR squad.season_id=m.season_id)
+        LIMIT 1
+      `).get(matchId, playerId, nextTeamId) as { id: string; name: string } | undefined;
+      const player = findRosterPlayer(nextPlayerId);
+      if (!player) throw scoreError("event_player_not_in_fixture_squad", 422, "event_player_not_in_fixture_squad");
+      const relatedPlayer = nextRelatedPlayerId ? findRosterPlayer(nextRelatedPlayerId) : undefined;
+      if (nextRelatedPlayerId && !relatedPlayer) throw scoreError("related_event_player_not_in_fixture_squad", 422, "related_event_player_not_in_fixture_squad");
+      if (relatedPlayer?.id === player.id) throw scoreError("event_players_must_be_different", 422, "event_players_must_be_different");
+      if (relatedPlayer && !["goal", "substitution"].includes(nextEventType)) throw scoreError("related_player_not_supported_for_event", 422, "invalid_event_payload");
+      const labels: Record<string, string> = {
+        goal: "Goal", yellow_card: "Yellow card", red_card: "Red card",
+        var_yellow_card: "Yellow card after VAR review", var_red_card: "Red card after VAR review",
+        penalty_scored: "Penalty scored", penalty_missed: "Penalty missed",
+        var_penalty_scored: "Penalty awarded by VAR · Goal", var_penalty_missed: "Penalty awarded by VAR · Missed",
+        var_goal_disallowed: "Goal disallowed by VAR", injury: "Injury"
+      };
+      description = nextEventType === "goal" && relatedPlayer
+        ? `${player.name} · Assist: ${relatedPlayer.name}`
+        : nextEventType === "substitution" && relatedPlayer
+          ? `${player.name} off · ${relatedPlayer.name} on`
+          : `${player.name} · ${labels[nextEventType] ?? nextEventType}`;
+    }
     const updatedAt = new Date().toISOString();
     const nextVersion = current.version + 1;
-    db.prepare("UPDATE match_score_timeline SET minute=?, updated_at=? WHERE id=? AND match_id=?").run(body.minute, updatedAt, eventId, matchId);
+    db.prepare(`UPDATE match_score_timeline SET minute=?, description=?, event_type=?, team_id=?, player_id=?, related_player_id=?, updated_at=?
+      WHERE id=? AND match_id=?`).run(body.minute, description, nextEventType, nextTeamId, nextPlayerId, nextRelatedPlayerId, updatedAt, eventId, matchId);
     db.prepare("UPDATE match_score_state SET version=?, updated_by_operator_id=?, updated_at=? WHERE match_id=?")
       .run(nextVersion, request.operator!.id, updatedAt, matchId);
     db.prepare(`INSERT INTO match_score_audit (id,match_id,action,operator_id,previous_version,new_version,
@@ -684,12 +739,68 @@ scoresRouter.patch("/manual/:id/events/:eventId", protectedRoute, requireAdmin, 
       .run(crypto.randomUUID(), matchId, "score_updated", request.operator!.id, current.version, nextVersion,
         current.homeScore, current.awayScore, current.homeScore, current.awayScore, current.status, current.status,
         current.finalResultConfirmed ? 1 : 0, current.finalResultConfirmed ? 1 : 0, correctionReason || null,
-        JSON.stringify({ operation: "correct_match_event_time", eventId, previousMinute: event.minute, newMinute: body.minute }), updatedAt);
+        JSON.stringify({ operation: "edit_match_event", eventId,
+          previous: { minute: event.minute, description: event.description, eventType: event.eventType, teamId: event.teamId, playerId: event.playerId, relatedPlayerId: event.relatedPlayerId },
+          next: { minute: body.minute, description, eventType: nextEventType, teamId: nextTeamId, playerId: nextPlayerId, relatedPlayerId: nextRelatedPlayerId } }), updatedAt);
     db.exec("COMMIT;");
     const updatedState = readManualScoreState(matchId)!;
     ScoreService.clearCache("scores:");
     ScoreService.notifyManualScoreUpdate(matchId, nextVersion);
-    response.json({ data: { id: event.id, minute: Number(body.minute), description: event.description, updatedAt, scoreState: updatedState } });
+    response.json({ data: { id: event.id, minute: Number(body.minute), description, eventType: nextEventType, teamId: nextTeamId, playerId: nextPlayerId, relatedPlayerId: nextRelatedPlayerId, updatedAt, scoreState: updatedState } });
+  } catch (error) {
+    try { db.exec("ROLLBACK;"); } catch { /* transaction may already be committed */ }
+    handleScoreError(error, response);
+  }
+});
+
+scoresRouter.delete("/manual/:id/events/:eventId", protectedRoute, requireAdmin, (request: AuthenticatedRequest, response) => {
+  const matchId = request.params.id;
+  const eventId = request.params.eventId;
+  const body = request.body && typeof request.body === "object" && !Array.isArray(request.body)
+    ? request.body as Record<string, unknown> : {};
+  const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+  if (!matchId || !eventId || body.version === undefined
+    || (body.reason !== undefined && (typeof body.reason !== "string" || reason.length > 500))) {
+    return response.status(400).json({ error: "invalid_event_payload" });
+  }
+  if (ScoreService.getSourceMode().mode !== "manual") return response.status(409).json({ error: "score_source_is_api" });
+  const db = getDatabase();
+  try {
+    db.exec("BEGIN IMMEDIATE;");
+    const current = readManualScoreState(matchId);
+    if (!current || !["live", "paused", "ended"].includes(current.status)
+      || (current.finalResultConfirmed && current.status !== "ended")) {
+      throw scoreError("only a live or ended match can delete an event", 409, "invalid_match_transition");
+    }
+    if (current.finalResultConfirmed && !reason) throw scoreError("correction_reason_required", 400, "correction_reason_required");
+    if (normalizeExpectedVersion(body.version) !== current.version) throw scoreError("stale_score_version", 409, "stale_score_version");
+    const event = db.prepare(`SELECT id, minute, description, event_type AS eventType, team_id AS teamId,
+        player_id AS playerId, related_player_id AS relatedPlayerId, home_score AS homeScore, away_score AS awayScore
+      FROM match_score_timeline WHERE id=? AND match_id=?`).get(eventId, matchId) as {
+        id: string; minute: number; description: string; eventType: string; teamId: string | null;
+        playerId: string | null; relatedPlayerId: string | null; homeScore: number; awayScore: number;
+      } | undefined;
+    if (!event) throw scoreError("match_event_not_found", 404, "match_event_not_found");
+
+    const now = new Date().toISOString();
+    const nextVersion = current.version + 1;
+    const deletion = db.prepare("DELETE FROM match_score_timeline WHERE id=? AND match_id=?").run(eventId, matchId);
+    if (deletion.changes !== 1) throw scoreError("match_event_not_found", 404, "match_event_not_found");
+    db.prepare("UPDATE match_score_state SET version=?, updated_by_operator_id=?, updated_at=? WHERE match_id=?")
+      .run(nextVersion, request.operator!.id, now, matchId);
+    db.prepare(`INSERT INTO match_score_audit (id,match_id,action,operator_id,previous_version,new_version,
+      previous_home_score,previous_away_score,new_home_score,new_away_score,previous_status,new_status,
+      previous_final_result_confirmed,new_final_result_confirmed,reason,metadata,created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(crypto.randomUUID(), matchId, "score_updated", request.operator!.id, current.version, nextVersion,
+        current.homeScore, current.awayScore, current.homeScore, current.awayScore, current.status, current.status,
+        current.finalResultConfirmed ? 1 : 0, current.finalResultConfirmed ? 1 : 0, reason || null,
+        JSON.stringify({ operation: "delete_match_event", event }), now);
+    db.exec("COMMIT;");
+    const updatedState = readManualScoreState(matchId)!;
+    ScoreService.clearCache("scores:");
+    ScoreService.notifyManualScoreUpdate(matchId, nextVersion);
+    response.json({ data: { deletedEventId: eventId, scoreState: updatedState } });
   } catch (error) {
     try { db.exec("ROLLBACK;"); } catch { /* transaction may already be committed */ }
     handleScoreError(error, response);
