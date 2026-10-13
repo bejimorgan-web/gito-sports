@@ -175,7 +175,15 @@ function recordClockAction(matchId: string, operatorId: string, action: string, 
       phase = phase === "paused" ? (football ? (elapsed <= 2700 + (firstAdded ?? 0) * 60 ? "first_half" : "second_half") : "running") : phase;
       running = true; runningSince = now;
     } else if (action === "halftime" && football && running && elapsed >= 2700 + (firstAdded ?? 0) * 60) {
+      const halftimeScore = readManualScoreState(matchId);
       phase = "halftime"; running = false; runningSince = null; elapsed = Math.max(elapsed, 2700 + (firstAdded ?? 0) * 60);
+      if (halftimeScore) {
+        db.prepare(`INSERT INTO match_score_timeline
+          (id,match_id,minute,description,event_type,team_id,player_id,related_player_id,home_score,away_score,operator_id,created_at,updated_at)
+          VALUES (?,?,?,'Half-time','halftime',NULL,NULL,NULL,?,?,?,?,?)`)
+          .run(crypto.randomUUID(), matchId, Math.min(150, Math.floor(elapsed / 60)), halftimeScore.homeScore,
+            halftimeScore.awayScore, operatorId, now, now);
+      }
     } else if (action === "start_second_half" && football && phase === "halftime") {
       phase = "second_half"; running = true; runningSince = now;
     } else if (action === "end" && (football ? ["first_half", "halftime", "second_half", "paused"].includes(phase) : running || (!running && phase === "paused"))) {
