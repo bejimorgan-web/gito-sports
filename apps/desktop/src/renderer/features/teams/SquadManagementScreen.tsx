@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { Player, PlayerAvailability, PlayerPosition, Season, SeasonSquad, Sport, Team } from "@gito/shared";
 import { apiClient } from "../../services/api-client";
+import { resolveAssetUrl } from "../../components/asset-url";
 
 const positions: PlayerPosition[] = ["goalkeeper", "defender", "midfielder", "forward", "winger", "striker", "fullback", "center-back", "attacking-midfielder", "defensive-midfielder", "custom", "GK", "LB", "CB", "RB", "LM", "CM", "RM", "ST", "DM", "LW", "AM", "RW", "LWB", "RWB"];
 const availabilities: PlayerAvailability[] = ["available", "injured", "suspended", "unavailable"];
@@ -25,6 +26,9 @@ export function SquadManagementScreen({ accessToken }: { accessToken: string }) 
   const [playerPosition, setPlayerPosition] = useState<PlayerPosition>("forward");
   const [secondaryPositions, setSecondaryPositions] = useState<PlayerPosition[]>([]);
   const [photoUrl, setPhotoUrl] = useState("");
+  const [photoPreview, setPhotoPreview] = useState("");
+  const [isPhotoUploading, setIsPhotoUploading] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
   const [playerStatus, setPlayerStatus] = useState<"active" | "inactive" | "archived">("active");
   const [availability, setAvailability] = useState<PlayerAvailability>("available");
   const [injuryType, setInjuryType] = useState("");
@@ -95,9 +99,22 @@ export function SquadManagementScreen({ accessToken }: { accessToken: string }) 
     (!position || player.primaryPosition === position || player.position === position || (player.secondaryPositions ?? []).includes(position as PlayerPosition)) && (!statusFilter || player.status === statusFilter) && (!availabilityFilter || player.availability === availabilityFilter)
   ), [availabilityFilter, players, position, search, statusFilter]);
 
-  const clearEditor = () => { setEditing(null); setName(""); setShirtNumber(""); setPlayerPosition("forward"); setSecondaryPositions([]); setPhotoUrl(""); setPlayerStatus("active"); setAvailability("available"); setInjuryType(""); setExpectedReturnDate(""); setInjuryNotes(""); };
-  const editPlayer = (player: Player) => { const nextPrimary = (player.primaryPosition ?? player.position ?? "forward") as PlayerPosition; setEditing(player); setName(player.displayName); setShirtNumber(player.jerseyNumber?.toString() ?? ""); setPlayerPosition(nextPrimary); setSecondaryPositions((player.secondaryPositions ?? []).filter((item): item is PlayerPosition => typeof item === "string" && item !== nextPrimary)); setPhotoUrl(player.photoUrl ?? ""); setPlayerStatus(player.status as typeof playerStatus); setAvailability(player.availability); setInjuryType(player.injuryType ?? ""); setExpectedReturnDate(player.expectedReturnDate ?? ""); setInjuryNotes(player.injuryNotes ?? ""); };
+  const clearEditor = () => { setEditing(null); setName(""); setShirtNumber(""); setPlayerPosition("forward"); setSecondaryPositions([]); setPhotoUrl(""); setPhotoPreview(""); if (photoInputRef.current) photoInputRef.current.value = ""; setPlayerStatus("active"); setAvailability("available"); setInjuryType(""); setExpectedReturnDate(""); setInjuryNotes(""); };
+  const editPlayer = (player: Player) => { const nextPrimary = (player.primaryPosition ?? player.position ?? "forward") as PlayerPosition; setEditing(player); setName(player.displayName); setShirtNumber(player.jerseyNumber?.toString() ?? ""); setPlayerPosition(nextPrimary); setSecondaryPositions((player.secondaryPositions ?? []).filter((item): item is PlayerPosition => typeof item === "string" && item !== nextPrimary)); setPhotoUrl(player.photoUrl ?? ""); setPhotoPreview(""); setPlayerStatus(player.status as typeof playerStatus); setAvailability(player.availability); setInjuryType(player.injuryType ?? ""); setExpectedReturnDate(player.expectedReturnDate ?? ""); setInjuryNotes(player.injuryNotes ?? ""); };
 
+  const uploadPlayerPhoto = async (file?: File) => {
+    if (!file) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) { setMessage("Choose a JPEG, PNG, or WebP image."); return; }
+    if (file.size > 5 * 1024 * 1024) { setMessage("Player photos must be 5 MB or smaller."); return; }
+    const previousPhoto = photoUrl;
+    const preview = URL.createObjectURL(file);
+    setPhotoPreview(preview);
+    setIsPhotoUploading(true);
+    setMessage("Uploading player photo…");
+    try { setPhotoUrl(await apiClient.uploadImage(file, accessToken)); setMessage("Photo uploaded. Save the player to apply it."); }
+    catch (error) { setPhotoUrl(previousPhoto); setMessage(error instanceof Error ? error.message : "Photo upload failed."); }
+    finally { URL.revokeObjectURL(preview); setPhotoPreview(""); setIsPhotoUploading(false); if (photoInputRef.current) photoInputRef.current.value = ""; }
+  };
   const toggleSecondaryPosition = (value: PlayerPosition) => {
     setSecondaryPositions((current) => {
       const next = current.includes(value) ? current.filter((item) => item !== value) : [...current, value];
@@ -111,7 +128,7 @@ export function SquadManagementScreen({ accessToken }: { accessToken: string }) 
     try {
       const parts = name.trim().split(/\s+/); const firstName = parts.shift() ?? name.trim(); const lastName = parts.join(" ") || firstName;
       const normalizedSecondaryPositions = secondaryPositions.filter((item) => item !== playerPosition);
-      const payload = { teamId, firstName, lastName, displayName: name.trim(), primaryPosition: playerPosition, position: playerPosition, secondaryPositions: normalizedSecondaryPositions, ...(shirtNumber ? { jerseyNumber: Number(shirtNumber) } : {}), ...(photoUrl ? { photoUrl } : {}), status: playerStatus, availability, ...(availability === "injured" ? { ...(injuryType ? { injuryType } : {}), ...(expectedReturnDate ? { expectedReturnDate } : {}), ...(injuryNotes ? { injuryNotes } : {}) } : {}) };
+      const payload = { teamId, firstName, lastName, displayName: name.trim(), primaryPosition: playerPosition, position: playerPosition, secondaryPositions: normalizedSecondaryPositions, ...(shirtNumber ? { jerseyNumber: Number(shirtNumber) } : {}), photoUrl: photoUrl.trim(), status: playerStatus, availability, ...(availability === "injured" ? { ...(injuryType ? { injuryType } : {}), ...(expectedReturnDate ? { expectedReturnDate } : {}), ...(injuryNotes ? { injuryNotes } : {}) } : {}) };
       const saved = editing ? await apiClient.updatePlayer(editing.id, payload, accessToken) : await apiClient.createPlayer(payload, accessToken);
       if (!editing) await apiClient.createSquadPlayer(squadId, { playerId: saved.id, role: "starter", position: playerPosition, ...(shirtNumber ? { jerseyNumber: Number(shirtNumber) } : {}) }, accessToken);
       await loadPlayers(); clearEditor(); setMessage(editing ? "Saved" : "Player created");
@@ -143,7 +160,7 @@ export function SquadManagementScreen({ accessToken }: { accessToken: string }) 
       {teamId && seasonId && !squads.length ? <div className="button-row"><button type="button" onClick={() => void createSquad()} disabled={isSaving}>{isSaving ? "Saving..." : "Create squad"}</button></div> : null}
     </section>
     <section className="console-panel">
-      <div className="panel-heading"><h3>{editing ? "Edit Player" : "Add Player"}</h3><button type="button" onClick={clearEditor} className="secondary">Clear</button></div>
+      <div className="panel-heading"><h3>{editing ? "Edit Player" : "Add Player"}</h3><button type="button" onClick={clearEditor} className="secondary" disabled={isSaving || isPhotoUploading}>Clear</button></div>
       <div className="form-grid two-column">
         <label>Name<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Player name" /></label>
         <label>Shirt Number<input inputMode="numeric" value={shirtNumber} onChange={(event) => setShirtNumber(event.target.value)} /></label>
@@ -164,12 +181,12 @@ export function SquadManagementScreen({ accessToken }: { accessToken: string }) 
             ) : null)}
           </div>
         </div>
-        <label>Photo URL<input value={photoUrl} onChange={(event) => setPhotoUrl(event.target.value)} placeholder="https://..." /></label>
+        <div className="field-group" style={{ gridColumn: "1 / -1" }}><label>Player photo URL<input value={photoUrl} disabled={isPhotoUploading} onChange={(event) => setPhotoUrl(event.target.value)} placeholder="https://... or uploaded image" /></label><div className="button-row" style={{ justifyContent: "flex-start", alignItems: "center" }}><input ref={photoInputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void uploadPlayerPhoto(event.target.files?.[0])} disabled={isPhotoUploading} aria-label="Upload player photo" />{photoPreview || photoUrl ? <img src={photoPreview || resolveAssetUrl(photoUrl)} alt="Player photo preview" style={{ width: 76, height: 76, objectFit: "cover", objectPosition: "top", borderRadius: "50%" }} /> : <div className="player-detail-avatar">?</div>}{photoUrl ? <button type="button" className="secondary" disabled={isPhotoUploading} onClick={() => { setPhotoUrl(""); setMessage("Photo removed. Save the player to apply the change."); }}>Remove photo</button> : null}</div><small>Upload a JPEG, PNG, or WebP image (up to 5 MB), or paste an image URL.</small></div>
         <label>Status<select value={playerStatus} onChange={(event) => setPlayerStatus(event.target.value as typeof playerStatus)}><option value="active">Active</option><option value="inactive">Inactive</option><option value="archived">Archived</option></select></label>
         <label>Availability<select value={availability} onChange={(event) => setAvailability(event.target.value as PlayerAvailability)}>{availabilities.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
         {availability === "injured" ? <><label>Injury<input value={injuryType} onChange={(event) => setInjuryType(event.target.value)} /></label><label>Expected Return<input type="date" value={expectedReturnDate} onChange={(event) => setExpectedReturnDate(event.target.value)} /></label><label>Notes<textarea value={injuryNotes} onChange={(event) => setInjuryNotes(event.target.value)} /></label></> : null}
       </div>
-      <div className="button-row"><button type="button" onClick={savePlayer} disabled={isSaving}>{isSaving ? "Saving..." : editing ? "Save Player" : "Save Player"}</button></div>
+      <div className="button-row"><button type="button" onClick={savePlayer} disabled={isSaving || isPhotoUploading}>{isSaving ? "Saving..." : editing ? "Save Player" : "Save Player"}</button></div>
     </section>
     <section className="console-panel">
       <div className="panel-heading"><h3>{selectedTeam?.name ?? "Players"}</h3><span>{isLoading ? "Loading..." : `${visiblePlayers.length} players`}</span></div>

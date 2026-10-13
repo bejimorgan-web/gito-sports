@@ -1,93 +1,74 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 import express from "express";
 import multer from "multer";
 
 import { runtimeConfig } from "../config/env.js";
+import { protectedRoute } from "../middleware/protected.js";
 
 const uploadsRouter = express.Router();
 const uploadDirectory = runtimeConfig.uploadDir;
-const debugLog = path.join(uploadDirectory, "upload-debug.log");
-function writeDebug(...parts: any[]) {
-  try {
-    const line = `[${new Date().toISOString()}] ` + parts.map((p) => (typeof p === 'string' ? p : JSON.stringify(p))).join(' ');
-    fs.appendFileSync(debugLog, line + "\n");
-  } catch (e) {
-    // best-effort
-    console.error('failed to write upload debug log', e);
-  }
-}
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDirectory),
-  filename: (_req, file, callback) => {
-    const extension = path.extname(file.originalname) || ".png";
-    const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${extension}`;
-    callback(null, fileName);
-  }
-});
-
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: {
-    fileSize: 5 * 1024 * 1024
+    fileSize: runtimeConfig.imageUploadMaxBytes,
+    files: 1
   }
 });
+
+function detectImage(buffer: Buffer) {
+  const pngEnd = Buffer.from([0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130]);
+  if (
+    buffer.length >= 57 &&
+    buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) &&
+    buffer.readUInt32BE(8) === 13 && buffer.toString("ascii", 12, 16) === "IHDR" &&
+    buffer.readUInt32BE(16) > 0 && buffer.readUInt32BE(20) > 0 &&
+    buffer.subarray(buffer.length - pngEnd.length).equals(pngEnd)
+  ) {
+    return { extension: ".png", contentType: "image/png" };
+  }
+  if (buffer.length >= 4 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff && buffer[buffer.length - 2] === 0xff && buffer[buffer.length - 1] === 0xd9) {
+    return { extension: ".jpg", contentType: "image/jpeg" };
+  }
+  if (
+    buffer.length >= 30 && buffer.toString("ascii", 0, 4) === "RIFF" &&
+    buffer.readUInt32LE(4) === buffer.length - 8 && buffer.toString("ascii", 8, 12) === "WEBP" &&
+    ["VP8 ", "VP8L", "VP8X"].includes(buffer.toString("ascii", 12, 16)) &&
+    buffer.readUInt32LE(16) <= buffer.length - 20
+  ) {
+    return { extension: ".webp", contentType: "image/webp" };
+  }
+  return null;
+}
 
 uploadsRouter.post(
   "/images",
-  (req, res, next) => {
-    console.log('[uploads] multer middleware start');
-    writeDebug('multer middleware start');
-    try {
-      writeDebug('request headers', req.headers);
-      writeDebug('request content-length', req.headers['content-length']);
-    } catch (e) {}
-    // Call multer middleware and capture completion / errors
-    upload.single("file")(req, res, (err) => {
-      console.log('[uploads] multer middleware finished', err ? `err=${err && err.code}` : 'no-err');
-      writeDebug('multer middleware finished', err ? (err as any).code ?? String(err) : 'no-err');
-      next(err);
-    });
-  },
-  (request, response) => {
-    try {
-      console.log('[uploads] route handler start');
-      writeDebug('route handler start');
-      if (!request.file) {
-        console.log('[uploads] no file present on request');
-        writeDebug('no file present on request');
-        response.status(400).json({ error: "file_required", message: "No file was uploaded." });
-        return;
-      }
-
-      writeDebug('file saved', { filename: request.file.filename, size: request.file.size, path: request.file.path });
-
-      // Basic sanity check: reject files that are clearly truncated (only PNG signature, etc.)
-      try {
-        const savedSize = request.file.size ?? 0;
-        if (savedSize <= 8) {
-          // remove the truncated file and return a clear error to the client
-          try { fs.unlinkSync(request.file.path); } catch (e) {}
-          console.warn('[uploads] rejected truncated upload', { filename: request.file.filename, size: savedSize });
-          writeDebug('rejected truncated upload', { filename: request.file.filename, size: savedSize });
-          response.status(400).json({ error: 'file_truncated', message: 'Uploaded file appears truncated or empty. Please retry the upload.' });
-          return;
-        }
-      } catch (e) {
-        // best-effort; continue if something unexpected happens
-      }
-
-      const fileUrl = `/uploads/${request.file.filename}`;
-      console.log('[uploads] responding with file url', fileUrl);
-      writeDebug('responding with file url', fileUrl);
-      response.status(201).json({ data: { url: fileUrl } });
-    } catch (err) {
-      console.error('[uploads] route handler error', err);
-      writeDebug('route handler error', (err as any)?.stack ?? String(err));
-      throw err;
+  protectedRoute,
+  (request, response, next) => upload.single("file")(request, response, (error) => {
+    if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
+      response.status(413).json({ error: "image_too_large", message: `Images must be ${(runtimeConfig.imageUploadMaxBytes / (1024 * 1024)).toFixed(1)} MB or smaller.` });
+      return;
     }
+    next(error);
+  }),
+  (request, response) => {
+    if (!request.file || !request.file.buffer.length) {
+      response.status(400).json({ error: "file_required", message: "Choose an image to upload." });
+      return;
+    }
+
+    const image = detectImage(request.file.buffer);
+    if (!image) {
+      response.status(415).json({ error: "unsupported_image", message: "Choose a valid JPEG, PNG, or WebP image." });
+      return;
+    }
+
+    const filename = `${randomUUID()}${image.extension}`;
+    const filePath = path.join(uploadDirectory, filename);
+    fs.writeFileSync(filePath, request.file.buffer, { flag: "wx" });
+    response.status(201).json({ data: { url: `/uploads/${filename}`, contentType: image.contentType } });
   }
 );
 

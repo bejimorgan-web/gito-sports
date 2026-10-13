@@ -149,7 +149,7 @@ export function CountriesManagementScreen({ accessToken }: { accessToken: string
               {countryNames.map((countryName) => <option key={countryName} value={countryName} />)}
             </datalist>
           </label>
-          <LogoUrlField label="Upload Flag / Logo" value={logoUrl} onChange={setLogoUrl} onUploadStateChange={setIsLogoUploading} />
+          <LogoUrlField accessToken={accessToken} label="Upload Flag / Logo" value={logoUrl} onChange={setLogoUrl} onUploadStateChange={setIsLogoUploading} />
         </div>
 
         <div className="button-row">

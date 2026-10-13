@@ -238,7 +238,7 @@ export function TeamsManagementScreen({ accessToken }: { accessToken: string }) 
               ))}
             </select>
           </label>
-          <LogoUrlField label="Upload Logo" value={logoUrl} onChange={setLogoUrl} onUploadStateChange={setIsLogoUploading} />
+          <LogoUrlField accessToken={accessToken} label="Upload Logo" value={logoUrl} onChange={setLogoUrl} onUploadStateChange={setIsLogoUploading} />
         </div>
 
         <div className="button-row">

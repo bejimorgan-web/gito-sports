@@ -256,6 +256,7 @@ export function MobileFeatureControlScreen({ accessToken }: MobileFeatureControl
           <h3>Playback Branding</h3>
           <p>Configure the independent emblem shown over live video.</p>
           <LogoUrlField
+            accessToken={accessToken}
             label="Playback emblem"
             value={brandingUrl}
             onChange={setBrandingUrl}

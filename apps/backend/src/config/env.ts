@@ -15,6 +15,10 @@ const canonicalDatabasePath = path.resolve(workspaceRoot, "data", "gito.sqlite")
 const canonicalBackupDir = path.resolve(workspaceRoot, "data", "backups");
 const configuredUploadDir = process.env.UPLOAD_DIR?.trim();
 const resolvedUploadDir = path.resolve(configuredUploadDir ?? path.join(workspaceRoot, "data", "uploads"));
+const configuredImageUploadMaxBytes = Number(process.env.IMAGE_UPLOAD_MAX_BYTES ?? 5 * 1024 * 1024);
+const imageUploadMaxBytes = Number.isFinite(configuredImageUploadMaxBytes) && configuredImageUploadMaxBytes > 0
+  ? Math.min(Math.floor(configuredImageUploadMaxBytes), 20 * 1024 * 1024)
+  : 5 * 1024 * 1024;
 const productionUploadRoot = path.resolve("/var/data");
 if (nodeEnv === "production") {
   if (!configuredUploadDir) {
@@ -171,6 +175,7 @@ export const runtimeConfig = {
   backupDir,
   backupIntervalMs,
   uploadDir: resolvedUploadDir,
+  imageUploadMaxBytes,
   autoRestoreBackup,
   autoImportMigration,
   newsTestMode,

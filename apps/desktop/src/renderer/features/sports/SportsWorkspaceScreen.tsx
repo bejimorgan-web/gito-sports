@@ -1005,7 +1005,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                 Sport Name
                 <input value={sportName} onChange={(event) => setSportName(event.target.value)} />
               </label>
-              <LogoUrlField label="Upload Logo" value={sportLogoUrl} onChange={setSportLogoUrl} />
+              <LogoUrlField accessToken={accessToken} label="Upload Logo" value={sportLogoUrl} onChange={setSportLogoUrl} />
               <label className="full-width">
                 Supported Countries
                 <div className="country-selection-grid">
@@ -1074,7 +1074,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                   {hostTypes.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
                 </select>
               </label>
-              <LogoUrlField label="Upload Logo / Flag" value={hostLogoUrl} onChange={setHostLogoUrl} />
+              <LogoUrlField accessToken={accessToken} label="Upload Logo / Flag" value={hostLogoUrl} onChange={setHostLogoUrl} />
             </div>
           ) : modalContext.kind === "competition" ? (
             <div className="form-grid two-column">
@@ -1082,7 +1082,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                 Competition Name
                 <input value={competitionName} onChange={(event) => setCompetitionName(event.target.value)} />
               </label>
-              <LogoUrlField label="Upload Logo" value={competitionLogoUrl} onChange={setCompetitionLogoUrl} />
+              <LogoUrlField accessToken={accessToken} label="Upload Logo" value={competitionLogoUrl} onChange={setCompetitionLogoUrl} />
               <label>
                 Participant Type
                 <select value={competitionParticipantType} onChange={(event) => setCompetitionParticipantType(event.target.value as CompetitionParticipantType)}>
@@ -1152,7 +1152,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                   {sportHosts.map((host) => <option key={host.id} value={host.id}>{host.name} ({host.type})</option>)}
                 </select>
               </label>
-              <LogoUrlField label="Upload Logo" value={teamLogoUrl} onChange={setTeamLogoUrl} onUploadStateChange={setIsLogoUploading} />
+              <LogoUrlField accessToken={accessToken} label="Upload Logo" value={teamLogoUrl} onChange={setTeamLogoUrl} onUploadStateChange={setIsLogoUploading} />
             </div>
           )}
         </Modal>

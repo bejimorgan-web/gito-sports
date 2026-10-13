@@ -4,6 +4,7 @@ import { apiClient } from "../services/api-client";
 import { resolveAssetUrl } from "./asset-url";
 
 interface LogoUrlFieldProps {
+  accessToken: string;
   label: string;
   value: string;
   onChange: (value: string) => void;
@@ -35,7 +36,7 @@ export function isValidLogoSource(value: string) {
   }
 }
 
-export function LogoUrlField({ label, value, onChange, onUploadStateChange }: LogoUrlFieldProps) {
+export function LogoUrlField({ accessToken, label, value, onChange, onUploadStateChange }: LogoUrlFieldProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [fileName, setFileName] = useState<string>("");
   const [previewSource, setPreviewSource] = useState<string>(() => getPreviewSource(value));
@@ -71,7 +72,7 @@ export function LogoUrlField({ label, value, onChange, onUploadStateChange }: Lo
     previewPromise.then(setPreviewSource).catch(() => {});
 
     try {
-      const url = await apiClient.uploadImage(file);
+      const url = await apiClient.uploadImage(file, accessToken);
       onChange(url);
       setUploadSuccess(true);
     } catch (error) {

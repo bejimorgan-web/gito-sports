@@ -653,7 +653,7 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
-  async uploadImage(file: File) {
+  async uploadImage(file: File, accessToken: string) {
     const formData = new FormData();
     formData.append("file", file);
 
@@ -663,6 +663,7 @@ export const apiClient = {
     try {
       const response = await fetch(`${API_BASE_URL}/upload/images`, {
         method: "POST",
+        headers: { authorization: `Bearer ${accessToken}` },
         body: formData,
         cache: "no-store",
         signal: controller.signal

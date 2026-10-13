@@ -145,7 +145,7 @@ export function SportsManagementScreen({ accessToken }: SportsManagementScreenPr
             Sport Name
             <input value={name} onChange={(event) => setName(event.target.value)} />
           </label>
-          <LogoUrlField label="Upload Logo" value={logoUrl} onChange={setLogoUrl} onUploadStateChange={setIsLogoUploading} />
+          <LogoUrlField accessToken={accessToken} label="Upload Logo" value={logoUrl} onChange={setLogoUrl} onUploadStateChange={setIsLogoUploading} />
           <label className="full-width">
             Supported Countries
             <div className="country-selection-grid">
