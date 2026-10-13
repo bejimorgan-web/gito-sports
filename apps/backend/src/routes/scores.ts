@@ -10,7 +10,7 @@ import { logOperationalEvent } from "../repositories/operational-log-repository.
 export const scoresRouter = Router();
 
 const manualScoreStatuses = new Set(["scheduled", "live", "paused", "ended", "postponed", "cancelled"]);
-const manualMatchEventTypes = new Set(["note", "goal", "yellow_card", "red_card", "penalty_scored", "penalty_missed", "var_goal_disallowed", "injury", "substitution"]);
+const manualMatchEventTypes = new Set(["note", "goal", "yellow_card", "red_card", "var_yellow_card", "var_red_card", "penalty_scored", "penalty_missed", "var_penalty_scored", "var_penalty_missed", "var_goal_disallowed", "injury", "substitution"]);
 
 export type ManualScoreState = {
   matchId: string;
@@ -619,16 +619,16 @@ scoresRouter.post("/manual/:id/events", protectedRoute, requireAdmin, (request: 
         if (!relatedPlayer) throw scoreError("related_event_player_not_in_fixture_squad", 422, "related_event_player_not_in_fixture_squad");
         if (relatedPlayer.id === player.id) throw scoreError("event_players_must_be_different", 422, "event_players_must_be_different");
       }
-      if (["goal", "penalty_scored"].includes(eventType) && relatedPlayer) description = `${player.name} · Assist: ${relatedPlayer.name}`;
+      if (eventType === "goal" && relatedPlayer) description = `${player.name} · Assist: ${relatedPlayer.name}`;
       else if (eventType === "substitution" && relatedPlayer) description = `${player.name} off · ${relatedPlayer.name} on`;
-      else description = `${player.name} · ${({ yellow_card: "Yellow card", red_card: "Red card", penalty_missed: "Penalty missed", var_goal_disallowed: "Goal disallowed by VAR", injury: "Injury", goal: "Goal", penalty_scored: "Penalty scored" } as Record<string, string>)[eventType] ?? eventType}`;
+      else description = `${player.name} · ${({ yellow_card: "Yellow card", red_card: "Red card", var_yellow_card: "Yellow card after VAR review", var_red_card: "Red card after VAR review", penalty_missed: "Penalty missed", var_penalty_scored: "Penalty scored · awarded by VAR", var_penalty_missed: "Penalty missed · awarded by VAR", var_goal_disallowed: "Goal disallowed by VAR", injury: "Injury", goal: "Goal", penalty_scored: "Penalty scored" } as Record<string, string>)[eventType] ?? eventType}`;
     }
     const homeScore = eventType === "note"
       ? normalizeScoreValue(body.homeScore, "homeScore")
-      : current.homeScore + (teamId === fixture.homeTeamId && ["goal", "penalty_scored"].includes(eventType) ? 1 : 0);
+      : current.homeScore + (teamId === fixture.homeTeamId && ["goal", "penalty_scored", "var_penalty_scored"].includes(eventType) ? 1 : 0);
     const awayScore = eventType === "note"
       ? normalizeScoreValue(body.awayScore, "awayScore")
-      : current.awayScore + (teamId === fixture.awayTeamId && ["goal", "penalty_scored"].includes(eventType) ? 1 : 0);
+      : current.awayScore + (teamId === fixture.awayTeamId && ["goal", "penalty_scored", "var_penalty_scored"].includes(eventType) ? 1 : 0);
     const now = new Date().toISOString();
     const version = current.version + 1;
     const eventId = crypto.randomUUID();
