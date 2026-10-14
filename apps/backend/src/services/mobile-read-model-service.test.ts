@@ -50,6 +50,55 @@ function seed() {
   return { fixture, article };
 }
 
+test("mobile fixture resolves provider card teams from unique season-squad surnames", () => {
+  const db = getDatabase();
+  const { fixture } = seed();
+  const now = new Date().toISOString();
+  try {
+    for (const [squadId, teamId] of [["squad-bayern-events", "team-bayern"], ["squad-dortmund-events", "team-dortmund"]] as const) {
+      db.prepare("INSERT INTO season_squads (id, team_id, competition_id, season_id, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)")
+        .run(squadId, teamId, "competition-bundesliga", "season-2026", squadId, now, now);
+    }
+    for (const [playerId, playerTeamId, squadTeamId, firstName, lastName, displayName] of [
+      ["player-aguerd", "team-dortmund", "team-bayern", "Nayef", "Aguerd", "Nayef Aguerd"],
+      ["player-home-smith", "team-bayern", "team-bayern", "Home", "Smith", "Home Smith"],
+      ["player-away-smith", "team-dortmund", "team-dortmund", "Away", "Smith", "Away Smith"],
+    ] as const) {
+      db.prepare("INSERT INTO players (id, team_id, first_name, last_name, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run(playerId, playerTeamId, firstName, lastName, displayName, now, now);
+      db.prepare("INSERT INTO squad_players (id, squad_id, player_id, status, created_at, updated_at) VALUES (?, ?, ?, 'active', ?, ?)")
+        .run(`membership-${playerId}`, `squad-${squadTeamId === "team-bayern" ? "bayern" : "dortmund"}-events`, playerId, now, now);
+    }
+    setScoreSourceMode("api");
+
+    const mapped = mobile.mapMobileFixture(fixture, {
+      id: "provider-fixture-events",
+      utcDate: fixture.startsAt,
+      status: "FT",
+      minute: null,
+      competition: { id: "competition-bundesliga", name: "Bundesliga", logoUrl: null },
+      homeTeam: { id: "team-bayern", name: "Bayern Munich", logoUrl: null },
+      awayTeam: { id: "team-dortmund", name: "Borussia Dortmund", logoUrl: null },
+      score: { home: 2, away: 1, winner: "home" },
+      timeline: [
+        { id: "provider-event-aguerd", minute: 79, description: "Aguerd · Yellow card", homeScore: 2, awayScore: 1, createdAt: now },
+        { id: "provider-event-smith", minute: 80, description: "Smith · Red card", homeScore: 2, awayScore: 1, createdAt: now },
+      ],
+      events: [],
+    });
+
+    assert.equal(mapped.timeline[0]?.teamId, "team-bayern");
+    assert.equal(mapped.timeline[0]?.playerName, "Aguerd");
+    assert.equal(mapped.timeline[1]?.teamId, undefined);
+  } finally {
+    for (const playerId of ["player-aguerd", "player-home-smith", "player-away-smith"]) {
+      db.prepare("DELETE FROM squad_players WHERE player_id = ?").run(playerId);
+      db.prepare("DELETE FROM players WHERE id = ?").run(playerId);
+    }
+    db.prepare("DELETE FROM season_squads WHERE id IN (?, ?)").run("squad-bayern-events", "squad-dortmund-events");
+  }
+});
+
 test("mobile read model exposes publication delivery without IPTV stream relationships", () => {
   const db = getDatabase();
   const { fixture, article } = seed();

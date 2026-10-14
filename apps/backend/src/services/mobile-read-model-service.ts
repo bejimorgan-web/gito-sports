@@ -34,7 +34,17 @@ export type MobileFixture = {
   homeClub: MobileClub;
   awayClub: MobileClub;
   score: { home: number | null; away: number | null; winner: string | null } | null;
-  timeline: Array<{ minute: number; description: string; homeScore: number; awayScore: number; createdAt: string }>;
+  timeline: Array<{
+    minute: number;
+    description: string;
+    eventType?: string;
+    teamId?: string | null;
+    playerName?: string | null;
+    assistPlayerName?: string | null;
+    homeScore: number;
+    awayScore: number;
+    createdAt: string;
+  }>;
   liveState: { isLive: boolean; status: string; homeScore: number | null; awayScore: number | null; elapsed: number | null; updatedAt: string | null } | null;
   live: boolean;
   playbackUrl: string | null;
@@ -93,6 +103,90 @@ function clubFromRow(row: any, fallback?: { sport?: { id: string; name: string }
   };
 }
 
+type MobileTimelineEvent = MobileFixture["timeline"][number];
+
+function timelinePlayerName(event: MobileTimelineEvent): string | undefined {
+  const structuredName = event.playerName?.trim();
+  if (structuredName && structuredName.toLowerCase() !== "var") return structuredName;
+
+  const eventLabels = new Set([
+    "var", "pen", "goal", "own goal", "penalty", "penalty scored", "penalty missed",
+    "penalty awarded by var", "yellow card", "yellow card after var review", "red card",
+    "red card after var review", "second yellow card", "goal disallowed by var", "injury",
+    "substitution",
+  ]);
+  return event.description
+    .split(" · ")
+    .map((part) => part.trim())
+    .find((part) => {
+      const label = part.toLowerCase();
+      return part.length > 0 &&
+        !eventLabels.has(label) &&
+        !label.startsWith("assist:") &&
+        !label.startsWith("assist ");
+    });
+}
+
+function timelineNameKey(name: string): string {
+  return name.trim().toLocaleLowerCase();
+}
+
+function resolveTimelineEventTeams(
+  timeline: MobileTimelineEvent[],
+  fixture: any,
+  homeTeamId: string,
+  awayTeamId: string,
+): MobileTimelineEvent[] {
+  const namesToResolve = timeline
+    .filter((event) => event.teamId !== homeTeamId && event.teamId !== awayTeamId)
+    .map(timelinePlayerName)
+    .filter((name): name is string => Boolean(name));
+  if (!fixture.seasonId || namesToResolve.length === 0) return timeline;
+
+  const roster = getDatabase().prepare(`
+    SELECT player.display_name AS displayName,
+      player.first_name AS firstName,
+      player.last_name AS lastName,
+      squad.team_id AS teamId
+    FROM players AS player
+    JOIN squad_players AS member ON member.player_id = player.id
+    JOIN season_squads AS squad ON squad.id = member.squad_id
+    WHERE squad.season_id = ?
+      AND squad.team_id IN (?, ?)
+      AND squad.status != 'archived'
+      AND member.status = 'active'
+  `).all(fixture.seasonId, homeTeamId, awayTeamId) as Array<{
+    displayName: string;
+    firstName: string;
+    lastName: string;
+    teamId: string;
+  }>;
+  const teamsByName = new Map<string, Set<string>>();
+  for (const player of roster) {
+    const names = [player.displayName, `${player.firstName} ${player.lastName}`, player.lastName];
+    for (const name of names) {
+      const key = timelineNameKey(name);
+      if (!key) continue;
+      const teams = teamsByName.get(key) ?? new Set<string>();
+      teams.add(player.teamId);
+      teamsByName.set(key, teams);
+    }
+  }
+
+  return timeline.map((event) => {
+    if (event.teamId === homeTeamId || event.teamId === awayTeamId) return event;
+    const playerName = timelinePlayerName(event);
+    if (!playerName) return event;
+    const teamIds = teamsByName.get(timelineNameKey(playerName));
+    if (!teamIds || teamIds.size !== 1) return event;
+    return {
+      ...event,
+      teamId: [...teamIds][0],
+      ...(event.playerName ? {} : { playerName }),
+    };
+  });
+}
+
 export function mapMobileFixture(fixture: any, suppliedSnapshot?: ScoreMatchSummary | null): MobileFixture {
   ensureManualScoreStartedAtKickoff(fixture.id);
   const home = clubFromRow(fixture.homeTeam, { sport: fixture.sport, country: fixture.country });
@@ -116,9 +210,17 @@ export function mapMobileFixture(fixture: any, suppliedSnapshot?: ScoreMatchSumm
     ? { home: Number(manualScore.homeScore), away: Number(manualScore.awayScore), winner: Number(manualScore.homeScore) > Number(manualScore.awayScore) ? "home" : Number(manualScore.awayScore) > Number(manualScore.homeScore) ? "away" : null }
     : snapshot?.score && typeof snapshot.score === "object" ? snapshot.score : null;
   const timeline = manualScore
-    ? getDatabase().prepare(`SELECT minute, description, home_score AS homeScore, away_score AS awayScore, created_at AS createdAt
-        FROM match_score_timeline WHERE match_id=? ORDER BY minute, created_at, rowid`).all(fixture.id) as Array<{ minute: number; description: string; homeScore: number; awayScore: number; createdAt: string }>
+    ? getDatabase().prepare(`SELECT timeline.minute, timeline.description, timeline.event_type AS eventType,
+        timeline.team_id AS teamId,
+        COALESCE(NULLIF(player.display_name, ''), NULLIF(TRIM(player.first_name || ' ' || player.last_name), '')) AS playerName,
+        COALESCE(NULLIF(related.display_name, ''), NULLIF(TRIM(related.first_name || ' ' || related.last_name), '')) AS assistPlayerName,
+        timeline.home_score AS homeScore, timeline.away_score AS awayScore, timeline.created_at AS createdAt
+        FROM match_score_timeline AS timeline
+        LEFT JOIN players AS player ON player.id = timeline.player_id
+        LEFT JOIN players AS related ON related.id = timeline.related_player_id
+        WHERE timeline.match_id=? ORDER BY timeline.minute, timeline.created_at, timeline.rowid`).all(fixture.id) as MobileTimelineEvent[]
     : snapshot?.timeline ?? [];
+  const fixtureTimeline = resolveTimelineEventTeams(timeline, fixture, home.id, away.id);
   const liveElapsed = manualClock
     ? Number(manualClock.elapsedSeconds) + (Number(manualClock.running) === 1 && manualClock.runningSince
       ? Math.max(0, Math.floor((Date.now() - Date.parse(manualClock.runningSince)) / 1000)) : 0)
@@ -174,7 +276,7 @@ export function mapMobileFixture(fixture: any, suppliedSnapshot?: ScoreMatchSumm
     homeClub: home,
     awayClub: away,
     score,
-    timeline,
+    timeline: fixtureTimeline,
     liveState,
     live: liveState?.isLive ?? fixture.status === "live",
     playbackUrl: delivery?.playbackUrl ?? null,
