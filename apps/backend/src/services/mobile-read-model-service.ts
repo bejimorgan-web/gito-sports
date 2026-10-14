@@ -117,7 +117,7 @@ export function mapMobileFixture(fixture: any, suppliedSnapshot?: ScoreMatchSumm
     : snapshot?.score && typeof snapshot.score === "object" ? snapshot.score : null;
   const timeline = manualScore
     ? getDatabase().prepare(`SELECT minute, description, home_score AS homeScore, away_score AS awayScore, created_at AS createdAt
-        FROM match_score_timeline WHERE match_id=? ORDER BY minute, created_at`).all(fixture.id) as Array<{ minute: number; description: string; homeScore: number; awayScore: number; createdAt: string }>
+        FROM match_score_timeline WHERE match_id=? ORDER BY minute, created_at, rowid`).all(fixture.id) as Array<{ minute: number; description: string; homeScore: number; awayScore: number; createdAt: string }>
     : snapshot?.timeline ?? [];
   const liveElapsed = manualClock
     ? Number(manualClock.elapsedSeconds) + (Number(manualClock.running) === 1 && manualClock.runningSince

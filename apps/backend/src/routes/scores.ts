@@ -3,6 +3,7 @@ import { Response, Router } from "express";
 
 import { ScoreService } from "../services/score-service.js";
 import { ensureDueManualScoreStartsAtKickoff, ensureManualScoreStartedAtKickoff } from "../services/manual-score-scheduler.js";
+import { recalculateTimelineScoreSnapshots, shouldIncrementAuthoritativeScore } from "../services/manual-score-timeline.js";
 import { getDatabase } from "../db/connection.js";
 import { protectedRoute, type AuthenticatedRequest } from "../middleware/protected.js";
 import { logOperationalEvent } from "../repositories/operational-log-repository.js";
@@ -11,6 +12,7 @@ export const scoresRouter = Router();
 
 const manualScoreStatuses = new Set(["scheduled", "live", "paused", "ended", "postponed", "cancelled"]);
 const manualMatchEventTypes = new Set(["note", "goal", "yellow_card", "red_card", "var_yellow_card", "var_red_card", "penalty_scored", "penalty_missed", "var_penalty_scored", "var_penalty_missed", "var_goal_disallowed", "injury", "substitution"]);
+const scoringEventTypes = new Set(["goal", "penalty_scored", "var_penalty_scored"]);
 
 export type ManualScoreState = {
   matchId: string;
@@ -210,6 +212,9 @@ function recordClockAction(matchId: string, operatorId: string, action: string, 
       }
     }
     if (action === "end") db.prepare("UPDATE matches SET status='ended', updated_at=? WHERE id=?").run(now, matchId);
+    if (action === "halftime" && !recalculateTimelineScoreSnapshots(db, matchId)) {
+      throw scoreError("timeline_goal_count_exceeds_authoritative_score", 409, "timeline_score_inconsistent");
+    }
 
     db.exec("COMMIT;");
     return next;
@@ -550,7 +555,7 @@ scoresRouter.get("/manual/:id/events", protectedRoute, requireAdmin, (request, r
   const rows = getDatabase().prepare(`SELECT id, minute, description, event_type AS eventType,
       team_id AS teamId, player_id AS playerId, related_player_id AS relatedPlayerId,
       home_score AS homeScore, away_score AS awayScore, created_at AS createdAt, updated_at AS updatedAt
-    FROM match_score_timeline WHERE match_id=? ORDER BY minute, created_at`).all(id);
+    FROM match_score_timeline WHERE match_id=? ORDER BY minute, created_at, rowid`).all(id);
   response.json({ data: rows });
 });
 
@@ -625,10 +630,12 @@ scoresRouter.post("/manual/:id/events", protectedRoute, requireAdmin, (request: 
     }
     const homeScore = eventType === "note"
       ? normalizeScoreValue(body.homeScore, "homeScore")
-      : current.homeScore + (teamId === fixture.homeTeamId && ["goal", "penalty_scored", "var_penalty_scored"].includes(eventType) ? 1 : 0);
+      : current.homeScore + (teamId === fixture.homeTeamId && scoringEventTypes.has(eventType)
+        && shouldIncrementAuthoritativeScore(db, matchId, fixture.homeTeamId, Number(body.minute)) ? 1 : 0);
     const awayScore = eventType === "note"
       ? normalizeScoreValue(body.awayScore, "awayScore")
-      : current.awayScore + (teamId === fixture.awayTeamId && ["goal", "penalty_scored", "var_penalty_scored"].includes(eventType) ? 1 : 0);
+      : current.awayScore + (teamId === fixture.awayTeamId && scoringEventTypes.has(eventType)
+        && shouldIncrementAuthoritativeScore(db, matchId, fixture.awayTeamId, Number(body.minute)) ? 1 : 0);
     const now = new Date().toISOString();
     const version = current.version + 1;
     const eventId = crypto.randomUUID();
@@ -642,6 +649,9 @@ scoresRouter.post("/manual/:id/events", protectedRoute, requireAdmin, (request: 
     db.prepare(`INSERT INTO match_score_timeline (id,match_id,minute,description,event_type,team_id,player_id,related_player_id,home_score,away_score,operator_id,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(eventId, matchId, body.minute, description, eventType, teamId, player?.id ?? null, relatedPlayer?.id ?? null, homeScore, awayScore, request.operator!.id, now, now);
+    if (!recalculateTimelineScoreSnapshots(db, matchId)) {
+      throw scoreError("timeline_goal_count_exceeds_authoritative_score", 409, "timeline_score_inconsistent");
+    }
     db.exec("COMMIT;");
     const state = readManualScoreState(matchId)!;
     ScoreService.notifyManualScoreUpdate(matchId, version);
@@ -742,6 +752,9 @@ scoresRouter.patch("/manual/:id/events/:eventId", protectedRoute, requireAdmin, 
         JSON.stringify({ operation: "edit_match_event", eventId,
           previous: { minute: event.minute, description: event.description, eventType: event.eventType, teamId: event.teamId, playerId: event.playerId, relatedPlayerId: event.relatedPlayerId },
           next: { minute: body.minute, description, eventType: nextEventType, teamId: nextTeamId, playerId: nextPlayerId, relatedPlayerId: nextRelatedPlayerId } }), updatedAt);
+    if (!recalculateTimelineScoreSnapshots(db, matchId)) {
+      throw scoreError("timeline_goal_count_exceeds_authoritative_score", 409, "timeline_score_inconsistent");
+    }
     db.exec("COMMIT;");
     const updatedState = readManualScoreState(matchId)!;
     ScoreService.clearCache("scores:");
@@ -796,6 +809,9 @@ scoresRouter.delete("/manual/:id/events/:eventId", protectedRoute, requireAdmin,
         current.homeScore, current.awayScore, current.homeScore, current.awayScore, current.status, current.status,
         current.finalResultConfirmed ? 1 : 0, current.finalResultConfirmed ? 1 : 0, reason || null,
         JSON.stringify({ operation: "delete_match_event", event }), now);
+    if (!recalculateTimelineScoreSnapshots(db, matchId)) {
+      throw scoreError("timeline_goal_count_exceeds_authoritative_score", 409, "timeline_score_inconsistent");
+    }
     db.exec("COMMIT;");
     const updatedState = readManualScoreState(matchId)!;
     ScoreService.clearCache("scores:");

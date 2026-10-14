@@ -14,6 +14,7 @@ import { importMigrationFile, isDatabaseCatalogEmpty, isMigrationImported } from
 import { NewsCollectionScheduler } from "../services/news-collection-scheduler.js";
 import { NewsService } from "../services/news-service.js";
 import { NewsWebRssGeneratorService } from "../services/news-web-rss-generator-service.js";
+import { migrateManualTimelineSnapshots } from "../services/manual-score-timeline.js";
 
 let database: DatabaseSync | null = null;
 const EXPECTED_SCHEMA_VERSION = 1;
@@ -550,6 +551,7 @@ export function ensureManualScoreSchema(database: DatabaseSync) {
       database.exec(`ALTER TABLE match_score_timeline ADD COLUMN ${column} ${definition}`);
     }
   }
+  migrateManualTimelineSnapshots(database);
 }
 
 function ensureNewsSchemaColumns(database: DatabaseSync) {

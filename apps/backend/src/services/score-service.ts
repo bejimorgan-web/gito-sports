@@ -545,7 +545,7 @@ function toManualScoreSummary(row: ManualScoreReadRow): ScoreMatchSummary {
 
   const timeline = getDatabase().prepare(`SELECT id, minute, description, home_score AS homeScore,
     away_score AS awayScore, created_at AS createdAt FROM match_score_timeline
-    WHERE match_id=? ORDER BY minute, created_at`).all(row.matchId) as Array<{ id: string; minute: number; description: string; homeScore: number; awayScore: number; createdAt: string }>;
+    WHERE match_id=? ORDER BY minute, created_at, rowid`).all(row.matchId) as Array<{ id: string; minute: number; description: string; homeScore: number; awayScore: number; createdAt: string }>;
 
   return {
     id: row.matchId,
