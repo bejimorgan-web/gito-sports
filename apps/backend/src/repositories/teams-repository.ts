@@ -137,6 +137,7 @@ export interface HostClubImportRow {
   hostId?: string;
   teamType?: string;
   shortName?: string;
+  slug?: string;
   homeStadiumName?: string;
   homeStadiumPhotoUrl?: string;
   logoUrl?: string;
@@ -156,8 +157,6 @@ export function importHostClubs(hostId: string, rows: HostClubImportRow[]) {
   const importRows = database.transaction(() => {
     for (const row of rows) {
       const name = String(row.teamName ?? "").trim();
-      const normalizedName = name.normalize("NFKC").toLocaleLowerCase();
-      if (!name) throw new Error("club_name_required");
       if ((row.hostId && row.hostId !== hostId) || (row.sportId && row.sportId !== host.sport_id)) throw new Error("club_import_host_or_sport_mismatch");
       if (row.teamId) {
         const exportedTeam = database.prepare("SELECT id, host_id FROM teams WHERE id = ?").get(row.teamId) as { id: string; host_id: string | null } | undefined;
@@ -165,6 +164,8 @@ export function importHostClubs(hostId: string, rows: HostClubImportRow[]) {
         skipped.add(row.teamId);
         continue;
       }
+      const normalizedName = name.normalize("NFKC").toLocaleLowerCase();
+      if (!name) throw new Error("club_name_required");
       if (seen.has(normalizedName)) { skipped.add(name); continue; }
       seen.add(normalizedName);
       const existing = database.prepare("SELECT id FROM teams WHERE host_id = ? AND lower(name) = lower(?) LIMIT 1").get(hostId, name) as { id: string } | undefined;
@@ -178,6 +179,7 @@ export function importHostClubs(hostId: string, rows: HostClubImportRow[]) {
         name,
         type,
         ...(row.shortName?.trim() ? { shortName: row.shortName.trim() } : {}),
+        ...(row.slug?.trim() ? { slug: row.slug.trim() } : {}),
         ...(row.homeStadiumName?.trim() ? { homeStadiumName: row.homeStadiumName.trim() } : {}),
         ...(row.homeStadiumPhotoUrl?.trim() ? { homeStadiumPhotoUrl: row.homeStadiumPhotoUrl.trim() } : {}),
         ...(row.logoUrl?.trim() ? { logoUrl: row.logoUrl.trim() } : {})

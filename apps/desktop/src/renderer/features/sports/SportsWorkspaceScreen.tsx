@@ -23,7 +23,7 @@ import { resolveAssetUrl } from "../../components/asset-url";
 import { Modal } from "../../components/Modal";
 import { Toast } from "../../components/Toast";
 import { SeasonMembershipPanel } from "./SeasonMembershipPanel";
-import { downloadCsv, parseCsvFile } from "../../services/csv-files";
+import { downloadCsv, normalizeCsvName, parseCsvFile } from "../../services/csv-files";
 
 const competitionScopes: CompetitionScope[] = ["domestic", "continental", "international", "global", "regional", "friendly", "custom"];
 const competitionTypes: CompetitionType[] = ["league", "cup", "tournament", "championship", "friendly", "custom"];
@@ -141,6 +141,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
   const [selectedClubSeasonId, setSelectedClubSeasonId] = useState("all");
   const [selectedClubSeasonTeamIds, setSelectedClubSeasonTeamIds] = useState<string[] | null>(null);
   const [selectedClubHostId, setSelectedClubHostId] = useState("all");
+  const [teamCategory, setTeamCategory] = useState<"club" | "national">("club");
   const [selectedSport, setSelectedSport] = useState<Sport | null>(null);
   const [status, setStatus] = useState("Ready");
   const [isSaving, setIsSaving] = useState(false);
@@ -228,16 +229,15 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
   );
 
   const clubs = sportTeams.filter((team) => team.type === "club");
-  const visibleClubs = selectedClubSeasonTeamIds
-    ? clubs.filter((team) => selectedClubSeasonTeamIds.includes(team.id) && (selectedClubHostId === "all" || team.hostId === selectedClubHostId))
-    : clubs.filter((team) => selectedClubHostId === "all" || team.hostId === selectedClubHostId);
+  const visibleTeams = sportTeams.filter((team) => team.type === teamCategory
+    && (!selectedClubSeasonTeamIds || selectedClubSeasonTeamIds.includes(team.id))
+    && (selectedClubHostId === "all" || team.hostId === selectedClubHostId));
   const nationalTeams = sportTeams.filter((team) => team.type === "national");
 
   useEffect(() => {
     let cancelled = false;
     setSelectedClubSeasonId("all");
     setSelectedClubSeasonTeamIds(null);
-    setSelectedClubHostId("all");
     if (!selectedSport || sportCompetitions.length === 0) {
       setClubSeasonOptions([]);
       return;
@@ -245,7 +245,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
 
     void Promise.all(
       sportCompetitions
-        .filter((competition) => competition.participantType === "clubs")
+        .filter((competition) => competition.participantType === (teamCategory === "club" ? "clubs" : "nationalTeams"))
         .map(async (competition) => {
           const seasons = await apiClient.listSeasons(competition.id);
           return seasons.map((season) => ({ ...season, competitionName: competition.name }));
@@ -261,7 +261,11 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
     return () => {
       cancelled = true;
     };
-  }, [selectedSport?.id, sportCompetitions]);
+  }, [selectedSport?.id, sportCompetitions, teamCategory]);
+
+  useEffect(() => {
+    setSelectedClubHostId("all");
+  }, [selectedSport?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -317,11 +321,12 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
 
   const exportHostRoster = () => {
     const host = sportHosts.find((item) => item.id === selectedClubHostId);
-    if (!host) { setStatus("Select a host before exporting its roster."); return; }
-    const roster = teams.filter((team) => team.hostId === host.id && (team.type === "club" || team.type === "national"));
-    downloadCsv(`${host.name.replace(/[^a-z0-9-_]+/gi, "-")}-team-roster.csv`, ["team_id", "sport_id", "host_id", "team_name", "team_type", "short_name", "home_stadium_name", "home_stadium_photo_url", "logo_url"], roster.map((team) => ({
-      team_id: team.id, sport_id: team.sportId, host_id: team.hostId, team_name: team.name, team_type: team.type,
-      short_name: team.shortName, home_stadium_name: team.homeStadiumName, home_stadium_photo_url: team.homeStadiumPhotoUrl, logo_url: team.logoUrl
+    if (!host || !selectedSport) { setStatus("Select a sport and host before exporting its roster."); return; }
+    const roster = teams.filter((team) => team.hostId === host.id && team.type === teamCategory);
+    downloadCsv(`${host.name.replace(/[^a-z0-9-_]+/gi, "-")}-${teamCategory}-roster.csv`, ["Team ID", "Sport", "Host", "Team Name", "Team Type", "Short Name", "Slug", "Home Stadium Name", "Logo URL"], roster.map((team) => ({
+      "Team ID": team.id, Sport: selectedSport.name, Host: host.name, "Team Name": team.name,
+      "Team Type": team.type === "club" ? "Club" : "National Team", "Short Name": team.shortName, Slug: team.slug,
+      "Home Stadium Name": team.homeStadiumName, "Logo URL": team.logoUrl
     })));
     setStatus(`Exported ${roster.length} teams for ${host.name}.`);
   };
@@ -332,12 +337,40 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
     setIsImportingHostRoster(true);
     try {
       const rows = await parseCsvFile(file);
-      const requiredColumns = ["sport_id", "host_id", "team_name", "team_type"];
-      if (!rows.every((row) => requiredColumns.every((column) => column in row))) throw new Error(`Roster CSV must include these columns: ${requiredColumns.join(", ")}.`);
+      const hasColumn = (row: Record<string, string>, ...aliases: string[]) => aliases.some((column) => column in row);
+      const hasRequiredColumns = rows.every((row) => hasColumn(row, "team id", "team_id")
+        && hasColumn(row, "sport", "sport_name", "sport_id")
+        && hasColumn(row, "host", "host_name", "host_id")
+        && hasColumn(row, "team name", "team_name")
+        && hasColumn(row, "team type", "team_type"));
+      if (!hasRequiredColumns) throw new Error("Roster CSV needs Team ID, Sport, Host, Team Name, and Team Type columns. Leave Team ID blank for new teams.");
+      const read = (row: Record<string, string>, ...aliases: string[]) => aliases.map((key) => row[key]).find((value) => value !== undefined) ?? "";
+      const normalizeTeamType = (value: string) => value.trim().toLowerCase() === "national team" ? "national" : value.trim().toLowerCase();
+      for (const row of rows) {
+        const teamId = read(row, "team id", "team_id");
+        const teamName = read(row, "team name", "team_name");
+        const isExistingTeam = teams.some((team) => team.hostId === host.id
+          && ((teamId && team.id === teamId) || (teamName && normalizeCsvName(team.name) === normalizeCsvName(teamName))));
+        if (isExistingTeam) continue;
+        const rowSport = read(row, "sport", "sport_name");
+        const rowHost = read(row, "host", "host_name");
+        const legacySportId = read(row, "sport_id");
+        const legacyHostId = read(row, "host_id");
+        if ((rowSport && rowSport.toLocaleLowerCase() !== selectedSport?.name.toLocaleLowerCase()) || (legacySportId && legacySportId !== selectedSport?.id)) {
+          throw new Error(`Sport on row ${teamName} does not match the selected sport.`);
+        }
+        if ((rowHost && rowHost.toLocaleLowerCase() !== host.name.toLocaleLowerCase()) || (legacyHostId && legacyHostId !== host.id)) {
+          throw new Error(`Host on row ${teamName} does not match the selected host.`);
+        }
+        if (!teamId && normalizeTeamType(read(row, "team type", "team_type")) !== teamCategory) {
+          throw new Error(`New rows in this view must have Team Type set to ${teamCategory === "club" ? "Club" : "National Team"}.`);
+        }
+      }
       const result = await apiClient.importHostClubs(host.id, rows.map((row) => ({
-        teamId: row.team_id ?? "", sportId: row.sport_id ?? "", hostId: row.host_id ?? "", teamName: row.team_name ?? "",
-        teamType: row.team_type ?? "club", shortName: row.short_name ?? "", homeStadiumName: row.home_stadium_name ?? "",
-        homeStadiumPhotoUrl: row.home_stadium_photo_url ?? "", logoUrl: row.logo_url ?? ""
+        teamId: read(row, "team id", "team_id"), sportId: read(row, "sport_id") || selectedSport?.id || "", hostId: read(row, "host_id") || host.id,
+        teamName: read(row, "team name", "team_name"), teamType: normalizeTeamType(read(row, "team type", "team_type")),
+        shortName: read(row, "short name", "short_name"), slug: read(row, "slug"), homeStadiumName: read(row, "home stadium name", "home_stadium_name"),
+        logoUrl: read(row, "logo url", "logo_url")
       })), accessToken);
       await loadData();
       setStatus(`Host roster imported: ${result.createdCount} added, ${result.skippedCount} already present.`);
@@ -491,7 +524,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
     }
   };
 
-  const openTeamEditor = (team?: Team) => {
+  const openTeamEditor = (team?: Team, createType: "club" | "national" = teamCategory) => {
     if (!selectedSport) {
       return;
     }
@@ -512,7 +545,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
       setTeamSlug("");
       setTeamLogoUrl("");
       setTeamHomeStadiumName("");
-      setTeamType("club");
+      setTeamType(createType);
       setTeamHostId("");
       setEditingTeamId(null);
       openModal({ kind: "team", action: "create" });
@@ -917,7 +950,10 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
           <section className="console-panel sports-workspace-grid">
             <article className="entity-panel">
               <div className="panel-heading">
-                <h3>Clubs</h3>
+                <div className="view-mode-toggle" role="group" aria-label="Team category">
+                  <button type="button" className={teamCategory === "club" ? "active" : ""} onClick={() => setTeamCategory("club")}>Clubs</button>
+                  <button type="button" className={teamCategory === "national" ? "active" : ""} onClick={() => setTeamCategory("national")}>National Teams</button>
+                </div>
                 <label className="club-season-filter">
                   <span>Competition season</span>
                   <select value={selectedClubSeasonId} onChange={(event) => setSelectedClubSeasonId(event.target.value)}>
@@ -939,21 +975,23 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                   </select>
                 </label>
                 <div className="button-row">
-                  <button type="button" className="secondary" onClick={exportHostRoster} disabled={isCatalogView || selectedClubHostId === "all"}>Export Host Team Roster CSV</button>
-                  <button type="button" className="secondary" onClick={() => hostRosterFileRef.current?.click()} disabled={isCatalogView || selectedClubHostId === "all" || isImportingHostRoster}>{isImportingHostRoster ? "Importing…" : "Import Host Team Roster CSV"}</button>
-                  <button type="button" onClick={() => openTeamEditor()} disabled={isCatalogView}>Add Club</button>
+                  <button type="button" className="secondary" onClick={exportHostRoster} disabled={isCatalogView || selectedClubHostId === "all"}>{`Export ${teamCategory === "club" ? "Club" : "National Team"} Roster CSV`}</button>
+                  <button type="button" className="secondary" onClick={() => hostRosterFileRef.current?.click()} disabled={isCatalogView || selectedClubHostId === "all" || isImportingHostRoster}>{isImportingHostRoster ? "Importing…" : `Import ${teamCategory === "club" ? "Club" : "National Team"} Roster CSV`}</button>
+                  <button type="button" onClick={() => openTeamEditor(undefined, teamCategory)} disabled={isCatalogView}>{teamCategory === "club" ? "Add Club" : "Add National Team"}</button>
                   <input ref={hostRosterFileRef} type="file" accept=".csv,text/csv" hidden onChange={(event) => void importHostRoster(event.target.files?.[0])} />
                 </div>
               </div>
-              <p className="field-note">The roster includes clubs and national teams. Existing IDs or names are skipped. For a new team, leave team_id blank and fill sport_id, host_id, team_name, and team_type. Logo URLs are optional.</p>
+              <p className="field-note">The CSV uses the same fields as Add {teamCategory === "club" ? "Club" : "National Team"}. Existing Team IDs or names are skipped unchanged. Leave Team ID blank for a new row; GiTO creates the ID. Sport and Host come from the selected workspace and host filter. Logo URL is optional.</p>
               <div className="entity-list">
-                {visibleClubs.length > 0 ? (
-                  visibleClubs.map((team) => (
+                {visibleTeams.length > 0 ? (
+                  visibleTeams.map((team) => (
                     <EntityHeroCard
                       key={team.id}
                       name={team.name}
                       logoUrl={team.logoUrl}
-                      detail={team.homeStadiumName ? `${team.shortName ?? "Club"} · ${team.homeStadiumName}` : team.shortName ?? "Club"}
+                      detail={teamCategory === "club"
+                        ? team.homeStadiumName ? `${team.shortName ?? "Club"} · ${team.homeStadiumName}` : team.shortName ?? "Club"
+                        : team.countryId ? countries.find((country) => country.id === team.countryId)?.name ?? "National Team" : "National Team"}
                       size="team"
                       onDoubleClick={() => openTeamEditor(team)}
                       onDelete={() => queueDelete("team", team.id, team.name)}
@@ -963,40 +1001,13 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                 ) : (
                   <p className="field-note">
                     {selectedClubSeasonId !== "all" && selectedClubHostId !== "all"
-                      ? "No clubs match this competition season and host."
+                      ? `No ${teamCategory === "club" ? "clubs" : "national teams"} match this competition season and host.`
                       : selectedClubSeasonId !== "all"
-                      ? "No clubs are assigned to this competition season."
+                      ? `No ${teamCategory === "club" ? "clubs" : "national teams"} are assigned to this competition season.`
                       : selectedClubHostId !== "all"
-                      ? "No clubs are assigned to this host."
-                      : "No clubs are defined for this sport yet."}
+                      ? `No ${teamCategory === "club" ? "clubs" : "national teams"} are assigned to this host.`
+                      : `No ${teamCategory === "club" ? "clubs" : "national teams"} are defined for this sport yet.`}
                   </p>
-                )}
-              </div>
-            </article>
-
-            <article className="entity-panel">
-              <div className="panel-heading">
-                <h3>National Teams</h3>
-                <button type="button" onClick={() => openTeamEditor()} disabled={isCatalogView}>
-                  Add National Team
-                </button>
-              </div>
-              <div className="entity-list">
-                {nationalTeams.length > 0 ? (
-                  nationalTeams.map((team) => (
-                    <EntityHeroCard
-                      key={team.id}
-                      name={team.name}
-                      logoUrl={team.logoUrl}
-                      detail={team.countryId ? countries.find((country) => country.id === team.countryId)?.name ?? "National Team" : "National Team"}
-                      size="team"
-                      onDoubleClick={() => openTeamEditor(team)}
-                      onDelete={() => queueDelete("team", team.id, team.name)}
-                      deleteDisabled={isCatalogView}
-                    />
-                  ))
-                ) : (
-                  <p className="field-note">No national teams have been created yet.</p>
                 )}
               </div>
             </article>
