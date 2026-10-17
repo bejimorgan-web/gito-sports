@@ -894,10 +894,13 @@ export const apiClient = {
   deleteHost(hostId: string, accessToken: string) {
     return request<void>(`/hosts/${hostId}`, { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } });
   },
-  importHostClubs(hostId: string, rows: Array<Record<string, string>>, accessToken: string) {
-    return request<{ created: Team[]; createdCount: number; skippedCount: number }>(`/hosts/${encodeURIComponent(hostId)}/clubs/import`, {
-      method: "POST", headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ rows })
+  importHostClubs(hostId: string, rows: Array<Record<string, string>>, accessToken: string, options?: { updateExisting?: boolean }) {
+    return request<{ created: Team[]; updated: Team[]; createdCount: number; updatedCount: number; skippedCount: number }>(`/hosts/${encodeURIComponent(hostId)}/clubs/import`, {
+      method: "POST", headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ rows, updateExisting: options?.updateExisting === true })
     });
+  },
+  getHostClubImportCapabilities(hostId: string, accessToken: string) {
+    return request<{ updateExisting: boolean }>(`/hosts/${encodeURIComponent(hostId)}/clubs/import-capabilities`, { headers: { authorization: `Bearer ${accessToken}` } });
   },
   listCompetitions(mode?: 'legacy' | 'catalog', hostId?: string) {
     const path = buildApiPath('/competitions', { mode, ...(hostId ? { hostId } : {}) });
