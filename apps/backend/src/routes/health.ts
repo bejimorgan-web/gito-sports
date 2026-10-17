@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getDatabase, isDatabaseInitialized } from "../db/connection.js";
+import { EXPECTED_SCHEMA_VERSION, getDatabase, isDatabaseInitialized } from "../db/connection.js";
 import { isMigrationImported, getMigrationMetadata } from "../db/migration-import.js";
 
 export const healthRouter = Router();
@@ -17,7 +17,7 @@ function getCount(database: ReturnType<typeof getDatabase>, table: string) {
 function databaseSchemaReady(database: ReturnType<typeof getDatabase>): boolean {
   try {
     const schemaVersion = Number((database.prepare("PRAGMA user_version").get() as { user_version?: number }).user_version ?? 0);
-    if (schemaVersion !== 1) return false;
+    if (schemaVersion !== EXPECTED_SCHEMA_VERSION) return false;
     const requiredTables = [
       "sports",
       "teams",
@@ -28,7 +28,14 @@ function databaseSchemaReady(database: ReturnType<typeof getDatabase>): boolean 
       "operator_users",
       "news_articles",
       "news_article_categories",
-      "news_article_media"
+      "news_article_media",
+      "competition_entries",
+      "match_result_revisions",
+      "standings_snapshots",
+      "standings_snapshot_rows",
+      "standings_coverage_assessments",
+      "standings_schedule_manifests",
+      "standings_rulesets"
     ];
     const placeholders = requiredTables.map(() => "?").join(",");
     const rows = database
