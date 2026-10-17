@@ -20,6 +20,9 @@ export interface CanonicalFixtureImportRow {
   awayTeamName?: string;
   startsAt?: string;
   venueName?: string;
+  homeScore?: number;
+  awayScore?: number;
+  resultCorrectionReason?: string;
 }
 
 function validateFixtureInput(input: CanonicalFixtureInput) {
@@ -74,7 +77,7 @@ export function createCanonicalFixture(input: CanonicalFixtureInput) {
   return getCanonicalFixtureById(id);
 }
 
-/** Add new fixtures from an editable CSV export; existing exported fixture IDs are skipped. */
+/** Update exported fixtures in place and append new rows; omitted fixtures are preserved. */
 export function importCanonicalFixtures(input: { hostId: string; competitionId: string; seasonId: string; rows: CanonicalFixtureImportRow[] }) {
   const db = getDatabase();
   if (!Array.isArray(input.rows) || input.rows.length > 2000) throw new Error("invalid_fixture_import_rows");
@@ -87,29 +90,55 @@ export function importCanonicalFixtures(input: { hostId: string; competitionId: 
   const expectedType = competition.participant_type === "nationalTeams" ? "national" : competition.participant_type === "clubs" ? "club" : undefined;
   const skippedIds = new Set<string>();
   const created: any[] = [];
+  const updated: any[] = [];
+  const rowResults: Array<{ rowIndex: number; fixtureId: string; action: "created" | "updated" | "unchanged" }> = [];
   const seen = new Set<string>();
+  const resolvedFixtureIds = new Set<string>();
   const resolveTeam = (nameValue: string | undefined) => {
     const name = String(nameValue ?? "").trim();
     if (!name) throw new Error("fixture_team_name_required");
-    const team = db.prepare("SELECT t.id, t.type, t.home_stadium_name FROM teams t JOIN competition_season_teams cst ON cst.team_id = t.id WHERE t.host_id = ? AND t.sport_id = ? AND cst.competition_id = ? AND cst.season_id = ? AND lower(trim(t.name)) = lower(trim(?)) LIMIT 1")
-      .get(input.hostId, competition.sport_id, input.competitionId, input.seasonId, name) as { id: string; type: string; home_stadium_name: string | null } | undefined;
+    const team = db.prepare("SELECT t.id, t.type, t.home_stadium_name, t.home_stadium_photo_url FROM teams t JOIN competition_season_teams cst ON cst.team_id = t.id WHERE t.host_id = ? AND t.sport_id = ? AND cst.competition_id = ? AND cst.season_id = ? AND lower(trim(t.name)) = lower(trim(?)) LIMIT 1")
+      .get(input.hostId, competition.sport_id, input.competitionId, input.seasonId, name) as { id: string; type: string; home_stadium_name: string | null; home_stadium_photo_url: string | null } | undefined;
     if (!team) throw new Error(`fixture_team_not_in_season:${name}`);
     if (expectedType && team.type !== expectedType) throw new Error("team_participant_type_mismatch");
     return team;
   };
 
   const run = db.transaction(() => {
-    for (const row of input.rows) {
-      if (row.fixtureId) {
-        const existing = db.prepare("SELECT id, competition_id, season_id FROM matches WHERE id = ?").get(row.fixtureId) as { id: string; competition_id: string; season_id: string | null } | undefined;
+    input.rows.forEach((row, rowIndex) => {
+      if (row.fixtureId?.trim()) {
+        const existing = db.prepare("SELECT id, competition_id, season_id, home_team_id, away_team_id FROM matches WHERE id = ?").get(row.fixtureId.trim()) as { id: string; competition_id: string; season_id: string | null; home_team_id: string; away_team_id: string } | undefined;
         if (!existing || existing.competition_id !== input.competitionId || existing.season_id !== input.seasonId) throw new Error("fixture_import_id_mismatch");
-        skippedIds.add(existing.id);
-        continue;
+        if (resolvedFixtureIds.has(existing.id)) throw new Error("duplicate_fixture_import_row");
+        if (!row.startsAt?.trim()) throw new Error("A match date is required.");
+        const homeTeam = resolveTeam(row.homeTeamName);
+        const awayTeam = resolveTeam(row.awayTeamName);
+        const currentScore = db.prepare(`SELECT CASE WHEN EXISTS (
+            SELECT 1 FROM match_score_state WHERE match_id = ? AND final_result_confirmed = 1
+          ) OR EXISTS (
+            SELECT 1 FROM match_result_revisions WHERE match_id = ? AND result_status = 'ended'
+              AND final_result_confirmed = 1 AND validation_state = 'accepted'
+          ) THEN 1 ELSE 0 END AS final_result_confirmed`).get(existing.id, existing.id) as { final_result_confirmed: number };
+        if (Number(currentScore?.final_result_confirmed) === 1 && (existing.home_team_id !== homeTeam.id || existing.away_team_id !== awayTeam.id)) throw new Error("fixture_import_confirmed_result_participants_locked");
+        const current = getCanonicalFixtureById(existing.id);
+        const sameStart = current?.startsAt && Date.parse(current.startsAt) === Date.parse(row.startsAt.trim());
+        if (Number(currentScore?.final_result_confirmed) === 1 && !sameStart) throw new Error("fixture_import_confirmed_result_schedule_locked");
+        if (!sameStart || existing.home_team_id !== homeTeam.id || existing.away_team_id !== awayTeam.id) {
+          const fixture = updateCanonicalFixture(existing.id, { startsAt: row.startsAt.trim(), homeTeamId: homeTeam.id, awayTeamId: awayTeam.id, venueName: homeTeam.home_stadium_name, venueImageUrl: homeTeam.home_stadium_photo_url });
+          if (!fixture) throw new Error("fixture_not_found");
+          updated.push(fixture);
+          rowResults.push({ rowIndex, fixtureId: fixture.id, action: "updated" });
+        } else {
+          skippedIds.add(existing.id);
+          rowResults.push({ rowIndex, fixtureId: existing.id, action: "unchanged" });
+        }
+        resolvedFixtureIds.add(existing.id);
+        return;
       }
       const homeTeam = resolveTeam(row.homeTeamName);
       const awayTeam = resolveTeam(row.awayTeamName);
       const signature = `${homeTeam.id}:${awayTeam.id}:${String(row.startsAt ?? "").trim()}`.toLocaleLowerCase();
-      if (seen.has(signature)) { skippedIds.add(signature); continue; }
+      if (seen.has(signature)) throw new Error("duplicate_fixture_import_row");
       seen.add(signature);
       const fixtureInput: CanonicalFixtureInput = {
         competitionId: input.competitionId,
@@ -118,15 +147,26 @@ export function importCanonicalFixtures(input: { hostId: string; competitionId: 
         awayTeamId: awayTeam.id,
         startsAt: String(row.startsAt ?? "").trim(),
         venueName: homeTeam.home_stadium_name,
+        venueImageUrl: homeTeam.home_stadium_photo_url,
         status: "scheduled"
       };
       const equivalent = findEquivalentCanonicalFixtures(fixtureInput);
-      if (equivalent.length) { skippedIds.add(`${homeTeam.id}:${awayTeam.id}:${fixtureInput.startsAt}`); continue; }
-      created.push(createCanonicalFixture(fixtureInput));
-    }
+      if (equivalent.length) {
+        if (resolvedFixtureIds.has(equivalent[0].id)) throw new Error("duplicate_fixture_import_row");
+        skippedIds.add(`${homeTeam.id}:${awayTeam.id}:${fixtureInput.startsAt}`);
+        rowResults.push({ rowIndex, fixtureId: equivalent[0].id, action: "unchanged" });
+        resolvedFixtureIds.add(equivalent[0].id);
+        return;
+      }
+      const fixture = createCanonicalFixture(fixtureInput);
+      if (!fixture) throw new Error("fixture_create_failed");
+      created.push(fixture);
+      rowResults.push({ rowIndex, fixtureId: fixture.id, action: "created" });
+      resolvedFixtureIds.add(fixture.id);
+    });
   });
   run();
-  return { created, createdCount: created.length, skippedCount: skippedIds.size };
+  return { created, updated, rowResults, createdCount: created.length, updatedCount: updated.length, skippedCount: skippedIds.size };
 }
 
 export function updateCanonicalFixture(fixtureId: string, input: Partial<CanonicalFixtureInput>) {

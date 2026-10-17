@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/mobile_models.dart';
 import '../services/mobile_api_service.dart';
+import 'mobile_standings_section.dart';
 
 class MobileStateView<T> extends StatelessWidget {
   const MobileStateView(
@@ -301,7 +302,7 @@ class _ClubDetailScreenState extends State<ClubDetailScreen> {
                           .toList())),
               Expanded(
                   child: tab == 2
-                      ? _ClubCompetitionsSection(detail: detail)
+                      ? _ClubCompetitionsSection(detail: detail, api: widget.api)
                       : tab == 3
                           ? const _ClubUnavailableSection(
                               message: 'Squad data is not available yet.')
@@ -401,9 +402,10 @@ class _ClubHeader extends StatelessWidget {
 }
 
 class _ClubCompetitionsSection extends StatefulWidget {
-  const _ClubCompetitionsSection({required this.detail});
+  const _ClubCompetitionsSection({required this.detail, required this.api});
 
   final MobileClubDetail detail;
+  final MobileApiService api;
 
   @override
   State<_ClubCompetitionsSection> createState() =>
@@ -412,6 +414,7 @@ class _ClubCompetitionsSection extends StatefulWidget {
 
 class _ClubCompetitionsSectionState extends State<_ClubCompetitionsSection> {
   String? competitionId;
+  String? seasonId;
 
   @override
   Widget build(BuildContext context) {
@@ -420,11 +423,21 @@ class _ClubCompetitionsSectionState extends State<_ClubCompetitionsSection> {
       return const _ClubUnavailableSection(
           message: 'No competitions available for this club.');
     }
-    final selectedId = competitionId ?? competitions.first.id;
+    final selectedId = competitions.any((item) => item.id == competitionId)
+        ? competitionId!
+        : competitions.first.id;
     final selected = competitions.firstWhere((item) => item.id == selectedId);
     final seasons = widget.detail.seasons
         .where((season) => season.competitionId == selected.id)
         .toList();
+    final selectedSeasonId = seasons.any((season) => season.id == seasonId)
+        ? seasonId
+        : seasons.isEmpty
+            ? null
+            : seasons.first.id;
+    final selectedSeason = selectedSeasonId == null
+        ? null
+        : seasons.firstWhere((season) => season.id == selectedSeasonId);
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -437,14 +450,43 @@ class _ClubCompetitionsSectionState extends State<_ClubCompetitionsSection> {
                     child: Text(item.name),
                   ))
               .toList(),
-          onChanged: (value) => setState(() => competitionId = value),
+          onChanged: (value) => setState(() {
+            competitionId = value;
+            seasonId = null;
+          }),
         ),
         const SizedBox(height: 16),
         Text(selected.name, style: Theme.of(context).textTheme.titleLarge),
-        Text(seasons.isEmpty ? 'Season unavailable' : seasons.first.name),
-        const SizedBox(height: 24),
-        const _ClubUnavailableSection(
-            message: 'Standings unavailable for this competition.'),
+        if (seasons.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(top: 12),
+            child: Text('No competition seasons are available for this club.'),
+          )
+        else ...[
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            initialValue: selectedSeasonId,
+            decoration: const InputDecoration(labelText: 'Season'),
+            items: seasons
+                .map((season) => DropdownMenuItem<String>(
+                      value: season.id,
+                      child: Text(season.name),
+                    ))
+                .toList(),
+            onChanged: (value) => setState(() => seasonId = value),
+          ),
+          const SizedBox(height: 16),
+          if (selectedSeason != null)
+            SizedBox(
+              height: 560,
+              child: MobileStandingsSection(
+                key: ValueKey('${selected.id}:${selectedSeason.id}'),
+                competitionId: selected.id,
+                seasonId: selectedSeason.id,
+                api: widget.api,
+              ),
+            ),
+        ],
       ],
     );
   }
