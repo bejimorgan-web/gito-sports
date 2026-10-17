@@ -60,6 +60,16 @@ export type {
 } from "./sports.js";
 
 export type {
+  SoccerCompetitionFormatId,
+  SoccerStageKind,
+  SoccerTieBreaker,
+  SoccerStageRules,
+  SoccerQualificationRoute,
+  SoccerCompetitionRuleset
+} from "./soccer-rulesets.js";
+export { soccerCompetitionFormats } from "./soccer-rulesets.js";
+
+export type {
   MatchLifecycleStatus,
   StreamLifecycleStatus
 } from "./lifecycle.js";

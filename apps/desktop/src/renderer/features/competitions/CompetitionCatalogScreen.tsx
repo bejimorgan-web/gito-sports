@@ -4,6 +4,7 @@ import type { Competition, CreateCompetitionRequest, Host, Sport } from "@gito/s
 import { apiClient } from "../../services/api-client";
 import { isValidLogoSource, LogoUrlField } from "../../components/LogoUrlField";
 import { resolveAssetUrl } from "../../components/asset-url";
+import { SoccerRulesetPanel } from "./SoccerRulesetPanel";
 
 const availableScopes: Competition["scope"][] = ["domestic", "continental", "international", "global", "regional", "friendly", "custom"];
 const availableTypes: Competition["type"][] = ["league", "cup", "tournament", "championship", "friendly", "custom"];
@@ -241,6 +242,10 @@ export function CompetitionCatalogScreen({ accessToken }: { accessToken: string 
           </button>
         </div>
       </section>
+
+      {selectedCompetition && /^(soccer|football)$/i.test(selectedSport?.slug ?? selectedSport?.name ?? "")
+        ? <SoccerRulesetPanel key={selectedCompetition.id} competitionId={selectedCompetition.id} accessToken={accessToken} />
+        : null}
 
       <section className="console-panel">
         <div className="panel-heading">

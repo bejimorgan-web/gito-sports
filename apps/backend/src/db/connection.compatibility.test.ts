@@ -13,6 +13,7 @@ import { standingsCoverageMigration } from "./standings-coverage-migration.js";
 import { standingsScheduleManifestMigration } from "./standings-schedule-manifest-migration.js";
 import { standingsGovernanceMigration } from "./standings-governance-migration.js";
 import { standingsSourceEvidenceMigration } from "./standings-source-evidence-migration.js";
+import { soccerRulesetsMigration } from "./soccer-rulesets-migration.js";
 import { allowSqliteInstantiation, DatabaseSync } from "./sqlite.js";
 import { markMigrationImported } from "./migration-import.js";
 
@@ -192,7 +193,34 @@ function downgradeSourceEvidenceMigration(database: DatabaseSync): void {
   `);
 }
 
-// getDatabase() applies the current working-tree bootstrap, then the ordered v2-v7
+function downgradeSoccerRulesetsMigration(database: DatabaseSync): void {
+  database.exec(`
+    DROP TRIGGER trg_qualification_decision_confirm_guard;
+    DROP TRIGGER trg_qualification_decision_no_direct_confirm;
+    DROP TRIGGER trg_qualification_decision_no_delete;
+    DROP TRIGGER trg_qualification_final_decision_immutable;
+    DROP TRIGGER trg_qualification_route_immutable;
+    DROP TRIGGER trg_qualification_route_proposal_only;
+    DROP TRIGGER trg_qualification_route_no_delete;
+    DROP TRIGGER trg_competition_soccer_default_guard;
+    DROP TRIGGER trg_season_soccer_ruleset_immutable;
+    DROP TRIGGER trg_season_soccer_ruleset_proposal_only;
+    DROP TRIGGER trg_season_soccer_ruleset_no_delete;
+    DROP TRIGGER trg_competition_soccer_ruleset_immutable;
+    DROP TRIGGER trg_competition_soccer_ruleset_proposal_only;
+    DROP TRIGGER trg_competition_soccer_ruleset_no_delete;
+    DROP TABLE soccer_qualification_decisions;
+    DROP TABLE soccer_qualification_routes;
+    DROP TABLE season_soccer_rulesets;
+    DROP TABLE competition_soccer_rulesets;
+    ALTER TABLE competitions DROP COLUMN default_soccer_ruleset_id;
+    ALTER TABLE competitions DROP COLUMN default_soccer_format_id;
+    DELETE FROM schema_migrations WHERE version = 8;
+    PRAGMA user_version = 7;
+  `);
+}
+
+// getDatabase() applies the current working-tree bootstrap, then the ordered v2-v8
 // migration. This fixture is not historical-v1 or production schema evidence.
 test("fresh bootstrap uses the current working-tree schema and startup path", () => {
   const testDirectory = createCaseDirectory("fresh-bootstrap-from-current-working-tree");
@@ -202,7 +230,7 @@ test("fresh bootstrap uses the current working-tree schema and startup path", ()
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 
   const snapshot = readDatabaseSnapshot(databasePath);
-  assert.equal(snapshot.version, 7);
+  assert.equal(snapshot.version, 8);
   const tableNames = new Set(snapshot.schema.map((entry) => (entry as { name: string }).name));
   for (const tableName of [
     "sports", "competitions", "seasons", "teams", "matches", "operator_users",
@@ -210,7 +238,8 @@ test("fresh bootstrap uses the current working-tree schema and startup path", ()
     "match_result_revisions", "standings_snapshots", "standings_snapshot_results",
     "standings_snapshot_rows", "standings_coverage_assessments", "standings_coverage_fixtures",
     "standings_schedule_manifests", "standings_schedule_manifest_fixtures", "standings_rulesets",
-    "standings_coverage_manifest_fixtures"
+    "standings_coverage_manifest_fixtures", "competition_soccer_rulesets", "season_soccer_rulesets",
+    "soccer_qualification_routes", "soccer_qualification_decisions"
   ]) {
     assert.ok(tableNames.has(tableName), `expected fresh bootstrap table ${tableName}`);
   }
@@ -226,7 +255,8 @@ test("fresh bootstrap uses the current working-tree schema and startup path", ()
     { version: 4, name: standingsCoverageMigration.name },
     { version: 5, name: standingsScheduleManifestMigration.name },
     { version: 6, name: standingsGovernanceMigration.name },
-    { version: 7, name: standingsSourceEvidenceMigration.name }
+    { version: 7, name: standingsSourceEvidenceMigration.name },
+    { version: 8, name: soccerRulesetsMigration.name }
   ]);
   const v2Ledger = ledger?.rows.find((row) => (row as { version: number }).version === 2) as
     { checksum: string } | undefined;
@@ -246,6 +276,9 @@ test("fresh bootstrap uses the current working-tree schema and startup path", ()
   const v7Ledger = ledger?.rows.find((row) => (row as { version: number }).version === 7) as
     { checksum: string } | undefined;
   assert.equal(v7Ledger?.checksum, migrationChecksum(standingsSourceEvidenceMigration));
+  const v8Ledger = ledger?.rows.find((row) => (row as { version: number }).version === 8) as
+    { checksum: string } | undefined;
+  assert.equal(v8Ledger?.checksum, migrationChecksum(soccerRulesetsMigration));
 });
 
 test("the explicitly sourced current-working-tree bootstrap fixture passes preflight read-only", () => {
@@ -303,7 +336,7 @@ test("read-only startup accepts the exact disposable v5 schema and makes no chan
   assert.deepEqual(readDatabaseSnapshot(databasePath), before);
 });
 
-test("writable startup advances an explicitly ledgered v2 database through migration v5", () => {
+test("writable startup advances an explicitly ledgered v2 database through migration v8", () => {
   const testDirectory = createCaseDirectory("writable-v2-to-v3");
   const databasePath = path.join(testDirectory, "bootstrap.sqlite");
   const bootstrap = runStartup(databasePath);
@@ -311,6 +344,7 @@ test("writable startup advances an explicitly ledgered v2 database through migra
 
   const database = allowSqliteInstantiation(() => new DatabaseSync(databasePath));
   try {
+    downgradeSoccerRulesetsMigration(database);
     downgradeSourceEvidenceMigration(database);
     downgradeGovernanceMigration(database);
     downgradeManifestMigration(database);
@@ -352,17 +386,17 @@ test("writable startup advances an explicitly ledgered v2 database through migra
   const upgraded = runStartup(databasePath);
   assert.equal(upgraded.status, 0, `${upgraded.stdout}\n${upgraded.stderr}`);
   const after = readDatabaseSnapshot(databasePath);
-  assert.equal(after.version, 7);
+  assert.equal(after.version, 8);
   assert.ok(after.schema.some((entry) => (entry as { name: string }).name === "match_result_revisions"));
   assert.ok(after.schema.some((entry) => (entry as { name: string }).name === "standings_coverage_assessments"));
   assert.deepEqual(
     (after.contents.find((entry) => entry.tableName === "schema_migrations")?.rows as Array<{ version: number }>)
       .map(({ version }) => version),
-    [1, 2, 3, 4, 5, 6, 7]
+    [1, 2, 3, 4, 5, 6, 7, 8]
   );
 });
 
-test("read-only startup rejects a verified v1 database before attempting v2 through v7 migrations", () => {
+test("read-only startup rejects a verified v1 database before attempting v2 through v8 migrations", () => {
   const testDirectory = createCaseDirectory("read-only-pending-migrations");
   const databasePath = path.join(testDirectory, "bootstrap.sqlite");
   const bootstrap = runStartup(databasePath);
@@ -370,6 +404,7 @@ test("read-only startup rejects a verified v1 database before attempting v2 thro
 
   const database = allowSqliteInstantiation(() => new DatabaseSync(databasePath));
   try {
+    downgradeSoccerRulesetsMigration(database);
     downgradeSourceEvidenceMigration(database);
     downgradeGovernanceMigration(database);
     downgradeManifestMigration(database);
@@ -418,7 +453,7 @@ test("read-only startup rejects a verified v1 database before attempting v2 thro
   );
 });
 
-test("structurally verified v1 databases upgrade through v7 and preserve fixture assignments", () => {
+test("structurally verified v1 databases upgrade through v8 and preserve fixture assignments", () => {
   const testDirectory = createCaseDirectory("v1-fixture-preservation");
   const databasePath = path.join(testDirectory, "bootstrap.sqlite");
   const bootstrap = runStartup(databasePath);
@@ -426,6 +461,7 @@ test("structurally verified v1 databases upgrade through v7 and preserve fixture
 
   const database = allowSqliteInstantiation(() => new DatabaseSync(databasePath));
   try {
+    downgradeSoccerRulesetsMigration(database);
     downgradeSourceEvidenceMigration(database);
     downgradeGovernanceMigration(database);
     downgradeManifestMigration(database);
@@ -508,7 +544,7 @@ test("structurally verified v1 databases upgrade through v7 and preserve fixture
     );
     assert.equal(
       (after.prepare("PRAGMA user_version").get() as { user_version: number }).user_version,
-      7
+      8
     );
     assert.ok(after.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?")
       .get("idx_legacy_teams_name_audit"));
@@ -568,6 +604,7 @@ test("a partially migrated unledgered version-one database is rejected unchanged
 
   const database = allowSqliteInstantiation(() => new DatabaseSync(databasePath));
   try {
+    downgradeSoccerRulesetsMigration(database);
     downgradeSourceEvidenceMigration(database);
     downgradeGovernanceMigration(database);
     downgradeManifestMigration(database);

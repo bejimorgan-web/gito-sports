@@ -62,6 +62,7 @@ export interface CreateStandingsSnapshotInput {
     approvedByOperatorId: string;
     approvedAt: string;
   };
+  seasonSoccerRuleset?: { id: string; version: number; formatTemplateId: string; rulesetHash: string };
   calculatedAt?: string;
 }
 
@@ -368,7 +369,8 @@ export function createStandingsSnapshot(
       calculationInput,
       acceptedRevisions: revisions,
       calculation: result,
-      ...(input.rulesetApproval ? { rulesetApproval: input.rulesetApproval } : {})
+      ...(input.rulesetApproval ? { rulesetApproval: input.rulesetApproval } : {}),
+      ...(input.seasonSoccerRuleset ? { seasonSoccerRuleset: input.seasonSoccerRuleset } : {})
     };
     const contentJson = stableJson(canonicalContent);
     const contentHash = crypto.createHash("sha256").update(contentJson).digest("hex");

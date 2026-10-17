@@ -17,14 +17,15 @@ import { standingsCoverageMigration } from "./standings-coverage-migration.js";
 import { standingsScheduleManifestMigration } from "./standings-schedule-manifest-migration.js";
 import { standingsGovernanceMigration } from "./standings-governance-migration.js";
 import { standingsSourceEvidenceMigration } from "./standings-source-evidence-migration.js";
+import { soccerRulesetsMigration } from "./soccer-rulesets-migration.js";
 import { NewsCollectionScheduler, ensureNewsCollectionSchedulerSchema } from "../services/news-collection-scheduler.js";
 import { NewsService } from "../services/news-service.js";
 import { NewsWebRssGeneratorService, ensureNewsGeneratedRssSchema } from "../services/news-web-rss-generator-service.js";
 
 let database: DatabaseSync | null = null;
 const BASELINE_SCHEMA_VERSION = 1;
-const EXPECTED_SCHEMA_VERSION = 7;
-const SUPPORTED_SCHEMA_VERSIONS = [BASELINE_SCHEMA_VERSION, 2, 3, 4, 5, 6, EXPECTED_SCHEMA_VERSION] as const;
+const EXPECTED_SCHEMA_VERSION = 8;
+const SUPPORTED_SCHEMA_VERSIONS = [BASELINE_SCHEMA_VERSION, 2, 3, 4, 5, 6, 7, EXPECTED_SCHEMA_VERSION] as const;
 const REQUIRED_BASELINE_TABLES = [
   "sports",
   "countries",
@@ -75,7 +76,8 @@ const APPLICATION_MIGRATIONS = [
   standingsCoverageMigration,
   standingsScheduleManifestMigration,
   standingsGovernanceMigration,
-  standingsSourceEvidenceMigration
+  standingsSourceEvidenceMigration,
+  soccerRulesetsMigration
 ] as const;
 
 function migrationDefinitionsForDatabase(database: DatabaseSync): readonly SqlMigration[] {
@@ -143,7 +145,11 @@ function assertVersionedMigrationShape(database: DatabaseSync, schemaVersion: nu
     { version: 5, table: "standings_schedule_manifest_fixtures", columns: ["manifest_id", "fixture_key", "home_team_id", "away_team_id"] },
     { version: 6, table: "standings_rulesets", columns: ["id", "competition_id", "season_id", "ruleset_json", "ruleset_hash", "status", "proposed_by_operator_id", "approved_by_operator_id"] },
     { version: 6, table: "standings_schedule_manifests", columns: ["source_name", "source_reference"] },
-    { version: 7, table: "standings_schedule_manifests", columns: ["source_content_hash"] }
+    { version: 7, table: "standings_schedule_manifests", columns: ["source_content_hash"] },
+    { version: 8, table: "competition_soccer_rulesets", columns: ["id", "competition_id", "version", "format_template_id", "ruleset_json", "ruleset_hash", "status"] },
+    { version: 8, table: "season_soccer_rulesets", columns: ["id", "competition_id", "season_id", "source_ruleset_id", "version", "status"] },
+    { version: 8, table: "soccer_qualification_routes", columns: ["id", "source_competition_id", "source_season_id", "destination_competition_id", "destination_season_id", "destination_stage_id", "route_json", "status"] },
+    { version: 8, table: "soccer_qualification_decisions", columns: ["id", "route_id", "source_snapshot_id", "source_ruleset_hash", "team_id", "state"] }
   ];
   for (const requirement of requirements.filter(({ version }) => schemaVersion >= version)) {
     if (!hasTable(database, requirement.table)) {
@@ -250,6 +256,12 @@ export function assertDatabaseStartupCompatibility(database: DatabaseSync, optio
       || !["source_name", "source_reference"].every((column) => manifestColumns.has(column))
       || (schemaVersion >= 7 && !manifestColumns.has("source_content_hash"))) {
       throw new Error(`[startup] schema mismatch: standings governance migration v${schemaVersion} is incomplete`);
+    }
+  }
+  if (schemaVersion >= 8) {
+    const competitionColumns = new Set((database.prepare("PRAGMA table_info(competitions)").all() as Array<{ name: string }>).map(({ name }) => name));
+    if (!competitionColumns.has("default_soccer_ruleset_id") || !competitionColumns.has("default_soccer_format_id")) {
+      throw new Error("[startup] schema mismatch: competition soccer default columns are missing");
     }
   }
 

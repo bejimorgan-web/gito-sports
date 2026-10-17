@@ -29,6 +29,9 @@ export function SeasonMembershipPanel({ teams, hosts, competitions, selectedSpor
   const [isSavingSeason, setIsSavingSeason] = useState(false);
   const [hostTeams, setHostTeams] = useState<Team[]>([]);
   const [isImportingRoster, setIsImportingRoster] = useState(false);
+  const [soccerRulesets, setSoccerRulesets] = useState<Array<{ id: string; version: number; formatTemplateId: string; status: "pending" | "approved"; proposedByOperatorId: string }>>([]);
+  const [competitionRulesets, setCompetitionRulesets] = useState<Array<{ id: string; version: number; formatTemplateId: string; status: "pending" | "approved" }>>([]);
+  const [selectedRulesetId, setSelectedRulesetId] = useState("");
   const seasonRosterFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -57,6 +60,32 @@ export function SeasonMembershipPanel({ teams, hosts, competitions, selectedSpor
       })
       .catch(() => setStatus("Unable to load competition memberships."));
   }, [competitionId]);
+
+  useEffect(() => {
+    if (!competitionId || !selectedCompetition) { setCompetitionRulesets([]); return; }
+    void apiClient.listSoccerRulesets(competitionId).then(setCompetitionRulesets).catch(() => setCompetitionRulesets([]));
+  }, [competitionId, selectedCompetition?.id]);
+  useEffect(() => {
+    if (!competitionId || !seasonId) { setSoccerRulesets([]); return; }
+    void apiClient.listSeasonSoccerRulesets(competitionId, seasonId).then(setSoccerRulesets).catch(() => setSoccerRulesets([]));
+  }, [competitionId, seasonId]);
+
+  const pinSeasonRuleset = async () => {
+    if (!competitionId || !seasonId || !selectedRulesetId) return;
+    try {
+      await apiClient.pinSeasonSoccerRuleset(competitionId, seasonId, selectedRulesetId, accessToken);
+      setSoccerRulesets(await apiClient.listSeasonSoccerRulesets(competitionId, seasonId));
+      setStatus("Season ruleset version proposed. A different administrator must approve it.");
+    } catch (error) { setStatus(error instanceof Error ? error.message : "Unable to pin season ruleset."); }
+  };
+  const approveSeasonRuleset = async (rulesetId: string) => {
+    if (!competitionId || !seasonId) return;
+    try {
+      await apiClient.approveSeasonSoccerRuleset(competitionId, seasonId, rulesetId, accessToken);
+      setSoccerRulesets(await apiClient.listSeasonSoccerRulesets(competitionId, seasonId));
+      setStatus("This season is pinned to its approved soccer ruleset version.");
+    } catch (error) { setStatus(error instanceof Error ? error.message : "Unable to approve season ruleset."); }
+  };
 
   useEffect(() => {
     if (!selectedCompetition?.hostId) { setHostTeams([]); return; }
@@ -202,6 +231,21 @@ export function SeasonMembershipPanel({ teams, hosts, competitions, selectedSpor
           </div>
         </label>
       </div>
+      {selectedCompetition && seasonId && competitionRulesets.length > 0 ? <section className="console-panel">
+        <div className="panel-heading"><h4>Season Ruleset</h4><span className="status-pill">{soccerRulesets.find((item) => item.status === "approved") ? "Pinned and approved" : "Not approved"}</span></div>
+        <p className="field-note">Choose an approved competition ruleset version for this season. Later competition-default changes will not change this season.</p>
+        <div className="button-row">
+          <select aria-label="Approved competition ruleset version" value={selectedRulesetId} onChange={(event) => setSelectedRulesetId(event.target.value)}>
+            <option value="">Select approved version</option>
+            {competitionRulesets.filter((item) => item.status === "approved").map((item) => <option key={item.id} value={item.id}>Version {item.version} · {item.formatTemplateId}</option>)}
+          </select>
+          <button type="button" onClick={() => void pinSeasonRuleset()} disabled={!selectedRulesetId}>Propose version for season</button>
+        </div>
+        <div className="entity-list">{soccerRulesets.map((item) => <div className="entity-list-item" key={item.id}>
+          <span>Season version {item.version} · {item.formatTemplateId} · {item.status}</span>
+          {item.status === "pending" ? <button type="button" className="secondary" onClick={() => void approveSeasonRuleset(item.id)}>Approve (second administrator)</button> : null}
+        </div>)}</div>
+      </section> : null}
       <div className="button-row">
         <button type="button" onClick={() => void addCompetitionMembership()} disabled={!teamId || !competitionId || competitionMembers.some((team) => team.id === teamId)}>Add competition membership</button>
         <button type="button" onClick={() => void addSeasonMembership()} disabled={!teamId || !competitionId || !seasonId || members.some((member) => member.teamId === teamId)}>Add season membership</button>

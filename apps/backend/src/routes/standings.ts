@@ -12,6 +12,7 @@ import {
 import { validateStandingsRuleset, type StandingsRuleset } from "../services/standings-calculation-service.js";
 import { assessStandingsCoverage } from "../services/standings-coverage-service.js";
 import { createStandingsSnapshot, type RevisionSelection } from "../services/standings-snapshot-service.js";
+import { rulesetStandingsSupport, validateSoccerCompetitionRuleset } from "../services/soccer-ruleset-validation.js";
 
 export const standingsRouter = Router();
 
@@ -534,8 +535,9 @@ standingsRouter.post("/:competitionId/:seasonId/prepare", protectedRoute, requir
   try {
     database.exec("BEGIN IMMEDIATE;");
     const competition = database.prepare(`
-      SELECT id, participant_type FROM competitions WHERE id = ?
-    `).get(competitionId) as { id: string; participant_type: string } | undefined;
+      SELECT c.id, c.participant_type, s.slug AS sport_slug FROM competitions c
+      JOIN sports s ON s.id = c.sport_id WHERE c.id = ?
+    `).get(competitionId) as { id: string; participant_type: string; sport_slug: string } | undefined;
     if (!competition || !["clubs", "teams", "team"].includes(competition.participant_type)) {
       throw new Error("competition scope does not support team standings");
     }
@@ -561,6 +563,27 @@ standingsRouter.post("/:competitionId/:seasonId/prepare", protectedRoute, requir
     validateStandingsRuleset(ruleset);
     if (ruleset.id !== approvedRuleset.rulesetId || ruleset.version !== approvedRuleset.version) {
       throw new Error("approved ruleset metadata does not match its immutable definition");
+    }
+
+    let seasonRuleset: { id: string; version: number; formatTemplateId: string; rulesetJson: string; rulesetHash: string } | undefined;
+    if (/^(soccer|football)$/i.test(competition.sport_slug)) {
+      seasonRuleset = database.prepare(`SELECT format_template_id AS formatTemplateId, ruleset_json AS rulesetJson,
+        ruleset_hash AS rulesetHash, id, version FROM season_soccer_rulesets
+        WHERE competition_id = ? AND season_id = ? AND status = 'approved' ORDER BY version DESC LIMIT 1`).get(competitionId, seasonId) as
+        typeof seasonRuleset;
+      if (!seasonRuleset || crypto.createHash("sha256").update(seasonRuleset.rulesetJson).digest("hex") !== seasonRuleset.rulesetHash) {
+        throw new Error("an explicitly approved, version-pinned soccer season ruleset is required before standings can be authoritative");
+      }
+      const seasonRules = JSON.parse(seasonRuleset.rulesetJson);
+      validateSoccerCompetitionRuleset(seasonRules);
+      const support = rulesetStandingsSupport(seasonRules);
+      if (!support.supported) throw new Error(`${support.reason}: this stage must remain incomplete until the standings engine supports it`);
+      const tableStage = seasonRules.stages[0];
+      if (!tableStage) throw new Error("approved season ruleset has no standings stage");
+      if (stableJson(tableStage.points) !== stableJson(ruleset.points)
+        || stableJson(tableStage.tieBreakers) !== stableJson(ruleset.tieBreakers)) {
+        throw new Error("standings calculation rules must match the approved season stage points and tie-break order");
+      }
     }
 
     const activeMemberships = database.prepare(`
@@ -748,7 +771,9 @@ standingsRouter.post("/:competitionId/:seasonId/prepare", protectedRoute, requir
         approvalId: approvedRuleset.id,
         approvedByOperatorId: approvedRuleset.approvedByOperatorId,
         approvedAt: approvedRuleset.approvedAt
-      }
+      },
+      ...(seasonRuleset ? { seasonSoccerRuleset: { id: seasonRuleset.id, version: seasonRuleset.version,
+        formatTemplateId: seasonRuleset.formatTemplateId, rulesetHash: seasonRuleset.rulesetHash } } : {})
     });
     const coverage = assessStandingsCoverage(database, {
       scope: { type: "competition_season", competitionId, seasonId },

@@ -37,7 +37,7 @@ function seedWorkflowDatabase() {
   const database = getDatabase();
   database.prepare(`
     INSERT INTO sports (id, name, slug, created_at, updated_at)
-    VALUES ('sport-workflow', 'Football', 'football-workflow', ?, ?)
+    VALUES ('sport-workflow', 'Football', 'football', ?, ?)
   `).run(timestamp, timestamp);
   database.prepare(`
     INSERT INTO competitions (id, sport_id, name, slug, scope, participant_type, created_at, updated_at)
@@ -62,7 +62,7 @@ function seedWorkflowDatabase() {
     INSERT INTO matches (
       id, competition_id, season_id, home_team_id, away_team_id, starts_at, status, created_at, updated_at
     ) VALUES ('workflow-ended', 'competition-workflow', 'season-workflow', 'workflow-home', 'workflow-away', ?, 'ended', ?, ?),
-             ('workflow-scheduled', 'competition-workflow', 'season-workflow', 'workflow-home', 'workflow-away', ?, 'scheduled', ?, ?)
+             ('workflow-scheduled', 'competition-workflow', 'season-workflow', 'workflow-away', 'workflow-home', ?, 'scheduled', ?, ?)
   `).run(timestamp, timestamp, timestamp, timestamp, timestamp, timestamp);
   const revision = appendResultRevision(database, {
     matchId: "workflow-ended",
@@ -111,10 +111,35 @@ test("admin workflow persists reviewed standings atomically and public GET remai
       VALUES (?, ?, ?, ?, 'active', ?, ?)
     `).run(id, id, email, role, timestamp, timestamp);
   }
+  const soccerRules = {
+    sport: "soccer",
+    formatTemplateId: "domestic_league",
+    stages: [{ id: "league", name: "League", kind: "league", scheduling: "double_round_robin",
+      points: { win: 3, draw: 1, loss: 0 }, tieBreakers: [
+        { criterion: "points", direction: "desc" },
+        { criterion: "scoreDifference", direction: "desc" },
+        { criterion: "scoresFor", direction: "desc" },
+        { criterion: "entryId", direction: "asc" }
+      ] }],
+    qualificationRoutes: []
+  };
+  const soccerRulesJson = JSON.stringify(soccerRules);
+  const soccerRulesHash = crypto.createHash("sha256").update(soccerRulesJson).digest("hex");
+  database.prepare(`INSERT INTO competition_soccer_rulesets (id, competition_id, version, format_template_id, ruleset_json,
+    ruleset_hash, status, proposed_by_operator_id, proposed_at) VALUES (?, 'competition-workflow', 1, 'domestic_league', ?, ?, 'pending', 'workflow-admin', ?)
+  `).run("workflow-soccer-rules", soccerRulesJson, soccerRulesHash, timestamp);
+  database.prepare(`UPDATE competition_soccer_rulesets SET status = 'approved', approved_by_operator_id = 'workflow-second-admin', approved_at = ? WHERE id = 'workflow-soccer-rules'`).run(timestamp);
+  database.prepare(`UPDATE competitions SET default_soccer_ruleset_id = 'workflow-soccer-rules', default_soccer_format_id = 'domestic_league' WHERE id = 'competition-workflow'`).run();
+  database.prepare(`INSERT INTO season_soccer_rulesets (id, competition_id, season_id, source_ruleset_id, version, format_template_id,
+    ruleset_json, ruleset_hash, status, proposed_by_operator_id, proposed_at)
+    VALUES ('workflow-season-soccer-rules', 'competition-workflow', 'season-workflow', 'workflow-soccer-rules', 1, 'domestic_league', ?, ?, 'pending', 'workflow-admin', ?)
+  `).run(soccerRulesJson, soccerRulesHash, timestamp);
+  database.prepare(`UPDATE season_soccer_rulesets SET status = 'approved', approved_by_operator_id = 'workflow-second-admin', approved_at = ?
+    WHERE id = 'workflow-season-soccer-rules'`).run(timestamp);
   const workflowUrl = `${baseUrl}/standings/competition-workflow/season-workflow`;
   const schedule = [
     { fixtureKey: "workflow-ended", matchId: "workflow-ended", homeTeamId: "workflow-home", awayTeamId: "workflow-away" },
-    { fixtureKey: "workflow-scheduled", matchId: "workflow-scheduled", homeTeamId: "workflow-home", awayTeamId: "workflow-away" }
+    { fixtureKey: "workflow-scheduled", matchId: "workflow-scheduled", homeTeamId: "workflow-away", awayTeamId: "workflow-home" }
   ];
   const ruleset = {
     id: "workflow-league-rules",
@@ -151,7 +176,7 @@ test("admin workflow persists reviewed standings atomically and public GET remai
   });
   assert.equal(approvalResponse.status, 200);
   const scheduleCsvBase64 = Buffer.from(
-    "homeTeam,awayTeam\nHome United,Away City\nHome United,Away City\n",
+    "homeTeam,awayTeam\nHome United,Away City\nAway City,Home United\n",
     "utf8"
   ).toString("base64");
   const sourceFields = {
@@ -282,7 +307,8 @@ test("admin workflow persists reviewed standings atomically and public GET remai
   const snapshotContent = JSON.parse((database.prepare(
     "SELECT content_json AS contentJson FROM standings_snapshots WHERE id = ?"
   ).get(preparedBody.data.snapshot.id) as { contentJson: string }).contentJson) as {
-    rulesetApproval: { competitionId: string; seasonId: string; rulesetId: string; rulesetVersion: number; approvalId: string; approvedByOperatorId: string };
+    rulesetApproval: { competitionId: string; seasonId: string; rulesetId: string; rulesetVersion: number; approvalId: string; approvedByOperatorId: string; approvedAt: string };
+    seasonSoccerRuleset: { id: string; version: number; formatTemplateId: string; rulesetHash: string };
   };
   assert.deepEqual(snapshotContent.rulesetApproval, {
     competitionId: "competition-workflow",
@@ -293,6 +319,27 @@ test("admin workflow persists reviewed standings atomically and public GET remai
     approvedByOperatorId: "workflow-second-admin",
     approvedAt: snapshotContent.rulesetApproval.approvedAt
   });
+  assert.deepEqual(snapshotContent.seasonSoccerRuleset, {
+    id: "workflow-season-soccer-rules", version: 1, formatTemplateId: "domestic_league", rulesetHash: soccerRulesHash
+  });
+
+  database.prepare("UPDATE matches SET status = 'ended' WHERE id = 'workflow-scheduled'").run();
+  const secondRevision = appendResultRevision(database, {
+    matchId: "workflow-scheduled", homeScore: 1, awayScore: 1, resultStatus: "ended",
+    finalResultConfirmed: true, validationState: "accepted", sourceCategory: "manual_operator", createdAt: timestamp
+  });
+  const finalizedResponse = await fetch(`${workflowUrl}/prepare`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${adminToken}`, "content-type": "application/json" },
+    body: JSON.stringify({ teamIds: ["workflow-home", "workflow-away"], expectedFixtures: schedule,
+      revisionSelections: [{ matchId: "workflow-ended", revisionId: revision.id }, { matchId: "workflow-scheduled", revisionId: secondRevision.id }],
+      ...sourceFields, scheduleConfirmed: true })
+  });
+  assert.equal(finalizedResponse.status, 201);
+  const finalizedBody = await finalizedResponse.json() as { data: { snapshot: { id: string; sequence: number }; coverage: { eligible: boolean; scheduleState: string } } };
+  assert.equal(finalizedBody.data.snapshot.sequence, 2);
+  assert.equal(finalizedBody.data.coverage.eligible, true);
+  assert.equal(finalizedBody.data.coverage.scheduleState, "verified_complete");
 
   const adminStandings = await fetch(workflowUrl, {
     headers: { authorization: `Bearer ${adminToken}` }
@@ -307,9 +354,13 @@ test("admin workflow persists reviewed standings atomically and public GET remai
   const beforePublicRead = readCounts();
   const publicResponse = await fetch(`${baseUrl}/public/standings/competition-workflow/season-workflow`);
   assert.equal(publicResponse.status, 200);
-  const publicBody = await publicResponse.json() as { data: { snapshot: { id: string; rulesetApproval?: unknown }; status: string } };
-  assert.equal(publicBody.data.snapshot.id, preparedBody.data.snapshot.id);
-  assert.equal(publicBody.data.status, "provisional");
+  const publicBody = await publicResponse.json() as { data: { snapshot: { id: string; rulesetApproval?: unknown }; status: string; rows: Array<{ team: { id: string }; rank: number; played: number; points: number }> } };
+  assert.equal(publicBody.data.snapshot.id, finalizedBody.data.snapshot.id);
+  assert.equal(publicBody.data.status, "eligible");
+  assert.deepEqual(publicBody.data.rows.map(({ team, rank, played, points }) => ({ teamId: team.id, rank, played, points })), [
+    { teamId: "workflow-home", rank: 1, played: 2, points: 4 },
+    { teamId: "workflow-away", rank: 2, played: 2, points: 1 }
+  ]);
   assert.equal("rulesetApproval" in publicBody.data.snapshot, false);
   assert.deepEqual(readCounts(), beforePublicRead);
 

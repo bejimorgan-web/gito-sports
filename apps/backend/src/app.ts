@@ -37,6 +37,7 @@ import { fixtureReconciliationRouter } from "./routes/fixture-reconciliation.js"
 import { playerCatalogRouter } from "./routes/player-catalog.js";
 import { publicationArtifactsRouter } from "./routes/publication-artifacts.js";
 import { standingsRouter } from "./routes/standings.js";
+import { soccerRulesetsRouter } from "./routes/soccer-rulesets.js";
 import { publicStandingsRouter } from "./routes/public-standings.js";
 import { createCorsMiddleware, parseCorsOrigins } from "./middleware/cors-policy.js";
 
@@ -183,6 +184,7 @@ export function createApp() {
   app.use("/publication-artifacts", publicationArtifactsRouter);
   app.use("/public/standings", publicStandingsRouter);
   app.use("/standings", standingsRouter);
+  app.use("/soccer-rulesets", soccerRulesetsRouter);
 
   if (runtimeConfig.errorReportingEnabled && runtimeConfig.sentryDsn) {
     Sentry.setupExpressErrorHandler(app);

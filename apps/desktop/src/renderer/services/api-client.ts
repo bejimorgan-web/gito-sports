@@ -907,6 +907,22 @@ export const apiClient = {
     const path = buildApiPath(`/competitions/${competitionId}`, { mode });
     return request<Competition>(path);
   },
+  listSoccerCompetitionFormats() {
+    return request<Array<{ id: string; name: string; description: string }>>('/soccer-rulesets/formats');
+  },
+  listSoccerRulesets(competitionId: string) {
+    return request<Array<{ id: string; version: number; formatTemplateId: string; status: 'pending' | 'approved'; ruleset: unknown; proposedByOperatorId: string }>>(`/soccer-rulesets/competitions/${encodeURIComponent(competitionId)}`);
+  },
+  proposeSoccerRuleset(competitionId: string, ruleset: unknown, accessToken: string) {
+    return request<{ id: string; version: number; status: 'pending' }>(`/soccer-rulesets/competitions/${encodeURIComponent(competitionId)}`, {
+      method: 'POST', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ ruleset })
+    });
+  },
+  approveSoccerRuleset(competitionId: string, rulesetId: string, accessToken: string) {
+    return request<{ id: string; status: 'approved' }>(`/soccer-rulesets/competitions/${encodeURIComponent(competitionId)}/${encodeURIComponent(rulesetId)}/approve`, {
+      method: 'POST', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify({})
+    });
+  },
   createCompetition(input: CreateCompetitionRequest, accessToken: string) {
     return request<Competition>('/competitions', {
       method: 'POST',
@@ -967,6 +983,19 @@ export const apiClient = {
   },
   createSeason(competitionId: string, input: CreateSeasonRequest, accessToken: string) {
     return request<Season>(`/competitions/${competitionId}/seasons`, { method: 'POST', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
+  },
+  listSeasonSoccerRulesets(competitionId: string, seasonId: string) {
+    return request<Array<{ id: string; sourceRulesetId: string; version: number; formatTemplateId: string; status: 'pending' | 'approved'; proposedByOperatorId: string }>>(`/soccer-rulesets/competitions/${encodeURIComponent(competitionId)}/seasons/${encodeURIComponent(seasonId)}`);
+  },
+  pinSeasonSoccerRuleset(competitionId: string, seasonId: string, rulesetId: string, accessToken: string) {
+    return request<{ id: string; status: 'pending' }>(`/soccer-rulesets/competitions/${encodeURIComponent(competitionId)}/seasons/${encodeURIComponent(seasonId)}/pin`, {
+      method: 'POST', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ rulesetId })
+    });
+  },
+  approveSeasonSoccerRuleset(competitionId: string, seasonId: string, seasonRulesetId: string, accessToken: string) {
+    return request<{ id: string; status: 'approved' }>(`/soccer-rulesets/competitions/${encodeURIComponent(competitionId)}/seasons/${encodeURIComponent(seasonId)}/${encodeURIComponent(seasonRulesetId)}/approve`, {
+      method: 'POST', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify({})
+    });
   },
   listSeasons(competitionId: string) {
     return request<Season[]>(`/competitions/${competitionId}/seasons`);
