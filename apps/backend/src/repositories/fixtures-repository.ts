@@ -91,8 +91,8 @@ export function importCanonicalFixtures(input: { hostId: string; competitionId: 
   const resolveTeam = (nameValue: string | undefined) => {
     const name = String(nameValue ?? "").trim();
     if (!name) throw new Error("fixture_team_name_required");
-    const team = db.prepare("SELECT t.id, t.type FROM teams t JOIN competition_season_teams cst ON cst.team_id = t.id WHERE t.host_id = ? AND t.sport_id = ? AND cst.competition_id = ? AND cst.season_id = ? AND lower(trim(t.name)) = lower(trim(?)) LIMIT 1")
-      .get(input.hostId, competition.sport_id, input.competitionId, input.seasonId, name) as { id: string; type: string } | undefined;
+    const team = db.prepare("SELECT t.id, t.type, t.home_stadium_name FROM teams t JOIN competition_season_teams cst ON cst.team_id = t.id WHERE t.host_id = ? AND t.sport_id = ? AND cst.competition_id = ? AND cst.season_id = ? AND lower(trim(t.name)) = lower(trim(?)) LIMIT 1")
+      .get(input.hostId, competition.sport_id, input.competitionId, input.seasonId, name) as { id: string; type: string; home_stadium_name: string | null } | undefined;
     if (!team) throw new Error(`fixture_team_not_in_season:${name}`);
     if (expectedType && team.type !== expectedType) throw new Error("team_participant_type_mismatch");
     return team;
@@ -117,7 +117,7 @@ export function importCanonicalFixtures(input: { hostId: string; competitionId: 
         homeTeamId: homeTeam.id,
         awayTeamId: awayTeam.id,
         startsAt: String(row.startsAt ?? "").trim(),
-        venueName: String(row.venueName ?? "").trim() || null,
+        venueName: homeTeam.home_stadium_name,
         status: "scheduled"
       };
       const equivalent = findEquivalentCanonicalFixtures(fixtureInput);

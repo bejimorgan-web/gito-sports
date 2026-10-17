@@ -196,10 +196,10 @@ export function FixtureWorkspaceScreen({
 
   const exportFixtureSchedule = () => {
     if (!selectedCompetition || !selectedSeason) { setStatus("Select a competition and season first."); return; }
-    downloadCsv(`${selectedCompetition.name.replace(/[^a-z0-9-_]+/gi, "-")}-${selectedSeason.name}-fixtures.csv`, ["fixture_id", "home_team_name", "away_team_name", "starts_at", "venue_name"], fixtures.map((fixture) => ({
-      fixture_id: fixture.id, home_team_name: fixture.homeTeam?.name, away_team_name: fixture.awayTeam?.name, starts_at: fixture.startsAt, venue_name: fixture.venueName
+    downloadCsv(`${selectedCompetition.name.replace(/[^a-z0-9-_]+/gi, "-")}-${selectedSeason.name}-fixtures.csv`, ["fixture_id", "home_team_name", "away_team_name", "match_date"], fixtures.map((fixture) => ({
+      fixture_id: fixture.id, home_team_name: fixture.homeTeam?.name, away_team_name: fixture.awayTeam?.name, match_date: fixture.startsAt?.slice(0, 10)
     })));
-    setStatus(`Exported ${fixtures.length} fixtures. Keep existing fixture IDs; leave fixture_id blank for new fixtures.`);
+    setStatus(`Exported ${fixtures.length} fixtures for this season. Keep existing fixture IDs; leave fixture_id blank for new fixtures.`);
   };
 
   const importFixtureSchedule = async (file?: File) => {
@@ -207,10 +207,12 @@ export function FixtureWorkspaceScreen({
     setIsImportingFixtures(true);
     try {
       const rows = await parseCsvFile(file);
-      const required = ["fixture_id", "home_team_name", "away_team_name", "starts_at", "venue_name"];
-      if (!rows.every((row) => required.every((column) => column in row))) throw new Error(`Fixture CSV must include these columns: ${required.join(", ")}.`);
+      const required = ["fixture_id", "home_team_name", "away_team_name"];
+      if (!rows.every((row) => required.every((column) => column in row)) || !rows.every((row) => "match_date" in row || "starts_at" in row)) {
+        throw new Error("Fixture CSV must include fixture_id, home_team_name, away_team_name, and match_date columns.");
+      }
       const result = await apiClient.importFixtures({ hostId: selectedHostId, competitionId: selectedCompetitionId, seasonId: selectedSeasonId, rows: rows.map((row) => ({
-        fixtureId: row.fixture_id ?? "", homeTeamName: row.home_team_name ?? "", awayTeamName: row.away_team_name ?? "", startsAt: row.starts_at ?? "", venueName: row.venue_name ?? ""
+        fixtureId: row.fixture_id ?? "", homeTeamName: row.home_team_name ?? "", awayTeamName: row.away_team_name ?? "", startsAt: row.match_date ?? row.starts_at ?? ""
       })) }, accessToken);
       await loadFixtures();
       setStatus(`Fixture CSV imported: ${result.createdCount} added, ${result.skippedCount} existing or duplicate rows skipped.`);
@@ -403,7 +405,7 @@ export function FixtureWorkspaceScreen({
             </button>
           </div>
         </div>
-        <p className="field-note">Fixture IDs are skipped on import. Leave fixture_id blank for a new fixture; team names must be season members and starts_at must include a timezone.</p>
+        <p className="field-note">Use only teams registered for this season. Keep existing fixture IDs to skip them; leave fixture_id blank for new fixtures. Home and away are required, and match_date is mandatory. Kickoff time and squad or formation details can be updated later; venue comes from the home team’s stadium.</p>
 
         {showCreatePanel ? (
           <div className="console-panel" style={{ marginTop: 16 }}>
