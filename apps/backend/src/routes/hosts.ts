@@ -21,9 +21,13 @@ hostsRouter.get("/:hostId", (request, response) => {
   response.json({ data: host });
 });
 
+hostsRouter.get("/:hostId/clubs/import-capabilities", protectedRoute, (_request, response) => {
+  response.json({ data: { updateExisting: true } });
+});
+
 hostsRouter.post("/:hostId/clubs/import", protectedRoute, (request, response) => {
   try {
-    const result = importHostClubs(String(request.params.hostId ?? ""), request.body?.rows);
+    const result = importHostClubs(String(request.params.hostId ?? ""), request.body?.rows, { updateExisting: request.body?.updateExisting === true });
     response.status(200).json({ data: result });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

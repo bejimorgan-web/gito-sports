@@ -157,6 +157,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
   const [isLogoUploading, setIsLogoUploading] = useState(false);
   const hostRosterFileRef = useRef<HTMLInputElement>(null);
   const [isImportingHostRoster, setIsImportingHostRoster] = useState(false);
+  const [updateExistingTeamDetails, setUpdateExistingTeamDetails] = useState(false);
 
 
   const pushToast = (message: string, type: "success" | "error" | "info" = "success") => {
@@ -324,11 +325,11 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
     const host = sportHosts.find((item) => item.id === selectedClubHostId);
     if (!host || !selectedSport) { setStatus("Select a sport and host before exporting its roster."); return; }
     const roster = teams.filter((team) => team.hostId === host.id && team.type === teamCategory);
-    downloadExcel(`${host.name.replace(/[^a-z0-9-_]+/gi, "-")}-${teamCategory}-roster.xlsx`, "Teams", "Host team roster", ["Team ID", "Sport", "Host", "Team Name", "Team Type", "Short Name", "Slug", "Home Stadium Name", "Logo URL"], roster.map((team) => ({
+    downloadExcel(`${host.name.replace(/[^a-z0-9-_]+/gi, "-")}-${teamCategory}-roster.xlsx`, "Teams", "Host team roster", ["Team ID", "Sport", "Host", "Team Name", "Team Type", "Short Name", "Slug", "Home Stadium Name", "Stadium Photo URL", "Logo URL"], roster.map((team) => ({
       "Team ID": team.id, Sport: selectedSport.name, Host: host.name, "Team Name": team.name,
       "Team Type": team.type === "club" ? "Club" : "National Team", "Short Name": team.shortName, Slug: team.slug,
-      "Home Stadium Name": team.homeStadiumName, "Logo URL": team.logoUrl
-    })), "Existing teams are identified by Team ID and Team Name. Leave Team ID blank for a new team; enter its name and type. Logo URL is optional. Existing teams are skipped and new teams are created under the selected host.");
+      "Home Stadium Name": team.homeStadiumName, "Stadium Photo URL": team.homeStadiumPhotoUrl, "Logo URL": team.logoUrl
+    })), "Keep Team ID, Sport, Host, Team Name and Team Type unchanged for existing teams. By default existing rows are skipped. If Update existing team details is enabled before upload, Short Name, Home Stadium Name, Stadium Photo URL and Logo URL can be updated; blank cells keep current values. Leave Team ID blank for a new team and fill Team Name and Team Type. Logo URL is optional.");
     setStatus(`Exported ${roster.length} teams for ${host.name}.`);
   };
 
@@ -337,6 +338,14 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
     if (!file || !host) return;
     setIsImportingHostRoster(true);
     try {
+      if (updateExistingTeamDetails) {
+        try {
+          const capabilities = await apiClient.getHostClubImportCapabilities(host.id, accessToken);
+          if (!capabilities.updateExisting) throw new Error("unsupported");
+        } catch {
+          throw new Error("The connected backend has not been updated to support workbook corrections. No workbook rows were uploaded.");
+        }
+      }
       const rows = await parseExcelFile(file);
       const hasColumn = (row: Record<string, string>, ...aliases: string[]) => aliases.some((column) => column in row);
       const hasRequiredColumns = rows.every((row) => hasColumn(row, "team id", "team_id")
@@ -371,10 +380,10 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
         teamId: read(row, "team id", "team_id"), sportId: read(row, "sport_id") || selectedSport?.id || "", hostId: read(row, "host_id") || host.id,
         teamName: read(row, "team name", "team_name"), teamType: normalizeTeamType(read(row, "team type", "team_type")),
         shortName: read(row, "short name", "short_name"), slug: read(row, "slug"), homeStadiumName: read(row, "home stadium name", "home_stadium_name"),
-        logoUrl: read(row, "logo url", "logo_url")
-      })), accessToken);
+        homeStadiumPhotoUrl: read(row, "stadium photo url", "home stadium photo url", "home_stadium_photo_url"), logoUrl: read(row, "logo url", "logo_url")
+      })), accessToken, { updateExisting: updateExistingTeamDetails });
       await loadData();
-      setStatus(`Host roster imported: ${result.createdCount} added, ${result.skippedCount} already present.`);
+      setStatus(`Host roster imported: ${result.createdCount} added, ${result.updatedCount} updated, ${result.skippedCount} unchanged or skipped.`);
     } catch (error) { setStatus(error instanceof Error ? error.message : "Unable to import host roster."); }
     finally { setIsImportingHostRoster(false); if (hostRosterFileRef.current) hostRosterFileRef.current.value = ""; }
   };
@@ -982,7 +991,8 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                   <input ref={hostRosterFileRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={(event) => void importHostRoster(event.target.files?.[0])} />
                 </div>
               </div>
-              <p className="field-note">Use the Excel workbook for roster export and import. It uses the same fields as Add {teamCategory === "club" ? "Club" : "National Team"}. Existing Team IDs or names are skipped unchanged. Leave Team ID blank for a new row; GiTO creates the ID. Sport and Host come from the selected workspace and host filter. Logo URL is optional.</p>
+              <label className="field-note"><input type="checkbox" checked={updateExistingTeamDetails} onChange={(event) => setUpdateExistingTeamDetails(event.target.checked)} disabled={isCatalogView || isImportingHostRoster} /> Update details for existing teams matched by Team ID or exact name (blank cells keep current values)</label>
+              <p className="field-note">Use the Excel workbook for roster export and import. It uses the same fields as Add {teamCategory === "club" ? "Club" : "National Team"}. Existing Team IDs and names stay associated with their registered records. Leave Team ID blank for a new row; GiTO creates the ID. Logo URL is optional.</p>
               <div className="entity-list">
                 {visibleTeams.length > 0 ? (
                   visibleTeams.map((team) => (

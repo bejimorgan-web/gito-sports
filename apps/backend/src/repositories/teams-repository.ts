@@ -144,7 +144,7 @@ export interface HostClubImportRow {
 }
 
 /** Add only new clubs from a host roster file. Existing exported rows are inert. */
-export function importHostClubs(hostId: string, rows: HostClubImportRow[]) {
+export function importHostClubs(hostId: string, rows: HostClubImportRow[], options: { updateExisting?: boolean } = {}) {
   const database = getDatabase();
   const host = database.prepare("SELECT id, sport_id, host_type FROM hosts WHERE id = ? AND status = 'active'").get(hostId) as { id: string; sport_id: string; host_type: string } | undefined;
   if (!host) throw new Error("host_not_found");
@@ -152,16 +152,34 @@ export function importHostClubs(hostId: string, rows: HostClubImportRow[]) {
   if (!Array.isArray(rows) || rows.length > 2000) throw new Error("invalid_club_import_rows");
 
   const created: Team[] = [];
+  const updated: Team[] = [];
   const skipped = new Set<string>();
   const seen = new Set<string>();
+  const seenIds = new Set<string>();
+  const updateDetails = (teamId: string, row: HostClubImportRow) => {
+    const existing = getTeamById(teamId);
+    if (!existing) throw new Error("club_import_team_id_mismatch");
+    if (row.teamType && row.teamType !== existing.type) throw new Error("club_import_existing_team_type_mismatch");
+    const changes: Partial<CreateTeamRequest> = {};
+    if (row.shortName?.trim() && row.shortName.trim() !== (existing.shortName ?? "")) changes.shortName = row.shortName.trim();
+    if (row.homeStadiumName?.trim() && row.homeStadiumName.trim() !== (existing.homeStadiumName ?? "")) changes.homeStadiumName = row.homeStadiumName.trim();
+    if (row.homeStadiumPhotoUrl?.trim() && row.homeStadiumPhotoUrl.trim() !== (existing.homeStadiumPhotoUrl ?? "")) changes.homeStadiumPhotoUrl = row.homeStadiumPhotoUrl.trim();
+    if (row.logoUrl?.trim() && row.logoUrl.trim() !== (existing.logoUrl ?? "")) changes.logoUrl = row.logoUrl.trim();
+    if (Object.keys(changes).length) updated.push(updateTeam(teamId, changes)!);
+    else skipped.add(teamId);
+  };
   const importRows = database.transaction(() => {
     for (const row of rows) {
       const name = String(row.teamName ?? "").trim();
       if ((row.hostId && row.hostId !== hostId) || (row.sportId && row.sportId !== host.sport_id)) throw new Error("club_import_host_or_sport_mismatch");
       if (row.teamId) {
-        const exportedTeam = database.prepare("SELECT id, host_id FROM teams WHERE id = ?").get(row.teamId) as { id: string; host_id: string | null } | undefined;
-        if (!exportedTeam || exportedTeam.host_id !== hostId) throw new Error("club_import_team_id_mismatch");
-        skipped.add(row.teamId);
+        if (seenIds.has(row.teamId)) throw new Error("club_import_duplicate_team_id");
+        seenIds.add(row.teamId);
+        const exportedTeam = getTeamById(row.teamId);
+        if (!exportedTeam || exportedTeam.hostId !== hostId || exportedTeam.sportId !== host.sport_id) throw new Error("club_import_team_id_mismatch");
+        if (name && name.normalize("NFKC").toLocaleLowerCase() !== exportedTeam.name.normalize("NFKC").toLocaleLowerCase()) throw new Error("club_import_existing_team_name_mismatch");
+        if (!options.updateExisting) { skipped.add(row.teamId); continue; }
+        updateDetails(row.teamId, row);
         continue;
       }
       const normalizedName = name.normalize("NFKC").toLocaleLowerCase();
@@ -169,7 +187,11 @@ export function importHostClubs(hostId: string, rows: HostClubImportRow[]) {
       if (seen.has(normalizedName)) { skipped.add(name); continue; }
       seen.add(normalizedName);
       const existing = database.prepare("SELECT id FROM teams WHERE host_id = ? AND lower(name) = lower(?) LIMIT 1").get(hostId, name) as { id: string } | undefined;
-      if (existing) { skipped.add(existing.id); continue; }
+      if (existing) {
+        if (!options.updateExisting) { skipped.add(existing.id); continue; }
+        updateDetails(existing.id, row);
+        continue;
+      }
       if (row.hostId !== hostId || row.sportId !== host.sport_id) throw new Error("club_import_host_or_sport_required");
       const type = row.teamType;
       if (type !== "club" && type !== "national") throw new Error("club_type_must_be_club_or_national");
@@ -187,7 +209,7 @@ export function importHostClubs(hostId: string, rows: HostClubImportRow[]) {
     }
   });
   importRows();
-  return { created, createdCount: created.length, skippedCount: skipped.size };
+  return { created, updated, createdCount: created.length, updatedCount: updated.length, skippedCount: skipped.size };
 }
 
 export function updateTeam(teamId: string, input: Partial<CreateTeamRequest> & { status?: Team["status"] }): Team | undefined {

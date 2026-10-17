@@ -15,7 +15,7 @@ const [
   { createHost },
   { createCompetition },
   { createSeason },
-  { createTeam, importHostClubs },
+  { createTeam, getTeamById, importHostClubs },
   { listSeasonTeamMemberships, replaceSeasonTeamMemberships },
   { createCanonicalFixture, importCanonicalFixtures, listCanonicalFixtures }
 ] = await Promise.all([
@@ -54,6 +54,23 @@ test("host roster CSV adds only new teams and season/fixture imports preserve ex
   assert.equal(secondImport.createdCount, 1);
   assert.equal(secondImport.skippedCount, 2);
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM teams WHERE host_id = ?").get(host.id)?.count, 4);
+
+  const correctedImport = importHostClubs(host.id, [
+    { teamName: "North City", teamType: "club", shortName: "NTH", homeStadiumName: "North Ground" }
+  ], { updateExisting: true });
+  assert.equal(correctedImport.createdCount, 0);
+  assert.equal(correctedImport.updatedCount, 1);
+  const correctedNorth = getTeamById(north.id)!;
+  assert.equal(correctedNorth.id, north.id);
+  assert.equal(correctedNorth.name, "North City");
+  assert.equal(correctedNorth.shortName, "NTH");
+  assert.equal(correctedNorth.homeStadiumName, "North Ground");
+
+  assert.throws(() => importHostClubs(host.id, [
+    { teamId: north.id, sportId: host.sportId, hostId: host.id, teamName: "North City", teamType: "club", shortName: "SHOULD ROLL BACK" },
+    { sportId: host.sportId, hostId: host.id, teamName: "Invalid Type", teamType: "custom" }
+  ], { updateExisting: true }), /club_type_must_be_club_or_national/);
+  assert.equal(getTeamById(north.id)?.shortName, "NTH");
 
   assert.throws(() => importHostClubs(host.id, [
     { sportId: host.sportId, hostId: host.id, teamName: "Would Roll Back", teamType: "club" },
