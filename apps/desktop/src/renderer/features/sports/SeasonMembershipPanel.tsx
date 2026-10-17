@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { Competition, Host, Season, Team } from "@gito/shared";
 import { apiClient } from "../../services/api-client";
-import { downloadCsv, normalizeCsvName, parseCsvFile } from "../../services/csv-files";
+import { normalizeCsvName } from "../../services/csv-files";
+import { downloadExcel, parseExcelFile } from "../../services/excel-files";
 
 interface Props {
   teams: Team[];
@@ -125,7 +126,7 @@ export function SeasonMembershipPanel({ teams, hosts, competitions, selectedSpor
     const host = hosts.find((item) => item.id === selectedCompetition.hostId);
     const season = seasons.find((item) => item.id === seasonId);
     const safeName = `${host?.name ?? "host"}-${season?.name ?? "season"}`.replace(/[^a-z0-9-_]+/gi, "-");
-    downloadCsv(`${safeName}-team-roster.csv`, ["team_id", "team_name", "team_type"], hostTeams.map((team) => ({ team_id: team.id, team_name: team.name, team_type: team.type })));
+    downloadExcel(`${safeName}-team-roster.xlsx`, "Teams", "Competition season team list", ["Team ID", "Team Name", "Team Type"], hostTeams.map((team) => ({ "Team ID": team.id, "Team Name": team.name, "Team Type": team.type })), "Keep the existing team names exactly as shown. Remove rows for teams that should not participate, or leave the team list as required. Uploading replaces this season's team list; teams must already be registered under the competition host.");
     setStatus(`Exported ${hostTeams.length} host teams. Importing this file sets the season's exact team list.`);
   };
 
@@ -133,17 +134,18 @@ export function SeasonMembershipPanel({ teams, hosts, competitions, selectedSpor
     if (!file || !selectedCompetition || !seasonId) return;
     setIsImportingRoster(true);
     try {
-      const rows = await parseCsvFile(file);
+      const rows = await parseExcelFile(file);
       if (!rows.length) throw new Error("Add at least one team row before importing a season roster.");
-      if (!rows.every((row) => "team_name" in row)) throw new Error("Season roster CSV must include the team_name column.");
+      if (!rows.every((row) => "team name" in row || "team_name" in row)) throw new Error("Season roster workbook must include the Team Name column.");
       const names = new Set<string>();
       const ids = rows.map((row) => {
-        const normalized = normalizeCsvName(row.team_name ?? "");
+        const teamName = row["team name"] ?? row.team_name ?? "";
+        const normalized = normalizeCsvName(teamName);
         if (!normalized) throw new Error("Every season roster row needs a team_name.");
-        if (names.has(normalized)) throw new Error(`Duplicate team name in CSV: ${row.team_name}`);
+        if (names.has(normalized)) throw new Error(`Duplicate team name in workbook: ${teamName}`);
         names.add(normalized);
         const team = hostTeams.find((candidate) => normalizeCsvName(candidate.name) === normalized);
-        if (!team) throw new Error(`Team is not registered under this competition's host: ${row.team_name}`);
+        if (!team) throw new Error(`Team is not registered under this competition's host: ${teamName}`);
         return team.id;
       });
       if (!window.confirm(`Replace the ${seasons.find((season) => season.id === seasonId)?.name ?? "selected season"} team list with these ${ids.length} teams?`)) return;
@@ -205,9 +207,9 @@ export function SeasonMembershipPanel({ teams, hosts, competitions, selectedSpor
         <button type="button" onClick={() => void addSeasonMembership()} disabled={!teamId || !competitionId || !seasonId || members.some((member) => member.teamId === teamId)}>Add season membership</button>
       </div>
       {competitionId && seasonId ? <div className="button-row">
-        <button type="button" className="secondary" onClick={exportSeasonRoster} disabled={!selectedCompetition?.hostId}>Export Host Roster CSV</button>
-        <button type="button" className="secondary" onClick={() => seasonRosterFileRef.current?.click()} disabled={!selectedCompetition?.hostId || isImportingRoster}>{isImportingRoster ? "Importing…" : "Import Season Roster CSV"}</button>
-        <input ref={seasonRosterFileRef} type="file" accept=".csv,text/csv" hidden onChange={(event) => void importSeasonRoster(event.target.files?.[0])} />
+        <button type="button" className="secondary" onClick={exportSeasonRoster} disabled={!selectedCompetition?.hostId}>Export Host Roster Excel</button>
+        <button type="button" className="secondary" onClick={() => seasonRosterFileRef.current?.click()} disabled={!selectedCompetition?.hostId || isImportingRoster}>{isImportingRoster ? "Importing…" : "Import Season Roster Excel"}</button>
+        <input ref={seasonRosterFileRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={(event) => void importSeasonRoster(event.target.files?.[0])} />
         <span className="field-note">The imported names replace this season’s team list; names must match the host roster.</span>
       </div> : null}
       {seasonId ? (

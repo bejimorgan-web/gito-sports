@@ -23,7 +23,8 @@ import { resolveAssetUrl } from "../../components/asset-url";
 import { Modal } from "../../components/Modal";
 import { Toast } from "../../components/Toast";
 import { SeasonMembershipPanel } from "./SeasonMembershipPanel";
-import { downloadCsv, normalizeCsvName, parseCsvFile } from "../../services/csv-files";
+import { normalizeCsvName } from "../../services/csv-files";
+import { downloadExcel, parseExcelFile } from "../../services/excel-files";
 
 const competitionScopes: CompetitionScope[] = ["domestic", "continental", "international", "global", "regional", "friendly", "custom"];
 const competitionTypes: CompetitionType[] = ["league", "cup", "tournament", "championship", "friendly", "custom"];
@@ -323,11 +324,11 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
     const host = sportHosts.find((item) => item.id === selectedClubHostId);
     if (!host || !selectedSport) { setStatus("Select a sport and host before exporting its roster."); return; }
     const roster = teams.filter((team) => team.hostId === host.id && team.type === teamCategory);
-    downloadCsv(`${host.name.replace(/[^a-z0-9-_]+/gi, "-")}-${teamCategory}-roster.csv`, ["Team ID", "Sport", "Host", "Team Name", "Team Type", "Short Name", "Slug", "Home Stadium Name", "Logo URL"], roster.map((team) => ({
+    downloadExcel(`${host.name.replace(/[^a-z0-9-_]+/gi, "-")}-${teamCategory}-roster.xlsx`, "Teams", "Host team roster", ["Team ID", "Sport", "Host", "Team Name", "Team Type", "Short Name", "Slug", "Home Stadium Name", "Logo URL"], roster.map((team) => ({
       "Team ID": team.id, Sport: selectedSport.name, Host: host.name, "Team Name": team.name,
       "Team Type": team.type === "club" ? "Club" : "National Team", "Short Name": team.shortName, Slug: team.slug,
       "Home Stadium Name": team.homeStadiumName, "Logo URL": team.logoUrl
-    })));
+    })), "Existing teams are identified by Team ID and Team Name. Leave Team ID blank for a new team; enter its name and type. Logo URL is optional. Existing teams are skipped and new teams are created under the selected host.");
     setStatus(`Exported ${roster.length} teams for ${host.name}.`);
   };
 
@@ -336,14 +337,14 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
     if (!file || !host) return;
     setIsImportingHostRoster(true);
     try {
-      const rows = await parseCsvFile(file);
+      const rows = await parseExcelFile(file);
       const hasColumn = (row: Record<string, string>, ...aliases: string[]) => aliases.some((column) => column in row);
       const hasRequiredColumns = rows.every((row) => hasColumn(row, "team id", "team_id")
         && hasColumn(row, "sport", "sport_name", "sport_id")
         && hasColumn(row, "host", "host_name", "host_id")
         && hasColumn(row, "team name", "team_name")
         && hasColumn(row, "team type", "team_type"));
-      if (!hasRequiredColumns) throw new Error("Roster CSV needs Team ID, Sport, Host, Team Name, and Team Type columns. Leave Team ID blank for new teams.");
+      if (!hasRequiredColumns) throw new Error("Roster workbook needs Team ID, Sport, Host, Team Name, and Team Type columns. Leave Team ID blank for new teams.");
       const read = (row: Record<string, string>, ...aliases: string[]) => aliases.map((key) => row[key]).find((value) => value !== undefined) ?? "";
       const normalizeTeamType = (value: string) => value.trim().toLowerCase() === "national team" ? "national" : value.trim().toLowerCase();
       for (const row of rows) {
@@ -975,13 +976,13 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                   </select>
                 </label>
                 <div className="button-row">
-                  <button type="button" className="secondary" onClick={exportHostRoster} disabled={isCatalogView || selectedClubHostId === "all"}>{`Export ${teamCategory === "club" ? "Club" : "National Team"} Roster CSV`}</button>
-                  <button type="button" className="secondary" onClick={() => hostRosterFileRef.current?.click()} disabled={isCatalogView || selectedClubHostId === "all" || isImportingHostRoster}>{isImportingHostRoster ? "Importing…" : `Import ${teamCategory === "club" ? "Club" : "National Team"} Roster CSV`}</button>
+                  <button type="button" className="secondary" onClick={exportHostRoster} disabled={isCatalogView || selectedClubHostId === "all"}>{`Export ${teamCategory === "club" ? "Club" : "National Team"} Roster Excel`}</button>
+                  <button type="button" className="secondary" onClick={() => hostRosterFileRef.current?.click()} disabled={isCatalogView || selectedClubHostId === "all" || isImportingHostRoster}>{isImportingHostRoster ? "Importing…" : `Import ${teamCategory === "club" ? "Club" : "National Team"} Roster Excel`}</button>
                   <button type="button" onClick={() => openTeamEditor(undefined, teamCategory)} disabled={isCatalogView}>{teamCategory === "club" ? "Add Club" : "Add National Team"}</button>
-                  <input ref={hostRosterFileRef} type="file" accept=".csv,text/csv" hidden onChange={(event) => void importHostRoster(event.target.files?.[0])} />
+                  <input ref={hostRosterFileRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={(event) => void importHostRoster(event.target.files?.[0])} />
                 </div>
               </div>
-              <p className="field-note">The CSV uses the same fields as Add {teamCategory === "club" ? "Club" : "National Team"}. Existing Team IDs or names are skipped unchanged. Leave Team ID blank for a new row; GiTO creates the ID. Sport and Host come from the selected workspace and host filter. Logo URL is optional.</p>
+              <p className="field-note">Use the Excel workbook for roster export and import. It uses the same fields as Add {teamCategory === "club" ? "Club" : "National Team"}. Existing Team IDs or names are skipped unchanged. Leave Team ID blank for a new row; GiTO creates the ID. Sport and Host come from the selected workspace and host filter. Logo URL is optional.</p>
               <div className="entity-list">
                 {visibleTeams.length > 0 ? (
                   visibleTeams.map((team) => (

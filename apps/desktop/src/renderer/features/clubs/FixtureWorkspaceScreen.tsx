@@ -8,7 +8,7 @@ import {
   utcToOperatorKickoff,
 } from "./fixture-time";
 import { FootballLineupEditor } from "./FootballLineupEditor";
-import { downloadCsv, parseCsvFile } from "../../services/csv-files";
+import { downloadExcel, parseExcelFile } from "../../services/excel-files";
 
 function getParticipantLabel(participantType?: string) {
   if (participantType === "nationalTeams") return "National Team";
@@ -190,32 +190,47 @@ export function FixtureWorkspaceScreen({
   const exportFixtureHostRoster = () => {
     if (!selectedHost || !selectedCompetition || !selectedSeason) { setStatus("Select a host, competition, and season first."); return; }
     const seasonHostTeams = participants.filter((team) => team.hostId === selectedHost.id);
-    downloadCsv(`${selectedHost.name.replace(/[^a-z0-9-_]+/gi, "-")}-${selectedSeason.name}-fixture-teams.csv`, ["team_id", "team_name", "team_type"], seasonHostTeams.map((team) => ({ team_id: team.id, team_name: team.name, team_type: team.type })));
+    downloadExcel(`${selectedHost.name.replace(/[^a-z0-9-_]+/gi, "-")}-${selectedSeason.name}-fixture-teams.xlsx`, "Teams", "Competition season teams", ["Team ID", "Team Name", "Team Type"], seasonHostTeams.map((team) => ({ "Team ID": team.id, "Team Name": team.name, "Team Type": team.type })), "This workbook lists teams already registered for the selected competition season. Use the exact team names when preparing the fixture workbook.");
     setStatus(`Exported ${seasonHostTeams.length} season teams from ${selectedHost.name}. Fixture imports require these season members.`);
   };
 
   const exportFixtureSchedule = () => {
     if (!selectedCompetition || !selectedSeason) { setStatus("Select a competition and season first."); return; }
-    downloadCsv(`${selectedCompetition.name.replace(/[^a-z0-9-_]+/gi, "-")}-${selectedSeason.name}-fixtures.csv`, ["fixture_id", "home_team_name", "away_team_name", "match_date"], fixtures.map((fixture) => ({
-      fixture_id: fixture.id, home_team_name: fixture.homeTeam?.name, away_team_name: fixture.awayTeam?.name, match_date: fixture.startsAt?.slice(0, 10)
-    })));
-    setStatus(`Exported ${fixtures.length} fixtures for this season. Keep existing fixture IDs; leave fixture_id blank for new fixtures.`);
+    downloadExcel(`${selectedCompetition.name.replace(/[^a-z0-9-_]+/gi, "-")}-${selectedSeason.name}-fixtures.xlsx`, "Fixtures", "Canonical fixture schedule", ["Fixture ID", "Home Team", "Away Team", "Match Date", "Kickoff Time"], fixtures.map((fixture) => ({
+      "Fixture ID": fixture.id, "Home Team": fixture.homeTeam?.name, "Away Team": fixture.awayTeam?.name,
+      "Match Date": fixture.startsAt ? utcToOperatorKickoff(fixture.startsAt).slice(0, 10) : "",
+      "Kickoff Time": fixture.startsAt ? utcToOperatorKickoff(fixture.startsAt).slice(11, 16) : ""
+    })), "Keep existing fixture IDs and home/away team names unchanged. Leave Fixture ID blank for new fixtures. Match Date is required; Kickoff Time is optional and can be filled by the operator. Squads, formations, and venues are managed in GiTO.");
+    setStatus(`Exported ${fixtures.length} fixtures for this season. Keep existing fixture IDs; leave Fixture ID blank for new fixtures.`);
   };
 
   const importFixtureSchedule = async (file?: File) => {
     if (!file || !selectedHostId || !selectedCompetitionId || !selectedSeasonId) return;
     setIsImportingFixtures(true);
     try {
-      const rows = await parseCsvFile(file);
-      const required = ["fixture_id", "home_team_name", "away_team_name"];
-      if (!rows.every((row) => required.every((column) => column in row)) || !rows.every((row) => "match_date" in row || "starts_at" in row)) {
-        throw new Error("Fixture CSV must include fixture_id, home_team_name, away_team_name, and match_date columns.");
+      const rows = await parseExcelFile(file);
+      const read = (row: Record<string, string>, ...keys: string[]) => keys.map((key) => row[key]).find((value) => value !== undefined) ?? "";
+      const required = [["fixture id", "fixture_id"], ["home team", "home_team_name"], ["away team", "away_team_name"]];
+      if (!rows.every((row) => required.every((keys) => keys.some((key) => key in row))) || !rows.every((row) => "match date" in row || "match_date" in row || "starts_at" in row)) {
+        throw new Error("Fixture workbook must include Fixture ID, Home Team, Away Team, and Match Date columns.");
       }
-      const result = await apiClient.importFixtures({ hostId: selectedHostId, competitionId: selectedCompetitionId, seasonId: selectedSeasonId, rows: rows.map((row) => ({
-        fixtureId: row.fixture_id ?? "", homeTeamName: row.home_team_name ?? "", awayTeamName: row.away_team_name ?? "", startsAt: row.match_date ?? row.starts_at ?? ""
-      })) }, accessToken);
+      const importRows = rows.map((row) => {
+        const matchDate = read(row, "match date", "match_date", "starts_at");
+        const kickoffTime = read(row, "kickoff time", "kickoff_time");
+        let startsAt = matchDate;
+        if (kickoffTime && /^\d{4}-\d{2}-\d{2}$/.test(matchDate)) {
+          const localKickoff = localDateTimeToUtc(`${matchDate}T${kickoffTime}`);
+          if (!localKickoff) throw new Error(`Invalid kickoff time for ${read(row, "home team", "home_team_name")} vs ${read(row, "away team", "away_team_name")}.`);
+          startsAt = localKickoff;
+        }
+        return {
+          fixtureId: read(row, "fixture id", "fixture_id"), homeTeamName: read(row, "home team", "home_team_name"),
+          awayTeamName: read(row, "away team", "away_team_name"), startsAt
+        };
+      });
+      const result = await apiClient.importFixtures({ hostId: selectedHostId, competitionId: selectedCompetitionId, seasonId: selectedSeasonId, rows: importRows }, accessToken);
       await loadFixtures();
-      setStatus(`Fixture CSV imported: ${result.createdCount} added, ${result.skippedCount} existing or duplicate rows skipped.`);
+      setStatus(`Fixture workbook imported: ${result.createdCount} added, ${result.skippedCount} existing or duplicate rows skipped.`);
     } catch (error) { setStatus(error instanceof Error ? error.message : "Unable to import fixture schedule."); }
     finally { setIsImportingFixtures(false); if (fixtureFileRef.current) fixtureFileRef.current.value = ""; }
   };
@@ -396,10 +411,10 @@ export function FixtureWorkspaceScreen({
           <h3>Canonical fixtures</h3>
           <div className="button-row">
             <span className="status-pill">{status}</span>
-            <button type="button" className="secondary" onClick={exportFixtureHostRoster} disabled={!selectedHostId || !selectedCompetitionId || !selectedSeasonId}>Export Season Teams CSV</button>
-            <button type="button" className="secondary" onClick={exportFixtureSchedule} disabled={!selectedCompetitionId || !selectedSeasonId}>Export Fixture CSV</button>
-            <button type="button" className="secondary" onClick={() => fixtureFileRef.current?.click()} disabled={!selectedHostId || !selectedCompetitionId || !selectedSeasonId || isImportingFixtures}>{isImportingFixtures ? "Importing…" : "Import Fixture CSV"}</button>
-            <input ref={fixtureFileRef} type="file" accept=".csv,text/csv" hidden onChange={(event) => void importFixtureSchedule(event.target.files?.[0])} />
+            <button type="button" className="secondary" onClick={exportFixtureHostRoster} disabled={!selectedHostId || !selectedCompetitionId || !selectedSeasonId}>Export Season Teams Excel</button>
+            <button type="button" className="secondary" onClick={exportFixtureSchedule} disabled={!selectedCompetitionId || !selectedSeasonId}>Export Fixture Excel</button>
+            <button type="button" className="secondary" onClick={() => fixtureFileRef.current?.click()} disabled={!selectedHostId || !selectedCompetitionId || !selectedSeasonId || isImportingFixtures}>{isImportingFixtures ? "Importing…" : "Import Fixture Excel"}</button>
+            <input ref={fixtureFileRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={(event) => void importFixtureSchedule(event.target.files?.[0])} />
             <button type="button" onClick={() => setShowCreatePanel((value) => !value)}>
               {showCreatePanel ? "Hide form" : "+ Create canonical fixture"}
             </button>
