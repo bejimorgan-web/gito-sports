@@ -366,22 +366,31 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
         const rowHost = read(row, "host", "host_name");
         const legacySportId = read(row, "sport_id");
         const legacyHostId = read(row, "host_id");
-        if ((rowSport && rowSport.toLocaleLowerCase() !== selectedSport?.name.toLocaleLowerCase()) || (legacySportId && legacySportId !== selectedSport?.id)) {
+        if ((rowSport && rowSport.toLocaleLowerCase() !== selectedSport?.name.toLocaleLowerCase()) || (teamId && legacySportId && legacySportId !== selectedSport?.id)) {
           throw new Error(`Sport on row ${teamName} does not match the selected sport.`);
         }
-        if ((rowHost && rowHost.toLocaleLowerCase() !== host.name.toLocaleLowerCase()) || (legacyHostId && legacyHostId !== host.id)) {
+        if ((rowHost && rowHost.toLocaleLowerCase() !== host.name.toLocaleLowerCase()) || (teamId && legacyHostId && legacyHostId !== host.id)) {
           throw new Error(`Host on row ${teamName} does not match the selected host.`);
         }
         if (!teamId && normalizeTeamType(read(row, "team type", "team_type")) !== teamCategory) {
           throw new Error(`New rows in this view must have Team Type set to ${teamCategory === "club" ? "Club" : "National Team"}.`);
         }
       }
-      const result = await apiClient.importHostClubs(host.id, rows.map((row) => ({
-        teamId: read(row, "team id", "team_id"), sportId: read(row, "sport_id") || selectedSport?.id || "", hostId: read(row, "host_id") || host.id,
-        teamName: read(row, "team name", "team_name"), teamType: normalizeTeamType(read(row, "team type", "team_type")),
-        shortName: read(row, "short name", "short_name"), slug: read(row, "slug"), homeStadiumName: read(row, "home stadium name", "home_stadium_name"),
-        homeStadiumPhotoUrl: read(row, "stadium photo url", "home stadium photo url", "home_stadium_photo_url"), logoUrl: read(row, "logo url", "logo_url")
-      })), accessToken, { updateExisting: updateExistingTeamDetails });
+      const result = await apiClient.importHostClubs(host.id, rows.map((row) => {
+        const teamId = read(row, "team id", "team_id");
+        return {
+          teamId,
+          sportId: teamId ? read(row, "sport_id") || selectedSport?.id || "" : selectedSport?.id || "",
+          hostId: teamId ? read(row, "host_id") || host.id : host.id,
+          teamName: read(row, "team name", "team_name"),
+          teamType: normalizeTeamType(read(row, "team type", "team_type")),
+          shortName: read(row, "short name", "short_name"),
+          slug: read(row, "slug"),
+          homeStadiumName: read(row, "home stadium name", "home_stadium_name"),
+          homeStadiumPhotoUrl: read(row, "stadium photo url", "home stadium photo url", "home_stadium_photo_url"),
+          logoUrl: read(row, "logo url", "logo_url")
+        };
+      }), accessToken, { updateExisting: updateExistingTeamDetails });
       await loadData();
       setStatus(`Host roster imported: ${result.createdCount} added, ${result.updatedCount} updated, ${result.skippedCount} unchanged or skipped.`);
     } catch (error) { setStatus(error instanceof Error ? error.message : "Unable to import host roster."); }
@@ -992,7 +1001,7 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                 </div>
               </div>
               <label className="field-note"><input type="checkbox" checked={updateExistingTeamDetails} onChange={(event) => setUpdateExistingTeamDetails(event.target.checked)} disabled={isCatalogView || isImportingHostRoster} /> Update details for existing teams matched by Team ID or exact name (blank cells keep current values)</label>
-              <p className="field-note">Use the Excel workbook for roster export and import. It uses the same fields as Add {teamCategory === "club" ? "Club" : "National Team"}. Existing Team IDs and names stay associated with their registered records. Leave Team ID blank for a new row; GiTO creates the ID. Logo URL is optional.</p>
+              <p className="field-note">Use the Excel workbook for roster export and import. It uses the same fields as Add {teamCategory === "club" ? "Club" : "National Team"}. Existing Team IDs and names stay associated with their registered records. Leave Team ID blank for a new row; the selected host and sport are applied and GiTO creates the ID. Logo URL is optional.</p>
               <div className="entity-list">
                 {visibleTeams.length > 0 ? (
                   visibleTeams.map((team) => (
