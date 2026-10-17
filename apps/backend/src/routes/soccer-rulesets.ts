@@ -1,6 +1,6 @@
 import { Router } from "express";
 import crypto from "node:crypto";
-import { soccerCompetitionFormats, type SoccerCompetitionRuleset } from "../../../../packages/shared/src/soccer-rulesets.js";
+import { soccerCompetitionFormats, type SoccerCompetitionRuleset } from "@gito/shared";
 import { getDatabase } from "../db/connection.js";
 import { protectedRoute, type AuthenticatedRequest } from "../middleware/protected.js";
 import { validateSoccerCompetitionRuleset } from "../services/soccer-ruleset-validation.js";

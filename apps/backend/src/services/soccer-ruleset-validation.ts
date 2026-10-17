@@ -1,5 +1,5 @@
-import type { SoccerCompetitionRuleset, SoccerStageRules } from "../../../../packages/shared/src/soccer-rulesets.js";
-import { soccerCompetitionFormats } from "../../../../packages/shared/src/soccer-rulesets.js";
+import type { SoccerCompetitionRuleset, SoccerStageRules } from "@gito/shared";
+import { soccerCompetitionFormats } from "@gito/shared";
 
 const formatIds = new Set<string>(soccerCompetitionFormats.map(({ id }) => id));
 const tieBreakCriteria = new Set(["points", "played", "won", "drawn", "lost", "scoreDifference", "scoresFor", "scoresAgainst", "headToHeadPoints", "headToHeadScoreDifference", "headToHeadScoresFor", "entryId"]);
