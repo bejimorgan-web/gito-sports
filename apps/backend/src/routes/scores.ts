@@ -43,7 +43,7 @@ type ManualScoreInput = {
   operatorId: string;
 };
 
-type ManualScoreOperation = "start" | "update" | "confirm" | "correct" | "reopen";
+type ManualScoreOperation = "start" | "update" | "confirm" | "correct" | "reopen" | "import";
 
 function scoreError(message: string, statusCode: number, code: string) {
   return Object.assign(new Error(message), { statusCode, code });
@@ -289,6 +289,29 @@ function ensureManualFootballMatch(matchId: string): { id: string; status: strin
   return row;
 }
 
+function ensureImportableResultFixture(matchId: string) {
+  const row = getDatabase().prepare(`SELECT m.id, m.status, m.starts_at AS startsAt,
+      m.competition_id AS competitionId, c.sport_id AS competitionSportId,
+      h.sport_id AS homeSportId, a.sport_id AS awaySportId,
+      m.season_id AS seasonId, se.competition_id AS seasonCompetitionId
+    FROM matches m JOIN competitions c ON c.id=m.competition_id
+    JOIN teams h ON h.id=m.home_team_id JOIN teams a ON a.id=m.away_team_id
+    LEFT JOIN seasons se ON se.id=m.season_id WHERE m.id=?`).get(matchId) as any;
+  if (!row) throw scoreError("match_not_found", 404, "match_not_found");
+  if ((row.competitionSportId && (row.homeSportId !== row.competitionSportId || row.awaySportId !== row.competitionSportId))
+      || (row.seasonId && row.seasonCompetitionId !== row.competitionId)) {
+    throw scoreError("match has invalid competition relationships.", 422, "invalid_match_relationships");
+  }
+  return row as { id: string; status: string; startsAt: string | null };
+}
+
+function getLatestAcceptedFixtureResult(matchId: string) {
+  return getDatabase().prepare(`SELECT id AS revisionId, home_score AS homeScore, away_score AS awayScore
+    FROM match_result_revisions WHERE match_id=? AND result_status='ended'
+      AND final_result_confirmed=1 AND validation_state='accepted'
+    ORDER BY revision_number DESC LIMIT 1`).get(matchId) as { revisionId: string; homeScore: number; awayScore: number } | undefined;
+}
+
 function hasExplicitManualScoreValues(matchId: string): boolean {
   return Boolean(getDatabase().prepare(`
     SELECT 1
@@ -299,13 +322,12 @@ function hasExplicitManualScoreValues(matchId: string): boolean {
   `).get(matchId));
 }
 
-function persistManualScoreChange(matchId: string, input: ManualScoreInput, operation: ManualScoreOperation) {
+function persistManualScoreChange(matchId: string, input: ManualScoreInput, operation: ManualScoreOperation, manageTransaction = true) {
   const db = getDatabase();
   let transactionOpen = false;
   try {
-    db.exec("BEGIN IMMEDIATE;");
-    transactionOpen = true;
-    const fixture = ensureManualFootballMatch(matchId);
+    if (manageTransaction) { db.exec("BEGIN IMMEDIATE;"); transactionOpen = true; }
+    const fixture = operation === "import" ? ensureImportableResultFixture(matchId) : ensureManualFootballMatch(matchId);
     const current = readManualScoreState(matchId);
     const expectedVersion = normalizeExpectedVersion(input.version);
     if (expectedVersion !== (current?.version ?? 0)) {
@@ -378,6 +400,19 @@ function persistManualScoreChange(matchId: string, input: ManualScoreInput, oper
         nextStatus = "live";
         nextConfirmed = false;
         action = "final_result_reopened";
+        break;
+      case "import":
+        nextHomeScore = normalizeScoreValue(input.homeScore, "homeScore");
+        nextAwayScore = normalizeScoreValue(input.awayScore, "awayScore");
+        const acceptedResult = getLatestAcceptedFixtureResult(matchId);
+        const priorHomeScore = current?.finalResultConfirmed ? current.homeScore : acceptedResult?.homeScore;
+        const priorAwayScore = current?.finalResultConfirmed ? current.awayScore : acceptedResult?.awayScore;
+        if (priorHomeScore !== undefined && priorAwayScore !== undefined && (nextHomeScore !== priorHomeScore || nextAwayScore !== priorAwayScore) && !input.reason?.trim()) {
+          throw scoreError("correction_reason_required", 400, "correction_reason_required");
+        }
+        nextStatus = "ended";
+        nextConfirmed = true;
+        action = priorHomeScore !== undefined ? "score_corrected" : "final_result_confirmed";
         break;
     }
 
@@ -466,8 +501,7 @@ function persistManualScoreChange(matchId: string, input: ManualScoreInput, oper
       }
     });
 
-    db.exec("COMMIT;");
-    transactionOpen = false;
+    if (manageTransaction) { db.exec("COMMIT;"); transactionOpen = false; }
     return readManualScoreState(matchId)!;
   } catch (error) {
     if (transactionOpen) {
@@ -491,6 +525,10 @@ export function confirmManualMatchResult(matchId: string, input: ManualScoreInpu
 
 export function correctManualMatchResult(matchId: string, input: ManualScoreInput) {
   return persistManualScoreChange(matchId, input, "correct");
+}
+
+export function importManualMatchResult(matchId: string, input: ManualScoreInput, manageTransaction = true) {
+  return persistManualScoreChange(matchId, input, "import", manageTransaction);
 }
 
 export function reopenManualMatchResult(matchId: string, input: ManualScoreInput) {
@@ -561,6 +599,33 @@ function runManualScoreOperation(
 
 scoresRouter.get("/source-mode", protectedRoute, requireAdmin, (_request, response) => {
   response.json({ data: ScoreService.getSourceMode() });
+});
+
+scoresRouter.get("/results/:id", protectedRoute, requireAdmin, (request, response) => {
+  const matchId = request.params.id;
+  if (!matchId) return response.status(400).json({ error: "match_id_required" });
+  try {
+    ensureImportableResultFixture(matchId);
+    const state = getManualMatchScoreState(matchId);
+    if (!state) return response.status(404).json({ error: "manual_score_not_found" });
+    response.json({ data: state });
+  } catch (error) { handleScoreError(error, response); }
+});
+
+scoresRouter.get("/results", protectedRoute, requireAdmin, (request, response) => {
+  const competitionId = String(request.query.competitionId ?? "");
+  const seasonId = String(request.query.seasonId ?? "");
+  if (!competitionId || !seasonId) return response.status(400).json({ error: "competition_and_season_required" });
+  const rows = getDatabase().prepare(`SELECT m.id AS matchId, latest.homeScore, latest.awayScore,
+      'ended' AS status, 1 AS finalResultConfirmed
+    FROM matches m JOIN (
+      SELECT r.match_id, r.home_score AS homeScore, r.away_score AS awayScore,
+        ROW_NUMBER() OVER (PARTITION BY r.match_id ORDER BY r.revision_number DESC) AS rowNumber
+      FROM match_result_revisions r WHERE r.result_status='ended'
+        AND r.final_result_confirmed=1 AND r.validation_state='accepted'
+    ) latest ON latest.match_id=m.id AND latest.rowNumber=1
+    WHERE m.competition_id=? AND m.season_id=? ORDER BY m.starts_at ASC`).all(competitionId, seasonId);
+  response.json({ data: rows });
 });
 
 scoresRouter.get("/operator-notifications", protectedRoute, requireAdmin, (_request, response) => {
@@ -1011,6 +1076,48 @@ scoresRouter.post("/manual/:id/correct", protectedRoute, requireAdmin, (request,
   } catch (error) {
     handleScoreError(error, response);
   }
+});
+
+scoresRouter.post("/manual/import-results", protectedRoute, requireAdmin, (request: AuthenticatedRequest, response) => {
+  if (ScoreService.getSourceMode().mode !== "manual") return response.status(409).json({ error: "score_source_is_api", message: "Switch score source to Manual before importing final results." });
+  const body = request.body && typeof request.body === "object" && !Array.isArray(request.body) ? request.body as Record<string, unknown> : {};
+  const competitionId = typeof body.competitionId === "string" ? body.competitionId : "";
+  const seasonId = typeof body.seasonId === "string" ? body.seasonId : "";
+  const results = Array.isArray(body.results) ? body.results as Array<Record<string, unknown>> : null;
+  if (!competitionId || !seasonId || !results || results.length > 2000) return response.status(400).json({ error: "invalid_fixture_result_import" });
+  const database = getDatabase();
+  const seen = new Set<string>();
+  const pending: Array<{ matchId: string; homeScore: number; awayScore: number; reason: string }> = [];
+  try {
+    for (const row of results) {
+      if (typeof row.matchId !== "string" || !row.matchId || seen.has(row.matchId)) throw scoreError("invalid_or_duplicate_result_fixture", 400, "invalid_fixture_result_import");
+      seen.add(row.matchId);
+      if (!Number.isSafeInteger(row.homeScore) || Number(row.homeScore) < 0 || !Number.isSafeInteger(row.awayScore) || Number(row.awayScore) < 0) throw scoreError("both scores must be non-negative whole numbers.", 400, "invalid_score_values");
+      const reason = typeof row.reason === "string" ? row.reason.trim() : "";
+      if (reason.length > 500) throw scoreError("reason must be 500 characters or fewer.", 400, "invalid_reason");
+      const fixture = database.prepare("SELECT starts_at AS startsAt FROM matches WHERE id=? AND competition_id=? AND season_id=?").get(row.matchId, competitionId, seasonId) as { startsAt: string } | undefined;
+      if (!fixture) throw scoreError("result_fixture_not_in_selected_season", 400, "result_fixture_not_in_selected_season");
+      if (!fixture.startsAt || Date.parse(fixture.startsAt) >= Date.now()) throw scoreError("only_past_fixtures_can_receive_imported_final_results", 400, "result_fixture_not_past");
+      const current = getManualMatchScoreState(row.matchId);
+      const accepted = getLatestAcceptedFixtureResult(row.matchId);
+      const currentHome = current?.finalResultConfirmed ? current.homeScore : accepted?.homeScore;
+      const currentAway = current?.finalResultConfirmed ? current.awayScore : accepted?.awayScore;
+      if (currentHome !== undefined && currentAway !== undefined && (currentHome !== Number(row.homeScore) || currentAway !== Number(row.awayScore)) && !reason) throw scoreError(`A correction reason is required for ${row.matchId}.`, 400, "correction_reason_required");
+      if (currentHome === Number(row.homeScore) && currentAway === Number(row.awayScore)) continue;
+      pending.push({ matchId: row.matchId, homeScore: Number(row.homeScore), awayScore: Number(row.awayScore), reason });
+    }
+    const importedStates: ManualScoreState[] = [];
+    if (pending.length) database.exec("BEGIN IMMEDIATE;");
+    try {
+      for (const result of pending) {
+        const state = importManualMatchResult(result.matchId, { version: getManualMatchScoreState(result.matchId)?.version ?? 0, homeScore: result.homeScore, awayScore: result.awayScore, reason: result.reason, operatorId: request.operator!.id }, false);
+        importedStates.push(state);
+      }
+      if (pending.length) database.exec("COMMIT;");
+    } catch (error) { if (pending.length) database.exec("ROLLBACK;"); throw error; }
+    for (const state of importedStates) ScoreService.notifyManualScoreUpdate(state.matchId, state.version);
+    response.json({ data: { updatedCount: importedStates.length, unchangedCount: results.length - importedStates.length } });
+  } catch (error) { handleScoreError(error, response); }
 });
 
 scoresRouter.post("/manual/:id/reopen", protectedRoute, requireAdmin, (request, response) => {

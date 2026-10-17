@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getDatabase, isDatabaseInitialized } from "../db/connection.js";
+import { EXPECTED_SCHEMA_VERSION, getDatabase, isDatabaseInitialized } from "../db/connection.js";
 import { isMigrationImported, getMigrationMetadata } from "../db/migration-import.js";
 import { hasStartupFailed, isServerReady, markStartupFailed } from "../core/server-readiness.js";
 
@@ -20,7 +20,7 @@ function databaseSchemaReady(database: ReturnType<typeof getDatabase>): boolean 
     const schemaVersion = Number((database.prepare("PRAGMA user_version").get() as { user_version?: number }).user_version ?? 0);
     // getDatabase() only completes after startup compatibility checks have
     // accepted the current schema and all required migrations have run.
-    if (!Number.isSafeInteger(schemaVersion) || schemaVersion < 1) return false;
+    if (!Number.isSafeInteger(schemaVersion) || schemaVersion !== EXPECTED_SCHEMA_VERSION) return false;
     const requiredTables = [
       "sports",
       "teams",
@@ -31,7 +31,14 @@ function databaseSchemaReady(database: ReturnType<typeof getDatabase>): boolean 
       "operator_users",
       "news_articles",
       "news_article_categories",
-      "news_article_media"
+      "news_article_media",
+      "competition_entries",
+      "match_result_revisions",
+      "standings_snapshots",
+      "standings_snapshot_rows",
+      "standings_coverage_assessments",
+      "standings_schedule_manifests",
+      "standings_rulesets"
     ];
     const placeholders = requiredTables.map(() => "?").join(",");
     const rows = database

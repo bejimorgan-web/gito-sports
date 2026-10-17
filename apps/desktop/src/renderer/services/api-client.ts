@@ -350,6 +350,10 @@ export const apiClient = {
       headers: { authorization: `Bearer ${accessToken}` }
     });
   },
+  getFixtureResultStates(competitionId: string, seasonId: string, accessToken: string) {
+    const params = new URLSearchParams({ competitionId, seasonId });
+    return request<Array<{ matchId: string; homeScore: number; awayScore: number; status: string; finalResultConfirmed: boolean }>>(`/scores/results?${params.toString()}`, { headers: { authorization: `Bearer ${accessToken}` } });
+  },
   getManualScoreClock(matchId: string, accessToken: string) {
     return request<any>(`/scores/manual/${encodeURIComponent(matchId)}/clock`, {
       headers: { authorization: `Bearer ${accessToken}` }
@@ -1172,10 +1176,13 @@ export const apiClient = {
   createFixture(input: any, accessToken: string) {
     return request<any>('/fixtures', { method: 'POST', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
   },
-  importFixtures(input: { hostId: string; competitionId: string; seasonId: string; rows: Array<Record<string, string>> }, accessToken: string) {
-    return request<{ created: any[]; createdCount: number; skippedCount: number }>("/fixtures/import", {
+  importFixtures(input: { hostId: string; competitionId: string; seasonId: string; rows: Array<Record<string, string | number>> }, accessToken: string) {
+    return request<{ created: any[]; updated: any[]; createdCount: number; updatedCount: number; skippedCount: number; rowResults: Array<{ rowIndex: number; fixtureId: string; action: "created" | "updated" | "unchanged" }> }>("/fixtures/import", {
       method: "POST", headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input)
     });
+  },
+  importManualFixtureResults(input: { competitionId: string; seasonId: string; results: Array<{ matchId: string; homeScore: number; awayScore: number; reason?: string }> }, accessToken: string) {
+    return request<{ updatedCount: number; unchangedCount: number }>("/scores/manual/import-results", { method: "POST", headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
   },
   updateFixture(fixtureId: string, input: any, accessToken: string) {
     return request<any>(`/fixtures/${fixtureId}`, { method: 'PUT', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });

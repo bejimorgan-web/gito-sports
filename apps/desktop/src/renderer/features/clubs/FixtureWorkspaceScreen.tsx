@@ -196,12 +196,24 @@ export function FixtureWorkspaceScreen({
 
   const exportFixtureSchedule = () => {
     if (!selectedCompetition || !selectedSeason) { setStatus("Select a competition and season first."); return; }
-    downloadExcel(`${selectedCompetition.name.replace(/[^a-z0-9-_]+/gi, "-")}-${selectedSeason.name}-fixtures.xlsx`, "Fixtures", "Canonical fixture schedule", ["Fixture ID", "Home Team", "Away Team", "Match Date", "Kickoff Time"], fixtures.map((fixture) => ({
-      "Fixture ID": fixture.id, "Home Team": fixture.homeTeam?.name, "Away Team": fixture.awayTeam?.name,
-      "Match Date": fixture.startsAt ? utcToOperatorKickoff(fixture.startsAt).slice(0, 10) : "",
-      "Kickoff Time": fixture.startsAt ? utcToOperatorKickoff(fixture.startsAt).slice(11, 16) : ""
-    })), "Keep existing fixture IDs and home/away team names unchanged. Leave Fixture ID blank for new fixtures. Match Date is required; Kickoff Time is optional and can be filled by the operator. Squads, formations, and venues are managed in GiTO.");
-    setStatus(`Exported ${fixtures.length} fixtures for this season. Keep existing fixture IDs; leave Fixture ID blank for new fixtures.`);
+    void (async () => {
+      try {
+        const allFixtures: any[] = [];
+        for (let offset = 0; ; offset += 100) {
+          const page = await apiClient.listFixtures({ competitionId: selectedCompetition.id, seasonId: selectedSeason.id, limit: 100, offset });
+          allFixtures.push(...page);
+          if (page.length < 100) break;
+        }
+        const scoreStates = await apiClient.getFixtureResultStates(selectedCompetition.id, selectedSeason.id, accessToken);
+        const resultById = new Map(scoreStates.map((state) => [state.matchId, state]));
+        downloadExcel(`${selectedCompetition.name.replace(/[^a-z0-9-_]+/gi, "-")}-${selectedSeason.name}-fixtures.xlsx`, "Fixtures", "Canonical fixture schedule and results", ["Fixture ID", "Home Team", "Away Team", "Match Date", "Kickoff Time", "Home Score", "Away Score", "Result Correction Reason"], allFixtures.map((fixture) => {
+          const result = resultById.get(fixture.id);
+          const kickoff = fixture.startsAt ? utcToOperatorKickoff(fixture.startsAt) : "";
+          return { "Fixture ID": fixture.id, "Home Team": fixture.homeTeam?.name, "Away Team": fixture.awayTeam?.name, "Match Date": kickoff.slice(0, 10), "Kickoff Time": kickoff.slice(11, 16), "Home Score": result?.finalResultConfirmed ? String(result.homeScore) : "", "Away Score": result?.finalResultConfirmed ? String(result.awayScore) : "", "Result Correction Reason": "" };
+        }), "Keep each existing Fixture ID and team names unchanged. Edit Match Date and optional Kickoff Time to update the fixture schedule. Enter both Home Score and Away Score only for a completed past fixture; blank score cells preserve the current result. A correction reason is required to change an already confirmed score. Leave Fixture ID blank only for a new fixture. Omitted fixtures remain registered. Squads and formations are managed separately.");
+        setStatus(`Exported all ${allFixtures.length} fixtures for this season, including confirmed scores.`);
+      } catch (error) { setStatus(error instanceof Error ? error.message : "Unable to export fixture workbook."); }
+    })();
   };
 
   const importFixtureSchedule = async (file?: File) => {
@@ -214,23 +226,60 @@ export function FixtureWorkspaceScreen({
       if (!rows.every((row) => required.every((keys) => keys.some((key) => key in row))) || !rows.every((row) => "match date" in row || "match_date" in row || "starts_at" in row)) {
         throw new Error("Fixture workbook must include Fixture ID, Home Team, Away Team, and Match Date columns.");
       }
-      const importRows = rows.map((row) => {
+      const resultRows: Array<{ rowIndex: number; fixtureId: string; startsAt: string; homeScore: number; awayScore: number; reason?: string }> = [];
+      const importRows = rows.map((row, rowIndex) => {
         const matchDate = read(row, "match date", "match_date", "starts_at");
         const kickoffTime = read(row, "kickoff time", "kickoff_time");
+        if (!matchDate.trim()) throw new Error("Match Date is required for every workbook row.");
         let startsAt = matchDate;
         if (kickoffTime && /^\d{4}-\d{2}-\d{2}$/.test(matchDate)) {
           const localKickoff = localDateTimeToUtc(`${matchDate}T${kickoffTime}`);
           if (!localKickoff) throw new Error(`Invalid kickoff time for ${read(row, "home team", "home_team_name")} vs ${read(row, "away team", "away_team_name")}.`);
           startsAt = localKickoff;
         }
-        return {
-          fixtureId: read(row, "fixture id", "fixture_id"), homeTeamName: read(row, "home team", "home_team_name"),
-          awayTeamName: read(row, "away team", "away_team_name"), startsAt
-        };
+        const fixtureId = read(row, "fixture id", "fixture_id").trim();
+        const homeScoreText = read(row, "home score", "home_score").trim();
+        const awayScoreText = read(row, "away score", "away_score").trim();
+        const reason = read(row, "result correction reason", "correction reason", "reason").trim();
+        if (Boolean(homeScoreText) !== Boolean(awayScoreText)) throw new Error("Enter both Home Score and Away Score, or leave both blank.");
+        if (homeScoreText && awayScoreText) {
+          if (!/^\d+$/.test(homeScoreText) || !/^\d+$/.test(awayScoreText)) throw new Error("Scores must be whole numbers of zero or greater.");
+          if (Date.parse(startsAt) >= Date.now()) throw new Error("Only past fixtures can be assigned a final score in this workbook.");
+          resultRows.push({ rowIndex, fixtureId, startsAt, homeScore: Number(homeScoreText), awayScore: Number(awayScoreText), ...(reason ? { reason } : {}) });
+        }
+        return { fixtureId, homeTeamName: read(row, "home team", "home_team_name"), awayTeamName: read(row, "away team", "away_team_name"), startsAt };
       });
+      if (resultRows.length) {
+        const sourceMode = await apiClient.getScoreSourceMode(accessToken);
+        if (sourceMode.mode !== "manual") throw new Error("Switch score source to Manual before importing fixture results. No workbook changes were applied.");
+        const currentResults = await apiClient.getFixtureResultStates(selectedCompetitionId, selectedSeasonId, accessToken);
+        const currentById = new Map(currentResults.map((current) => [current.matchId, current]));
+        for (const row of resultRows) {
+          const current = currentById.get(row.fixtureId);
+          if (current?.finalResultConfirmed && (current.homeScore !== row.homeScore || current.awayScore !== row.awayScore) && !row.reason) {
+            throw new Error(`A correction reason is required to change the confirmed result for fixture ${row.fixtureId}. No workbook changes were applied.`);
+          }
+        }
+      }
+      const scheduleSummary = importRows.length ? `${importRows.length} fixture rows; ${resultRows.length} final results` : "no fixture rows";
+      if (!window.confirm(`Import this workbook for ${selectedCompetition?.name} · ${selectedSeason?.name}?\n\n${scheduleSummary}. Existing fixture IDs will be updated in place. Omitted fixtures will remain unchanged.`)) return;
       const result = await apiClient.importFixtures({ hostId: selectedHostId, competitionId: selectedCompetitionId, seasonId: selectedSeasonId, rows: importRows }, accessToken);
+      let resultSummary = "";
+      if (resultRows.length) {
+        try {
+          const fixtureIdsByRow = new Map(result.rowResults.map((row) => [row.rowIndex, row.fixtureId]));
+          const scoreImportRows = resultRows.map((row) => ({ matchId: row.fixtureId || fixtureIdsByRow.get(row.rowIndex) || "", homeScore: row.homeScore, awayScore: row.awayScore, ...(row.reason ? { reason: row.reason } : {}) }));
+          if (scoreImportRows.some((row) => !row.matchId)) throw new Error("A score row could not be matched to its imported fixture.");
+          const scoreResult = await apiClient.importManualFixtureResults({ competitionId: selectedCompetitionId, seasonId: selectedSeasonId, results: scoreImportRows }, accessToken);
+          resultSummary = ` ${scoreResult.updatedCount} results saved; ${scoreResult.unchangedCount} unchanged.`;
+        } catch (error) {
+          setStatus(`Schedule applied (${result.createdCount} added, ${result.updatedCount} updated), but score import failed: ${error instanceof Error ? error.message : "unknown error"}. Re-upload the workbook after resolving this result issue.`);
+          await loadFixtures();
+          return;
+        }
+      }
       await loadFixtures();
-      setStatus(`Fixture workbook imported: ${result.createdCount} added, ${result.skippedCount} existing or duplicate rows skipped.`);
+      setStatus(`Fixture workbook imported: ${result.createdCount} added, ${result.updatedCount} updated, ${result.skippedCount} unchanged.${resultSummary} Prepare standings again to publish an updated table.`);
     } catch (error) { setStatus(error instanceof Error ? error.message : "Unable to import fixture schedule."); }
     finally { setIsImportingFixtures(false); if (fixtureFileRef.current) fixtureFileRef.current.value = ""; }
   };
@@ -411,10 +460,6 @@ export function FixtureWorkspaceScreen({
           <h3>Canonical fixtures</h3>
           <div className="button-row">
             <span className="status-pill">{status}</span>
-            <button type="button" className="secondary" onClick={exportFixtureHostRoster} disabled={!selectedHostId || !selectedCompetitionId || !selectedSeasonId}>Export Season Teams Excel</button>
-            <button type="button" className="secondary" onClick={exportFixtureSchedule} disabled={!selectedCompetitionId || !selectedSeasonId}>Export Fixture Excel</button>
-            <button type="button" className="secondary" onClick={() => fixtureFileRef.current?.click()} disabled={!selectedHostId || !selectedCompetitionId || !selectedSeasonId || isImportingFixtures}>{isImportingFixtures ? "Importing…" : "Import Fixture Excel"}</button>
-            <input ref={fixtureFileRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={(event) => void importFixtureSchedule(event.target.files?.[0])} />
             <button type="button" onClick={() => setShowCreatePanel((value) => !value)}>
               {showCreatePanel ? "Hide form" : "+ Create canonical fixture"}
             </button>
@@ -553,6 +598,10 @@ export function FixtureWorkspaceScreen({
             </div>
 
             <div className="button-row">
+              <button type="button" className="secondary" onClick={exportFixtureHostRoster} disabled={!selectedSportId || !selectedHostId || !selectedCompetitionId || !selectedSeasonId}>Export Season Teams Excel</button>
+              <button type="button" className="secondary" onClick={exportFixtureSchedule} disabled={!selectedSportId || !selectedHostId || !selectedCompetitionId || !selectedSeasonId}>Export Fixture Excel</button>
+              <button type="button" className="secondary" onClick={() => fixtureFileRef.current?.click()} disabled={!selectedSportId || !selectedHostId || !selectedCompetitionId || !selectedSeasonId || isImportingFixtures}>{isImportingFixtures ? "Importing…" : "Import Fixture Excel"}</button>
+              <input ref={fixtureFileRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={(event) => void importFixtureSchedule(event.target.files?.[0])} />
               <button type="button" onClick={() => void createFixture()}>Create canonical fixture</button>
               <button type="button" className="secondary" onClick={() => {
                 setCreateHomeTeamId("");
@@ -565,6 +614,7 @@ export function FixtureWorkspaceScreen({
             </div>
           </div>
         ) : null}
+        {showCreatePanel ? <p className="field-note">Workbook actions use the Sport, Host, Competition, and Season selected above. Existing fixture IDs update in place; omitted fixtures are preserved. Match date is required. Blank score cells preserve any saved result; entering both scores records a completed past result for mobile scores. Changing a confirmed score requires a correction reason. Re-prepare standings after result imports.</p> : null}
 
         <div className="button-row" style={{ marginTop: 16 }}>
           <label className="search-field" style={{ flex: 1, minWidth: 220 }}>

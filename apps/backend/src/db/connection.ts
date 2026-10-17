@@ -24,7 +24,7 @@ import { NewsWebRssGeneratorService, ensureNewsGeneratedRssSchema } from "../ser
 
 let database: DatabaseSync | null = null;
 const BASELINE_SCHEMA_VERSION = 1;
-const EXPECTED_SCHEMA_VERSION = 8;
+export const EXPECTED_SCHEMA_VERSION = 8;
 const SUPPORTED_SCHEMA_VERSIONS = [BASELINE_SCHEMA_VERSION, 2, 3, 4, 5, 6, 7, EXPECTED_SCHEMA_VERSION] as const;
 const REQUIRED_BASELINE_TABLES = [
   "sports",
