@@ -46,7 +46,6 @@ export type ScoreEventDescriptor = {
 
 export type ScoreMatchSummary = {
   id: string;
-  canonicalMatchId?: string | null;
   utcDate: string | null;
   status: string;
   minute: number | null;
@@ -448,6 +447,7 @@ type ManualScoreReadRow = {
   externalMatchId: string | null;
   utcDate: string;
   status: string;
+  clockPhase: string | null;
   homeScore: number;
   awayScore: number;
   version: number;
@@ -461,11 +461,6 @@ type ManualScoreReadRow = {
   awayTeamId: string;
   awayTeamName: string;
   awayTeamLogoUrl: string | null;
-  clockPhase: string | null;
-  clockRunning: number | null;
-  clockRunningSince: string | null;
-  clockElapsedSeconds: number | null;
-  firstHalfAddedMinutes: number | null;
 };
 
 function manualScoreRows(whereSql: string, ...values: string[]): ManualScoreReadRow[] {
@@ -475,6 +470,7 @@ function manualScoreRows(whereSql: string, ...values: string[]): ManualScoreRead
            m.external_match_id AS externalMatchId,
            m.starts_at AS utcDate,
            ms.status,
+           clock.phase AS clockPhase,
            ms.home_score AS homeScore,
            ms.away_score AS awayScore,
            ms.version,
@@ -487,19 +483,14 @@ function manualScoreRows(whereSql: string, ...values: string[]): ManualScoreRead
            h.logo_url AS homeTeamLogoUrl,
            a.id AS awayTeamId,
            a.name AS awayTeamName,
-           a.logo_url AS awayTeamLogoUrl,
-           cs.phase AS clockPhase,
-           cs.is_running AS clockRunning,
-           cs.running_since AS clockRunningSince,
-           cs.elapsed_seconds AS clockElapsedSeconds,
-           cs.first_half_added_minutes AS firstHalfAddedMinutes
+           a.logo_url AS awayTeamLogoUrl
     FROM match_score_state ms
+    LEFT JOIN match_score_clock_state clock ON clock.match_id = ms.match_id
     JOIN matches m ON m.id = ms.match_id
     JOIN competitions c ON c.id = m.competition_id
     JOIN sports s ON s.id = c.sport_id
     JOIN teams h ON h.id = m.home_team_id
     JOIN teams a ON a.id = m.away_team_id
-    LEFT JOIN match_score_clock_state cs ON cs.match_id = m.id
     LEFT JOIN seasons se ON se.id = m.season_id
     WHERE lower(s.slug) IN ('football', 'soccer')
       AND h.sport_id = c.sport_id
@@ -526,17 +517,7 @@ function getFootballProviderIdentity(): string {
 function toManualScoreSummary(row: ManualScoreReadRow): ScoreMatchSummary {
   const homeScore = Number(row.homeScore);
   const awayScore = Number(row.awayScore);
-  const elapsedSeconds = Number(row.clockElapsedSeconds ?? 0) + (Number(row.clockRunning) === 1 && row.clockRunningSince
-    ? Math.max(0, Math.floor((Date.now() - Date.parse(row.clockRunningSince)) / 1000)) : 0);
-  const firstHalfEnd = 45 * 60 + Number(row.firstHalfAddedMinutes ?? 0) * 60;
-  const clockPhase = row.clockPhase;
-  const isSecondHalf = clockPhase === "second_half" || (clockPhase === "paused" && elapsedSeconds > firstHalfEnd);
-  const minute = clockPhase === "halftime" || clockPhase === "ended" || !clockPhase
-    ? null
-    : isSecondHalf
-      ? 45 + Math.floor(Math.max(0, elapsedSeconds - firstHalfEnd) / 60)
-      : Math.floor(elapsedSeconds / 60);
-  const status = row.status === "live" ? clockPhase ? isSecondHalf ? "2H" : "1H" : "LIVE"
+  const status = row.status === "live" ? row.clockPhase === "halftime" ? "HT" : row.clockPhase === "second_half" ? "2H" : "LIVE"
     : row.status === "paused" ? "PAUSED"
       : row.status === "ended" ? "FT"
         : row.status === "postponed" ? "PST"
@@ -549,10 +530,9 @@ function toManualScoreSummary(row: ManualScoreReadRow): ScoreMatchSummary {
 
   return {
     id: row.matchId,
-    canonicalMatchId: row.matchId,
     utcDate: row.utcDate,
-    status: clockPhase === "halftime" ? "HT" : status,
-    minute,
+    status,
+    minute: null,
     competition: {
       id: row.competitionId,
       name: row.competitionName,
@@ -588,19 +568,16 @@ function manualSummaryForCanonicalMatch(matchId: string): ScoreMatchSummary | nu
 }
 
 function applyManualScoreToProviderMatch(match: ScoreMatchSummary, providerIdentity: string): ScoreMatchSummary {
+  if (getScoreSourceMode() === "api") return match;
   const canonicalMatches = canonicalMatchesForProviderFixture(providerIdentity, match.id);
-  const matchWithCanonicalId = canonicalMatches.length === 1
-    ? { ...match, canonicalMatchId: canonicalMatches[0]! }
-    : match;
-  if (getScoreSourceMode() === "api") return matchWithCanonicalId;
-  if (canonicalMatches.length !== 1) return matchWithCanonicalId;
+  if (canonicalMatches.length !== 1) return match;
   const rows = manualScoreRows("m.id = ?", canonicalMatches[0]!);
   if (rows.length !== 1) {
-    return matchWithCanonicalId;
+    return match;
   }
   const manual = toManualScoreSummary(rows[0]!);
   return {
-    ...matchWithCanonicalId,
+    ...match,
     id: manual.id,
     utcDate: manual.utcDate,
     status: manual.status,

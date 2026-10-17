@@ -9,8 +9,9 @@ export type NavigationKey =
   | "preview"
   | "matchAssignment"
   | "sports"
-  | "scores"
   | "approvals"
+  | "scores"
+  | "standings"
   | "matches"
   | "mobileFeatures"
   | "news"
@@ -50,6 +51,11 @@ export const navigationItems: NavigationItem[] = [
     key: "scores",
     label: "Live Scores",
     description: "Operate manual match scores and final results"
+  },
+  {
+    key: "standings",
+    label: "Standings",
+    description: "Review persisted competition standings and coverage"
   },
   {
     key: "squads",

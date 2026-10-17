@@ -1,14 +1,17 @@
 import { getDatabase } from "../db/connection.js";
+import type { DatabaseSync } from "../db/sqlite.js";
 
 type JobFn = () => Promise<void> | void;
 const scheduledIntervals = new Set<ReturnType<typeof setInterval>>();
 const scheduledImmediates = new Set<ReturnType<typeof setImmediate>>();
 const scheduledStops = new Set<() => void>();
 
-// Ensure lock table exists
-function ensureLockTable() {
-  const db = getDatabase();
+export function ensureBackgroundJobSchema(db: DatabaseSync = getDatabase()): void {
   db.exec(`CREATE TABLE IF NOT EXISTS job_locks (name TEXT PRIMARY KEY, last_run_at TEXT, lock_until INTEGER);`);
+}
+
+function ensureLockTable() {
+  ensureBackgroundJobSchema();
 }
 
 function tryAcquireLock(name: string, leaseMs: number): boolean {

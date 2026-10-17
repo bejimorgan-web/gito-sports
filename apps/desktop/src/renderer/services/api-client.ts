@@ -75,10 +75,116 @@ export { API_BASE_URL };
 const REQUEST_TIMEOUT_MS = 35_000;
 
 export class ApiRequestError extends Error {
-  constructor(message: string, readonly status: number, readonly path: string) {
-    super(message);
-    this.name = "ApiRequestError";
-  }
+  constructor(message: string, readonly status: number, readonly path: string) { super(message); this.name = "ApiRequestError"; }
+}
+
+export interface StandingsResponse {
+  competition: { id: string; name: string };
+  season: { id: string; name: string };
+  snapshot: {
+    id: string;
+    sequence: number;
+    calculatedAt: string;
+    ruleset: { id: string; version: number };
+    rulesetApproval: {
+      competitionId: string;
+      seasonId: string;
+      rulesetId: string;
+      rulesetVersion: number;
+      approvalId?: string;
+      approvedByOperatorId: string;
+      approvedAt: string;
+    } | null;
+    complete: boolean;
+  };
+  rows: Array<{
+    rank: number;
+    entry: {
+      id: string;
+      type: "team" | "individual";
+      teamId: string | null;
+      playerId: string | null;
+      displayName: string | null;
+    };
+    played: number;
+    won: number;
+    drawn: number;
+    lost: number;
+    goalsFor: number;
+    goalsAgainst: number;
+    goalDifference: number;
+    points: number;
+  }>;
+  resultRevisions: Array<{ matchId: string; revisionId: string; revisionNumber: number }>;
+  coverage: {
+    status: "verified_complete" | "incomplete" | "invalid" | "superseded" | "unassessed" | "unverified";
+    eligible: boolean;
+    assessment: {
+      id: string;
+      sequence: number;
+      manifest: { id: string; version: number; state: "draft" | "finalized"; source?: { name: string; reference: string } | null } | null;
+      blockingReasons: Array<{ code: string; message: string; fixtureId?: string }>;
+    } | null;
+  };
+}
+
+export interface StandingsRulesetInput {
+  id: string;
+  version: number;
+  points: { win: number; draw: number; loss: number };
+  trackedStatistics: Array<
+    "played" | "won" | "drawn" | "lost" | "scoresFor" | "scoresAgainst" | "scoreDifference" | "points"
+  >;
+  tieBreakers: Array<{
+    criterion: "points" | "played" | "won" | "drawn" | "lost" | "scoreDifference" | "scoresFor" | "scoresAgainst"
+      | "headToHeadPoints" | "headToHeadScoreDifference" | "headToHeadScoresFor" | "entryId";
+    direction: "asc" | "desc";
+  }>;
+}
+
+export interface StandingsWorkflowContext {
+  competition: { id: string; name: string; participantType: string };
+  season: { id: string; name: string };
+  teamCandidates: Array<{ teamId: string; name: string }>;
+  entries: Array<{ id: string; teamId: string }>;
+  fixtures: Array<{
+    id: string;
+    homeTeamId: string;
+    homeTeamName: string;
+    awayTeamId: string;
+    awayTeamName: string;
+    status: string;
+  }>;
+  acceptedRevisions: Array<{
+    id: string;
+    matchId: string;
+    revisionNumber: number;
+    homeScore: number;
+    awayScore: number;
+    createdAt: string;
+  }>;
+  rulesets: Array<{
+    id: string;
+    rulesetId: string;
+    version: number;
+    ruleset: StandingsRulesetInput;
+    status: "pending" | "approved";
+    proposedByOperatorId: string;
+    approvedByOperatorId: string | null;
+    proposedAt: string;
+    approvedAt: string | null;
+  }>;
+}
+
+export interface StandingsWorkflowResult {
+  snapshot: { id: string; sequence: number; rulesetId: string; rulesetVersion: number };
+  manifest: { id: string; version: number; state: "finalized"; source: { name: string; reference: string; contentHash: string } | null };
+  coverage: {
+    id: string;
+    eligible: boolean;
+    scheduleState: "unverified" | "incomplete" | "invalid" | "verified_complete";
+    blockingReasons: Array<{ code: string; message: string; fixtureId?: string }>;
+  };
 }
 
 let currentAccessToken: string | null = null;
@@ -102,9 +208,11 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   const method = init?.method?.toUpperCase() ?? "GET";
   const canRetry = method === "GET" || (method === "DELETE" && path.startsWith("/iptv/providers/"));
-  const requestTimeoutMs = path.startsWith("/iptv/providers") && ["POST", "PUT"].includes(method)
-    ? 120_000
-    : REQUEST_TIMEOUT_MS;
+  const requestTimeoutMs = path.startsWith("/news/ai/") && method === "POST"
+    ? 150_000
+    : path.startsWith("/iptv/providers") && ["POST", "PUT"].includes(method)
+      ? 120_000
+      : REQUEST_TIMEOUT_MS;
   let response: Response | undefined;
   let lastNetworkError: unknown;
   for (let attempt = 0; attempt < (canRetry ? 3 : 1); attempt += 1) {
@@ -145,7 +253,13 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
       const errorBody = (await response.json()) as { message?: string; error?: string };
       message = errorBody.message ?? errorBody.error ?? message;
     } catch {
-      // Keep the status message when the backend cannot return JSON.
+      if (path.startsWith("/news/ai/") && response.status === 404) {
+        message = "AI News endpoint unavailable (HTTP 404). The Phase 1–6 AI backend routes may not be deployed yet.";
+      } else if (response.status === 404 && path.includes("/scores/manual/") && path.includes("/events/")) {
+        message = `Match event endpoint or event was not found (HTTP 404): ${path}. Refresh the match; if this event is still listed, the backend deployment may be behind the desktop app.`;
+      } else if (path.startsWith("/news/ai/")) {
+        message = `AI News request failed (HTTP ${response.status}).`;
+      }
     }
 
     throw new ApiRequestError(message, response.status, path);
@@ -253,13 +367,21 @@ export const apiClient = {
       headers: { authorization: `Bearer ${accessToken}` }
     });
   },
+  listScoreOperatorNotifications(accessToken: string) {
+    return request<any[]>("/scores/operator-notifications", { headers: { authorization: `Bearer ${accessToken}` } });
+  },
+  acknowledgeScoreOperatorNotification(id: string, accessToken: string) {
+    return request<any>(`/scores/operator-notifications/${encodeURIComponent(id)}/acknowledge`, {
+      method: "POST", headers: { authorization: `Bearer ${accessToken}` }
+    });
+  },
   listManualScoreEvents(matchId: string, accessToken: string) {
-    return request<Array<{ id: string; minute: number; description: string; eventType: string; teamId: string | null; playerId: string | null; relatedPlayerId: string | null; homeScore: number; awayScore: number }>>(`/scores/manual/${encodeURIComponent(matchId)}/events`, { headers: { authorization: `Bearer ${accessToken}` } });
+    return request<any[]>(`/scores/manual/${encodeURIComponent(matchId)}/events`, { headers: { authorization: `Bearer ${accessToken}` } });
   },
   listManualScorePlayers(matchId: string, accessToken: string) {
     return request<Array<{ id: string; name: string; teamId: string; teamName: string; jerseyNumber: number | null }>>(`/scores/manual/${encodeURIComponent(matchId)}/players`, { headers: { authorization: `Bearer ${accessToken}` } });
   },
-  recordManualScoreEvent(matchId: string, input: { version: number; minute: number; eventType: string; teamId: string; playerId: string; relatedPlayerId?: string | null }, accessToken: string) {
+  recordManualScoreEvent(matchId: string, input: { version: number; minute: number; eventType: string; teamId?: string; playerId?: string; relatedPlayerId?: string | null }, accessToken: string) {
     return request<any>(`/scores/manual/${encodeURIComponent(matchId)}/events`, {
       method: "POST", headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" }, body: JSON.stringify(input)
     });
@@ -267,6 +389,19 @@ export const apiClient = {
   updateManualScoreEventMinute(matchId: string, eventId: string, input: { version: number; minute: number; reason?: string }, accessToken: string) {
     return request<any>(`/scores/manual/${encodeURIComponent(matchId)}/events/${encodeURIComponent(eventId)}`, {
       method: "PATCH", headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" }, body: JSON.stringify(input)
+    });
+  },
+  updateManualScoreEvent(matchId: string, eventId: string, input: {
+    version: number; minute: number; eventType: string; teamId?: string | null; playerId?: string | null;
+    relatedPlayerId?: string | null; description?: string; reason?: string;
+  }, accessToken: string) {
+    return request<any>(`/scores/manual/${encodeURIComponent(matchId)}/events/${encodeURIComponent(eventId)}`, {
+      method: "PATCH", headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" }, body: JSON.stringify(input)
+    });
+  },
+  deleteManualScoreEvent(matchId: string, eventId: string, input: { version: number; reason?: string }, accessToken: string) {
+    return request<any>(`/scores/manual/${encodeURIComponent(matchId)}/events/${encodeURIComponent(eventId)}`, {
+      method: "DELETE", headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" }, body: JSON.stringify(input)
     });
   },
   setScoreSourceMode(mode: "manual" | "api", accessToken: string) {
@@ -531,8 +666,8 @@ export const apiClient = {
   listGeneratedNewsRssFeeds(accessToken: string) {
     return request<Array<any>>("/news/generated-rss-sources", { headers: { authorization: `Bearer ${accessToken}` } });
   },
-  createGeneratedNewsRssFeed(name: string, sourceUrl: string, accessToken: string) {
-    return request<any>("/news/generated-rss-sources", { method: "POST", headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ name, sourceUrl }) });
+  createGeneratedNewsRssFeed(name: string, sourceUrl: string, accessToken: string, selectors?: { item: string; title: string; link: string; summary?: string; date?: string }) {
+    return request<any>("/news/generated-rss-sources", { method: "POST", headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ name, sourceUrl, ...(selectors ? { selectors } : {}) }) });
   },
   refreshGeneratedNewsRssFeed(feedId: string, accessToken: string) {
     return request<any>(`/news/generated-rss-sources/${feedId}/refresh`, { method: "POST", headers: { authorization: `Bearer ${accessToken}` } });
@@ -831,6 +966,49 @@ export const apiClient = {
   listSeasons(competitionId: string) {
     return request<Season[]>(`/competitions/${competitionId}/seasons`);
   },
+  getStandings(competitionId: string, seasonId: string, accessToken: string) {
+    return request<StandingsResponse>(
+      `/standings/${encodeURIComponent(competitionId)}/${encodeURIComponent(seasonId)}`,
+      { headers: { authorization: ["Bearer", accessToken].join(" ") } }
+    );
+  },
+  getStandingsWorkflowContext(competitionId: string, seasonId: string, accessToken: string) {
+    return request<{ data: StandingsWorkflowContext }>(
+      `/standings/${encodeURIComponent(competitionId)}/${encodeURIComponent(seasonId)}/workflow-context`,
+      { headers: { authorization: ["Bearer", accessToken].join(" ") } }
+    );
+  },
+  proposeStandingsRuleset(competitionId: string, seasonId: string, ruleset: StandingsRulesetInput, accessToken: string) {
+    return request<{ data: { id: string; rulesetId: string; version: number; status: "pending" } }>(
+      `/standings/${encodeURIComponent(competitionId)}/${encodeURIComponent(seasonId)}/rulesets`,
+      { method: "POST", headers: { authorization: ["Bearer", accessToken].join(" ") }, body: JSON.stringify({ ruleset }) }
+    );
+  },
+  approveStandingsRuleset(competitionId: string, seasonId: string, approvalId: string, accessToken: string) {
+    return request<{ data: { id: string; status: "approved" } }>(
+      `/standings/${encodeURIComponent(competitionId)}/${encodeURIComponent(seasonId)}/rulesets/${encodeURIComponent(approvalId)}/approve`,
+      { method: "POST", headers: { authorization: ["Bearer", accessToken].join(" ") }, body: JSON.stringify({}) }
+    );
+  },
+  prepareStandings(competitionId: string, seasonId: string, input: {
+    teamIds: string[];
+    expectedFixtures: Array<{ fixtureKey: string; matchId: string; homeTeamId: string; awayTeamId: string }>;
+    revisionSelections: Array<{ matchId: string; revisionId: string }>;
+    rulesetApprovalId: string;
+    scheduleConfirmed: true;
+    scheduleSourceName: string;
+    scheduleSourceReference: string;
+    scheduleCsvBase64: string;
+  }, accessToken: string) {
+    return request<{ data: StandingsWorkflowResult }>(
+      `/standings/${encodeURIComponent(competitionId)}/${encodeURIComponent(seasonId)}/prepare`,
+      {
+        method: "POST",
+        headers: { authorization: ["Bearer", accessToken].join(" ") },
+        body: JSON.stringify(input)
+      }
+    );
+  },
   getSeason(seasonId: string) {
     return request<Season>(`/seasons/${seasonId}`);
   },
@@ -932,9 +1110,10 @@ export const apiClient = {
   deleteMatch(matchId: string, accessToken: string) {
     return request<void>(`/matches/${matchId}`, { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } });
   },
-  listFixtures(opts?: { sportId?: string; competitionId?: string; seasonId?: string; teamId?: string; status?: string; from?: string; to?: string; limit?: number; offset?: number }) {
+  listFixtures(opts?: { sportId?: string; hostId?: string; competitionId?: string; seasonId?: string; teamId?: string; status?: string; from?: string; to?: string; limit?: number; offset?: number }) {
     const params = new URLSearchParams();
     if (opts?.sportId) params.set('sportId', opts.sportId);
+    if (opts?.hostId) params.set('hostId', opts.hostId);
     if (opts?.competitionId) params.set('competitionId', opts.competitionId);
     if (opts?.seasonId) params.set('seasonId', opts.seasonId);
     if (opts?.teamId) params.set('teamId', opts.teamId);

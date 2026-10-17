@@ -11,8 +11,8 @@ interface AuthenticatedLayoutProps {
   onNavigate: (key: NavigationKey) => void;
   activeProvider?: IPTVProvider | undefined;
   currentEmail?: string | null;
-  operatorRole?: string | null;
   apiBaseUrl: string;
+  operatorRole?: string | null;
   onLogout?: () => void;
 }
 
@@ -23,10 +23,13 @@ export function AuthenticatedLayout({
   onNavigate,
   activeProvider,
   currentEmail,
-  operatorRole,
   apiBaseUrl,
+  operatorRole,
   onLogout
 }: AuthenticatedLayoutProps) {
+  const visibleNavigationItems = operatorRole === "admin"
+    ? navigationItems
+    : navigationItems.filter((item) => item.key !== "scores" && item.key !== "standings");
   return (
     <main className={liveMode ? "app-shell live-mode-shell" : "app-shell"}>
       <aside className="sidebar">
@@ -39,7 +42,7 @@ export function AuthenticatedLayout({
           <>
             <SidebarNavigation
               activeKey={activeKey}
-              items={operatorRole === "admin" ? navigationItems : navigationItems.filter((item) => item.key !== "scores")}
+              items={visibleNavigationItems}
               onSelect={onNavigate}
             />
             {activeProvider ? (

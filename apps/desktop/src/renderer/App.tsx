@@ -24,6 +24,7 @@ import { FixtureWorkspaceScreen } from "./features/clubs/FixtureWorkspaceScreen"
 import { SquadManagementScreen } from "./features/teams/SquadManagementScreen";
 import { FormationManagementScreen } from "./features/sports/FormationManagementScreen";
 import { ManualScoreControlScreen } from "./features/scores/ManualScoreControlScreen";
+import { StandingsScreen } from "./features/standings/StandingsScreen";
 import { AuthenticatedLayout } from "./layouts/AuthenticatedLayout";
 import { LoginScreen } from "./screens/LoginScreen";
 import { apiClient, API_BASE_URL, setAccessToken as setClientAccessToken } from "./services/api-client";
@@ -361,6 +362,8 @@ function renderScreen(
       return <SportsWorkspaceScreen accessToken={state.accessToken} />;
     case "scores":
       return <ManualScoreControlScreen accessToken={state.accessToken} isAdmin={state.operatorRole === "admin"} />;
+    case "standings":
+      return <StandingsScreen accessToken={state.accessToken} isAdmin={state.operatorRole === "admin"} />;
     case "matches":
       return <MatchSchedulerScreen selectedMatchId={state.selectedMatchId} accessToken={state.accessToken} />;
     case "approvals":

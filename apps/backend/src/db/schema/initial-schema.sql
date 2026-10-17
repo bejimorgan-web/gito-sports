@@ -319,6 +319,96 @@ CREATE TABLE IF NOT EXISTS matches (
   FOREIGN KEY (away_team_id) REFERENCES teams(id)
 );
 
+CREATE TABLE IF NOT EXISTS match_score_state (
+  id TEXT PRIMARY KEY,
+  match_id TEXT NOT NULL UNIQUE,
+  home_score INTEGER NOT NULL DEFAULT 0,
+  away_score INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'live', 'paused', 'ended', 'cancelled', 'postponed')),
+  final_result_confirmed INTEGER NOT NULL DEFAULT 0,
+  version INTEGER NOT NULL DEFAULT 1,
+  updated_by_operator_id TEXT,
+  last_confirmed_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,
+  FOREIGN KEY (updated_by_operator_id) REFERENCES operator_users(id)
+);
+
+CREATE TABLE IF NOT EXISTS match_score_audit (
+  id TEXT PRIMARY KEY,
+  match_id TEXT NOT NULL,
+  action TEXT NOT NULL CHECK (action IN ('score_updated', 'score_corrected', 'final_result_confirmed', 'final_result_reopened')),
+  operator_id TEXT,
+  previous_version INTEGER NOT NULL,
+  new_version INTEGER NOT NULL,
+  previous_home_score INTEGER,
+  previous_away_score INTEGER,
+  new_home_score INTEGER,
+  new_away_score INTEGER,
+  previous_status TEXT,
+  new_status TEXT,
+  previous_final_result_confirmed INTEGER,
+  new_final_result_confirmed INTEGER,
+  reason TEXT,
+  metadata TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,
+  FOREIGN KEY (operator_id) REFERENCES operator_users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_match_score_state_match ON match_score_state(match_id);
+CREATE INDEX IF NOT EXISTS idx_match_score_audit_match ON match_score_audit(match_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_match_score_audit_operator ON match_score_audit(operator_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS match_score_system_audit (
+  id TEXT PRIMARY KEY,
+  match_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  previous_state TEXT,
+  new_state TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_match_score_system_audit_match ON match_score_system_audit(match_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS match_score_operator_notifications (
+  id TEXT PRIMARY KEY,
+  match_id TEXT NOT NULL,
+  event_key TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  event_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  acknowledged_at TEXT,
+  acknowledged_by_operator_id TEXT,
+  UNIQUE (match_id, event_key),
+  FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,
+  FOREIGN KEY (acknowledged_by_operator_id) REFERENCES operator_users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_score_operator_notifications_pending
+  ON match_score_operator_notifications(acknowledged_at, event_at DESC);
+
+CREATE TABLE IF NOT EXISTS match_score_timeline (
+  id TEXT PRIMARY KEY,
+  match_id TEXT NOT NULL,
+  minute INTEGER NOT NULL CHECK (minute BETWEEN 0 AND 150),
+  description TEXT NOT NULL,
+  event_type TEXT NOT NULL DEFAULT 'note',
+  team_id TEXT,
+  player_id TEXT,
+  related_player_id TEXT,
+  home_score INTEGER NOT NULL CHECK (home_score >= 0),
+  away_score INTEGER NOT NULL CHECK (away_score >= 0),
+  operator_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT '',
+  FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,
+  FOREIGN KEY (operator_id) REFERENCES operator_users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_match_score_timeline_match ON match_score_timeline(match_id, minute, created_at);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_matches_external_identity
   ON matches(external_provider, external_match_id)
   WHERE external_provider IS NOT NULL AND external_match_id IS NOT NULL;

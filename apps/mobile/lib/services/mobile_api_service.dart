@@ -15,11 +15,13 @@ class MobileApiException implements Exception {
 }
 
 class MobileApiService {
-  const MobileApiService({this.baseUrl = apiBaseUrl});
+  const MobileApiService({this.baseUrl = apiBaseUrl, this.httpClientFactory});
   final String baseUrl;
+  final HttpClient Function()? httpClientFactory;
 
   Future<dynamic> _get(String path) async {
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 6);
+    final client = (httpClientFactory?.call() ?? HttpClient())
+      ..connectionTimeout = const Duration(seconds: 6);
     try {
       final request = await client.getUrl(Uri.parse('$baseUrl$path'));
       request.headers.set(HttpHeaders.cacheControlHeader, 'no-store');
@@ -184,6 +186,16 @@ class MobileApiService {
   Future<MobileSeason> getSeason(String seasonId) async =>
       MobileSeason.fromJson(
           Map<String, dynamic>.from(await _get('/mobile/seasons/$seasonId')));
+  Future<MobileStandings> getPublicStandings({
+    required String competitionId,
+    required String seasonId,
+  }) async {
+    final competition = Uri.encodeComponent(competitionId);
+    final season = Uri.encodeComponent(seasonId);
+    final response = await _get('/public/standings/$competition/$season');
+    return MobileStandings.fromJson(Map<String, dynamic>.from(response as Map));
+  }
+
   Future<List<MobileFixture>> getSeasonFixtures(String seasonId) async =>
       _fixtures('/mobile/seasons/$seasonId/fixtures');
   Future<List<MobileClub>> getSeasonTeams(String seasonId) async =>

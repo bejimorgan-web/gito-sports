@@ -43,6 +43,33 @@ export type GeneratedRssSelectors = BrowserExtractionSelectors;
 
 type DiscoveredArticle = Omit<GeneratedRssArticle, "id" | "discoveredAt" | "status">;
 
+interface RssSchemaDatabase {
+  exec(sql: string): unknown;
+  prepare(sql: string): { all(): unknown[] };
+}
+
+export function ensureNewsGeneratedRssSchema(db: RssSchemaDatabase): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS news_generated_rss_sources (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, source_url TEXT NOT NULL, feed_token TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_fetched_at TEXT, status TEXT NOT NULL DEFAULT 'created',
+      discovered_article_count INTEGER NOT NULL DEFAULT 0, error_message TEXT, enabled INTEGER NOT NULL DEFAULT 1,
+      crawler_tier TEXT NOT NULL DEFAULT 'http', failure_classification TEXT, selectors_json TEXT
+    );
+    CREATE TABLE IF NOT EXISTS news_generated_rss_articles (
+      id TEXT PRIMARY KEY, generated_feed_id TEXT NOT NULL, external_id TEXT NOT NULL, canonical_url TEXT NOT NULL,
+      title TEXT NOT NULL, summary TEXT, article_url TEXT NOT NULL, published_at TEXT, discovered_at TEXT NOT NULL,
+      content_hash TEXT NOT NULL, source_name TEXT NOT NULL, source_url TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'discovered',
+      FOREIGN KEY (generated_feed_id) REFERENCES news_generated_rss_sources(id) ON DELETE CASCADE,
+      UNIQUE(generated_feed_id, external_id)
+    );
+  `);
+  const sourceColumns = db.prepare("PRAGMA table_info(news_generated_rss_sources)").all() as Array<{ name: string }>;
+  if (!sourceColumns.some((column) => column.name === "selectors_json")) {
+    db.exec("ALTER TABLE news_generated_rss_sources ADD COLUMN selectors_json TEXT");
+  }
+}
+
 export function getWebRssUserMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   if (message === "rss_fetch_failed_403") {
@@ -185,25 +212,7 @@ export class NewsWebRssGeneratorService {
 
   constructor(private readonly db: Database = getDatabase(), options?: { browserRenderer?: NewsBrowserRenderer }) {
     this.browserRenderer = options?.browserRenderer ?? createNewsBrowserRenderer();
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS news_generated_rss_sources (
-        id TEXT PRIMARY KEY, name TEXT NOT NULL, source_url TEXT NOT NULL, feed_token TEXT NOT NULL UNIQUE,
-        created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_fetched_at TEXT, status TEXT NOT NULL DEFAULT 'created',
-        discovered_article_count INTEGER NOT NULL DEFAULT 0, error_message TEXT, enabled INTEGER NOT NULL DEFAULT 1,
-        crawler_tier TEXT NOT NULL DEFAULT 'http', failure_classification TEXT, selectors_json TEXT
-      );
-      CREATE TABLE IF NOT EXISTS news_generated_rss_articles (
-        id TEXT PRIMARY KEY, generated_feed_id TEXT NOT NULL, external_id TEXT NOT NULL, canonical_url TEXT NOT NULL,
-        title TEXT NOT NULL, summary TEXT, article_url TEXT NOT NULL, published_at TEXT, discovered_at TEXT NOT NULL,
-        content_hash TEXT NOT NULL, source_name TEXT NOT NULL, source_url TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'discovered',
-        FOREIGN KEY (generated_feed_id) REFERENCES news_generated_rss_sources(id) ON DELETE CASCADE,
-        UNIQUE(generated_feed_id, external_id)
-      );
-    `);
-    const sourceColumns = this.db.prepare("PRAGMA table_info(news_generated_rss_sources)").all() as Array<{ name: string }>;
-    if (!sourceColumns.some((column) => column.name === "selectors_json")) {
-      this.db.exec("ALTER TABLE news_generated_rss_sources ADD COLUMN selectors_json TEXT");
-    }
+    ensureNewsGeneratedRssSchema(this.db);
   }
 
   createFeed(name: string, sourceUrl: string, selectors?: GeneratedRssSelectors | null): GeneratedRssFeed {

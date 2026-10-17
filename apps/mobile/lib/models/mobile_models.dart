@@ -1,5 +1,7 @@
 import '../app_config.dart';
 
+export 'standings_models.dart';
+
 class MobileSport {
   const MobileSport(
       {required this.id, required this.name, this.slug, this.logoUrl});

@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
 import { Response, Router } from "express";
 
+import { recordAcceptedScoreUpdateInTransaction } from "../services/accepted-score-revision-service.js";
 import { ScoreService } from "../services/score-service.js";
 import { ensureDueManualScoreStartsAtKickoff, ensureManualScoreStartedAtKickoff } from "../services/manual-score-scheduler.js";
-import { recalculateTimelineScoreSnapshots, shouldIncrementAuthoritativeScore } from "../services/manual-score-timeline.js";
 import { getDatabase } from "../db/connection.js";
 import { protectedRoute, type AuthenticatedRequest } from "../middleware/protected.js";
 import { logOperationalEvent } from "../repositories/operational-log-repository.js";
@@ -11,7 +11,7 @@ import { logOperationalEvent } from "../repositories/operational-log-repository.
 export const scoresRouter = Router();
 
 const manualScoreStatuses = new Set(["scheduled", "live", "paused", "ended", "postponed", "cancelled"]);
-const manualMatchEventTypes = new Set(["note", "goal", "yellow_card", "red_card", "var_yellow_card", "var_red_card", "penalty_scored", "penalty_missed", "var_penalty_scored", "var_penalty_missed", "var_goal_disallowed", "injury", "substitution"]);
+const manualMatchEventTypes = new Set(["note", "goal", "yellow_card", "red_card", "var_yellow_card", "var_red_card", "penalty_scored", "penalty_missed", "var_penalty_scored", "var_penalty_missed", "var_goal_disallowed", "injury", "substitution", "halftime"]);
 const scoringEventTypes = new Set(["goal", "penalty_scored", "var_penalty_scored"]);
 
 export type ManualScoreState = {
@@ -30,6 +30,7 @@ export type ManualScoreState = {
 type ClockState = {
   matchId: string; phase: string; running: boolean; runningSince: string | null;
   elapsedSeconds: number; firstHalfAddedMinutes: number | null; secondHalfAddedMinutes: number | null;
+  actualStartedAt: string | null; phaseStartedAt: string | null; halftimeStartedAt: string | null; halftimeEndsAt: string | null;
   version: number; updatedAt: string;
 };
 
@@ -125,10 +126,44 @@ function readManualScoreState(matchId: string): ManualScoreState | null {
   };
 }
 
+function recalculateTimelineScoreSnapshots(matchId: string) {
+  const db = getDatabase();
+  const fixture = db.prepare("SELECT home_team_id AS homeTeamId, away_team_id AS awayTeamId FROM matches WHERE id=?")
+    .get(matchId) as { homeTeamId: string; awayTeamId: string } | undefined;
+  const score = readManualScoreState(matchId);
+  if (!fixture || !score) return;
+
+  const events = db.prepare(`SELECT id, minute, created_at AS createdAt, event_type AS eventType, team_id AS teamId
+    FROM match_score_timeline WHERE match_id=? ORDER BY minute, created_at, rowid`).all(matchId) as Array<{
+      id: string; minute: number; createdAt: string; eventType: string; teamId: string | null;
+    }>;
+  const homeGoals = events.filter((event) => scoringEventTypes.has(event.eventType) && event.teamId === fixture.homeTeamId).length;
+  const awayGoals = events.filter((event) => scoringEventTypes.has(event.eventType) && event.teamId === fixture.awayTeamId).length;
+  // Preserve the authoritative match result while rebuilding each chronological event snapshot.
+  let homeScore = Math.max(0, score.homeScore - homeGoals);
+  let awayScore = Math.max(0, score.awayScore - awayGoals);
+  const updateSnapshot = db.prepare("UPDATE match_score_timeline SET home_score=?, away_score=? WHERE id=?");
+  for (const event of events) {
+    if (scoringEventTypes.has(event.eventType)) {
+      if (event.teamId === fixture.homeTeamId) homeScore++;
+      if (event.teamId === fixture.awayTeamId) awayScore++;
+    }
+    updateSnapshot.run(homeScore, awayScore, event.id);
+  }
+}
+
+function countTimelineGoals(matchId: string, teamId: string) {
+  const rows = getDatabase().prepare(`SELECT COUNT(*) AS count FROM match_score_timeline
+    WHERE match_id=? AND team_id=? AND event_type IN ('goal', 'penalty_scored', 'var_penalty_scored')`).get(matchId, teamId) as { count: number };
+  return rows.count;
+}
+
 function readClockState(matchId: string): ClockState | null {
   const row = getDatabase().prepare(`SELECT match_id AS matchId, phase, is_running AS running,
     running_since AS runningSince, elapsed_seconds AS elapsedSeconds,
     first_half_added_minutes AS firstHalfAddedMinutes, second_half_added_minutes AS secondHalfAddedMinutes,
+    actual_started_at AS actualStartedAt, phase_started_at AS phaseStartedAt,
+    halftime_started_at AS halftimeStartedAt, halftime_ends_at AS halftimeEndsAt,
     version, updated_at AS updatedAt FROM match_score_clock_state WHERE match_id = ?`).get(matchId) as any;
   if (!row) return null;
   const elapsedSeconds = Number(row.elapsedSeconds) + (Number(row.running) === 1 && row.runningSince
@@ -148,6 +183,7 @@ function recordClockAction(matchId: string, operatorId: string, action: string, 
     const now = new Date().toISOString();
     let phase = current.phase; let running = current.running; let runningSince = current.runningSince;
     let elapsed = current.elapsedSeconds; let firstAdded = current.firstHalfAddedMinutes; let secondAdded = current.secondHalfAddedMinutes;
+    let halftimeStartedAt = current.halftimeStartedAt; let halftimeEndsAt = current.halftimeEndsAt;
     const football = Boolean(db.prepare(`SELECT 1 FROM matches m JOIN competitions c ON c.id=m.competition_id JOIN sports s ON s.id=c.sport_id WHERE m.id=? AND lower(s.slug) IN ('football','soccer')`).get(matchId));
     const elapsedBefore = elapsed;
     let auditReason: string | null = null;
@@ -168,42 +204,53 @@ function recordClockAction(matchId: string, operatorId: string, action: string, 
       if (!football) throw scoreError("added_time_is_only_supported_for_soccer", 422, "unsupported_clock_rule");
       const minutes = normalizeScoreValue(value, "addedMinutes");
       if (minutes > 30) throw scoreError("added_minutes_must_be_between_0_and_30", 400, "invalid_added_minutes");
-      if (action === "set_first_added" && elapsed < 2700) throw scoreError("first_half_added_time_not_due", 409, "invalid_clock_transition");
-      if (action === "set_second_added" && elapsed < 5400 + (firstAdded ?? 0) * 60) throw scoreError("second_half_added_time_not_due", 409, "invalid_clock_transition");
+      if (action === "set_first_added" && (phase !== "first_half" || !running || elapsed >= 2700 + (firstAdded ?? 0) * 60)) throw scoreError("first_half_added_time_window_closed", 409, "invalid_clock_transition");
+      if (action === "set_second_added" && (phase !== "second_half" || !running || elapsed >= 5400 + (secondAdded ?? 0) * 60)) throw scoreError("second_half_added_time_window_closed", 409, "invalid_clock_transition");
       if (action === "set_first_added") firstAdded = minutes; else secondAdded = minutes;
     } else if (action === "pause" && running) {
       phase = "paused"; running = false; runningSince = null;
     } else if (action === "resume" && !running && ["first_half", "second_half", "running", "paused"].includes(phase)) {
-      phase = phase === "paused" ? (football ? (elapsed <= 2700 + (firstAdded ?? 0) * 60 ? "first_half" : "second_half") : "running") : phase;
+      phase = phase === "paused" ? (football
+        ? (current.halftimeStartedAt && current.phaseStartedAt && Date.parse(current.phaseStartedAt) >= Date.parse(current.halftimeStartedAt) ? "second_half" : "first_half")
+        : "running") : phase;
       running = true; runningSince = now;
     } else if (action === "halftime" && football && running && elapsed >= 2700 + (firstAdded ?? 0) * 60) {
       const halftimeScore = readManualScoreState(matchId);
       phase = "halftime"; running = false; runningSince = null; elapsed = Math.max(elapsed, 2700 + (firstAdded ?? 0) * 60);
-      if (halftimeScore) {
+      halftimeStartedAt = now; halftimeEndsAt = new Date(Date.parse(now) + 15 * 60_000).toISOString();
+      const halftimeAlreadyRecorded = db.prepare("SELECT 1 FROM match_score_timeline WHERE match_id=? AND event_type='halftime' LIMIT 1")
+        .get(matchId);
+      if (halftimeScore && !halftimeAlreadyRecorded) {
         db.prepare(`INSERT INTO match_score_timeline
           (id,match_id,minute,description,event_type,team_id,player_id,related_player_id,home_score,away_score,operator_id,created_at,updated_at)
-          VALUES (?,?,?,'Half-time','halftime',NULL,NULL,NULL,?,?,?,?,?)`)
+          VALUES (?,?,?,'Half-time','halftime',NULL,NULL,NULL,?,?,?, ?,?)`)
           .run(crypto.randomUUID(), matchId, Math.min(150, Math.floor(elapsed / 60)), halftimeScore.homeScore,
             halftimeScore.awayScore, operatorId, now, now);
+        recalculateTimelineScoreSnapshots(matchId);
       }
     } else if (action === "start_second_half" && football && phase === "halftime") {
-      phase = "second_half"; running = true; runningSince = now;
-    } else if (action === "end" && (football ? ["first_half", "halftime", "second_half", "paused"].includes(phase) : running || (!running && phase === "paused"))) {
+      phase = "second_half"; running = true; runningSince = now; elapsed = 2700;
+    } else if (action === "end" && (football
+      ? ["first_half", "halftime", "second_half", "paused"].includes(phase)
+      : running || (!running && phase === "paused"))) {
       phase = "ended"; running = false; runningSince = null;
     } else {
       throw scoreError("invalid_clock_transition", 409, "invalid_clock_transition");
     }
     const version = current.version + 1;
     if (running) runningSince = now;
-    db.prepare(`UPDATE match_score_clock_state SET phase=?, is_running=?, running_since=?, elapsed_seconds=?, first_half_added_minutes=?, second_half_added_minutes=?, version=?, updated_by_operator_id=?, updated_at=? WHERE match_id=?`)
-      .run(phase, running ? 1 : 0, runningSince, elapsed, firstAdded, secondAdded, version, operatorId, now, matchId);
-    const next = { ...current, phase, running, runningSince, elapsedSeconds: elapsed, firstHalfAddedMinutes: firstAdded, secondHalfAddedMinutes: secondAdded, version, updatedAt: now };
+    db.prepare(`UPDATE match_score_clock_state SET phase=?, is_running=?, running_since=?, elapsed_seconds=?, first_half_added_minutes=?, second_half_added_minutes=?, phase_started_at=?, actual_started_at=COALESCE(actual_started_at,?), halftime_started_at=?, halftime_ends_at=?, version=?, updated_by_operator_id=?, updated_at=? WHERE match_id=?`)
+      .run(phase, running ? 1 : 0, runningSince, elapsed, firstAdded, secondAdded,
+        ["halftime", "start_second_half", "end"].includes(action) ? now : current.phaseStartedAt,
+        action === "start_second_half" ? now : current.actualStartedAt, halftimeStartedAt, halftimeEndsAt,
+        version, operatorId, now, matchId);
+    const next = { ...current, phase, running, runningSince, elapsedSeconds: elapsed, firstHalfAddedMinutes: firstAdded, secondHalfAddedMinutes: secondAdded, halftimeStartedAt, halftimeEndsAt, version, updatedAt: now };
     db.prepare(`INSERT INTO match_score_clock_audit (id,match_id,action,operator_id,previous_state,new_state,created_at) VALUES (?,?,?,?,?,?,?)`)
       .run(crypto.randomUUID(), matchId, action, operatorId, JSON.stringify({ ...current, elapsedSeconds: elapsedBefore }), JSON.stringify({ ...next, ...(auditReason ? { correctionReason: auditReason } : {}) }), now);
     if (["pause", "resume", "halftime", "start_second_half", "end"].includes(action)) {
       const score = readManualScoreState(matchId);
       if (score && !score.finalResultConfirmed) {
-        const status = action === "pause" || action === "halftime" ? "paused" : action === "end" ? "ended" : "live";
+        const status = action === "pause" ? "paused" : action === "end" ? "ended" : "live";
         const scoreVersion = score.version + 1;
         db.prepare("UPDATE match_score_state SET status=?, version=?, updated_by_operator_id=?, updated_at=? WHERE match_id=?")
           .run(status, scoreVersion, operatorId, now, matchId);
@@ -211,11 +258,7 @@ function recordClockAction(matchId: string, operatorId: string, action: string, 
           .run(crypto.randomUUID(), matchId, "score_updated", operatorId, score.version, scoreVersion, score.homeScore, score.awayScore, score.homeScore, score.awayScore, score.status, status, 0, 0, null, JSON.stringify({ operation: `clock_${action}`, operatorId }), now);
       }
     }
-    if (action === "end") db.prepare("UPDATE matches SET status='ended', updated_at=? WHERE id=?").run(now, matchId);
-    if (action === "halftime" && !recalculateTimelineScoreSnapshots(db, matchId)) {
-      throw scoreError("timeline_goal_count_exceeds_authoritative_score", 409, "timeline_score_inconsistent");
-    }
-
+    if (action === "end") db.prepare("UPDATE matches SET status='ended',updated_at=? WHERE id=?").run(now, matchId);
     db.exec("COMMIT;");
     return next;
   } catch (error) { db.exec("ROLLBACK;"); throw error; }
@@ -244,6 +287,16 @@ function ensureManualFootballMatch(matchId: string): { id: string; status: strin
     throw scoreError("match_is_not_a_valid_football_fixture", 422, "invalid_match_relationships");
   }
   return row;
+}
+
+function hasExplicitManualScoreValues(matchId: string): boolean {
+  return Boolean(getDatabase().prepare(`
+    SELECT 1
+    FROM match_score_audit
+    WHERE match_id = ?
+      AND json_extract(metadata, '$.scoreValuesExplicit') = 1
+    LIMIT 1
+  `).get(matchId));
 }
 
 function persistManualScoreChange(matchId: string, input: ManualScoreInput, operation: ManualScoreOperation) {
@@ -296,6 +349,15 @@ function persistManualScoreChange(matchId: string, input: ManualScoreInput, oper
         if (!current || current.finalResultConfirmed || current.status !== "ended") {
           throw scoreError("only an ended, unconfirmed match can be finalized.", 409, "invalid_match_transition");
         }
+        if ((input.homeScore === undefined) !== (input.awayScore === undefined)) {
+          throw scoreError("both homeScore and awayScore are required when confirming a result.", 400, "invalid_score_values");
+        }
+        if (input.homeScore !== undefined && input.awayScore !== undefined) {
+          nextHomeScore = normalizeScoreValue(input.homeScore, "homeScore");
+          nextAwayScore = normalizeScoreValue(input.awayScore, "awayScore");
+        } else if (!hasExplicitManualScoreValues(matchId)) {
+          throw scoreError("both score values must be explicitly recorded before confirming a result.", 400, "score_values_required");
+        }
         nextStatus = "ended";
         nextConfirmed = true;
         action = "final_result_confirmed";
@@ -340,7 +402,18 @@ function persistManualScoreChange(matchId: string, input: ManualScoreInput, oper
       `).run(crypto.randomUUID(), matchId, nextHomeScore, nextAwayScore, nextStatus, nextVersion, nextConfirmed ? 1 : 0, input.operatorId, nextConfirmedAt, now, now);
     }
 
-    if (operation === "start" && nextStatus === "live") db.prepare("UPDATE matches SET status='live', updated_at=? WHERE id=?").run(now, matchId);
+    recordAcceptedScoreUpdateInTransaction(db, {
+      matchId,
+      homeScore: nextHomeScore,
+      awayScore: nextAwayScore,
+      resultStatus: nextStatus as "scheduled" | "live" | "paused" | "ended" | "cancelled" | "postponed",
+      finalResultConfirmed: nextConfirmed,
+      sourceCategory: "manual_operator",
+      actorOperatorId: input.operatorId,
+      createdAt: now
+    });
+
+    db.prepare("UPDATE matches SET status = ?, updated_at = ? WHERE id = ?").run(nextStatus, now, matchId);
 
     db.prepare(`
       INSERT INTO match_score_audit (
@@ -365,7 +438,11 @@ function persistManualScoreChange(matchId: string, input: ManualScoreInput, oper
       current?.finalResultConfirmed ? 1 : 0,
       nextConfirmed ? 1 : 0,
       input.reason ?? null,
-      JSON.stringify({ operation, operatorId: input.operatorId }),
+      JSON.stringify({
+        operation,
+        operatorId: input.operatorId,
+        scoreValuesExplicit: input.homeScore !== undefined && input.awayScore !== undefined
+      }),
       now
     );
 
@@ -493,12 +570,10 @@ scoresRouter.get("/operator-notifications", protectedRoute, requireAdmin, (_requ
       h.name AS homeName, a.name AS awayName, c.name AS competitionName
     FROM match_score_operator_notifications n
     JOIN matches m ON m.id=n.match_id
-    JOIN teams h ON h.id=m.home_team_id
-    JOIN teams a ON a.id=m.away_team_id
+    JOIN teams h ON h.id=m.home_team_id JOIN teams a ON a.id=m.away_team_id
     JOIN competitions c ON c.id=m.competition_id
     WHERE n.acknowledged_at IS NULL
-    ORDER BY n.event_at DESC, n.created_at DESC
-    LIMIT 200
+    ORDER BY n.event_at DESC, n.created_at DESC LIMIT 200
   `).all();
   response.json({ data: rows });
 });
@@ -506,17 +581,14 @@ scoresRouter.get("/operator-notifications", protectedRoute, requireAdmin, (_requ
 scoresRouter.post("/operator-notifications/:id/acknowledge", protectedRoute, requireAdmin, (request: AuthenticatedRequest, response) => {
   const id = request.params.id;
   if (!id) return response.status(400).json({ error: "notification_id_required" });
-  const acknowledgedAt = new Date().toISOString();
-  const result = getDatabase().prepare(`
-    UPDATE match_score_operator_notifications
-    SET acknowledged_at=?, acknowledged_by_operator_id=?
-    WHERE id=? AND acknowledged_at IS NULL
-  `).run(acknowledgedAt, request.operator!.id, id);
-  if (result.changes === 0) {
-    return response.status(404).json({ error: "notification_not_found_or_already_acknowledged" });
-  }
-  response.json({ data: { id, acknowledgedAt } });
+  const now = new Date().toISOString();
+  const result = getDatabase().prepare(`UPDATE match_score_operator_notifications
+    SET acknowledged_at=?, acknowledged_by_operator_id=? WHERE id=? AND acknowledged_at IS NULL`)
+    .run(now, request.operator!.id, id);
+  if (result.changes === 0) return response.status(404).json({ error: "notification_not_found_or_already_acknowledged" });
+  response.json({ data: { id, acknowledgedAt: now } });
 });
+
 scoresRouter.put("/source-mode", protectedRoute, requireAdmin, (request, response) => {
   const mode = request.body && typeof request.body === "object" ? (request.body as Record<string, unknown>).mode : undefined;
   if (mode !== "manual" && mode !== "api") {
@@ -586,7 +658,7 @@ scoresRouter.post("/manual/:id/events", protectedRoute, requireAdmin, (request: 
     || !manualMatchEventTypes.has(eventType) || body.version === undefined
     || (eventType === "note" && (typeof body.description !== "string" || !body.description.trim() || body.description.trim().length > 240))
     || (eventType === "note" && (body.homeScore === undefined || body.awayScore === undefined))
-    || (eventType !== "note" && (typeof body.teamId !== "string" || !body.teamId || typeof body.playerId !== "string" || !body.playerId))
+    || (!["note", "halftime"].includes(eventType) && (typeof body.teamId !== "string" || !body.teamId || typeof body.playerId !== "string" || !body.playerId))
     || (eventType === "substitution" && (typeof body.relatedPlayerId !== "string" || !body.relatedPlayerId))) {
     return response.status(400).json({ error: "invalid_event_payload" });
   }
@@ -601,11 +673,11 @@ scoresRouter.post("/manual/:id/events", protectedRoute, requireAdmin, (request: 
     if (normalizeExpectedVersion(body.version) !== current.version) throw scoreError("stale_score_version", 409, "stale_score_version");
     const fixture = db.prepare("SELECT home_team_id AS homeTeamId, away_team_id AS awayTeamId FROM matches WHERE id=?").get(matchId) as { homeTeamId: string; awayTeamId: string } | undefined;
     if (!fixture) throw scoreError("match_not_found", 404, "match_not_found");
-    const teamId = eventType === "note" ? null : String(body.teamId);
+    const teamId = ["note", "halftime"].includes(eventType) ? null : String(body.teamId);
     let player: { id: string; name: string; teamId: string } | undefined;
     let relatedPlayer: { id: string; name: string; teamId: string } | undefined;
-    let description = typeof body.description === "string" ? body.description.trim() : "";
-    if (eventType !== "note") {
+    let description = eventType === "halftime" ? "Half-time" : typeof body.description === "string" ? body.description.trim() : "";
+    if (!["note", "halftime"].includes(eventType)) {
       if (![fixture.homeTeamId, fixture.awayTeamId].includes(teamId!)) throw scoreError("event_team_not_in_fixture", 422, "event_team_not_in_fixture");
       const findRosterPlayer = (playerId: string) => db.prepare(`
         SELECT p.id, COALESCE(NULLIF(p.display_name, ''), p.first_name || ' ' || p.last_name) AS name, p.team_id AS teamId
@@ -626,16 +698,17 @@ scoresRouter.post("/manual/:id/events", protectedRoute, requireAdmin, (request: 
       }
       if (eventType === "goal" && relatedPlayer) description = `${player.name} · Assist: ${relatedPlayer.name}`;
       else if (eventType === "substitution" && relatedPlayer) description = `${player.name} off · ${relatedPlayer.name} on`;
-      else description = `${player.name} · ${({ yellow_card: "Yellow card", red_card: "Red card", var_yellow_card: "Yellow card after VAR review", var_red_card: "Red card after VAR review", penalty_missed: "Penalty missed", var_penalty_scored: "Penalty scored · awarded by VAR", var_penalty_missed: "Penalty missed · awarded by VAR", var_goal_disallowed: "Goal disallowed by VAR", injury: "Injury", goal: "Goal", penalty_scored: "Penalty scored" } as Record<string, string>)[eventType] ?? eventType}`;
+      else description = `${player.name} · ${({ yellow_card: "Yellow card", red_card: "Red card", var_yellow_card: "Yellow card after VAR review", var_red_card: "Red card after VAR review", penalty_missed: "Penalty missed", var_penalty_scored: "Penalty awarded by VAR · Goal", var_penalty_missed: "Penalty awarded by VAR · Missed", var_goal_disallowed: "Goal disallowed by VAR", injury: "Injury", goal: "Goal", penalty_scored: "Penalty scored" } as Record<string, string>)[eventType] ?? eventType}`;
     }
     const homeScore = eventType === "note"
       ? normalizeScoreValue(body.homeScore, "homeScore")
+      // A new goal fills a backfilled timeline gap when the final score already counts it.
       : current.homeScore + (teamId === fixture.homeTeamId && scoringEventTypes.has(eventType)
-        && shouldIncrementAuthoritativeScore(db, matchId, fixture.homeTeamId, Number(body.minute)) ? 1 : 0);
+        && current.homeScore < countTimelineGoals(matchId, fixture.homeTeamId) + 1 ? 1 : 0);
     const awayScore = eventType === "note"
       ? normalizeScoreValue(body.awayScore, "awayScore")
       : current.awayScore + (teamId === fixture.awayTeamId && scoringEventTypes.has(eventType)
-        && shouldIncrementAuthoritativeScore(db, matchId, fixture.awayTeamId, Number(body.minute)) ? 1 : 0);
+        && current.awayScore < countTimelineGoals(matchId, fixture.awayTeamId) + 1 ? 1 : 0);
     const now = new Date().toISOString();
     const version = current.version + 1;
     const eventId = crypto.randomUUID();
@@ -645,17 +718,39 @@ scoresRouter.post("/manual/:id/events", protectedRoute, requireAdmin, (request: 
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(crypto.randomUUID(), matchId, "score_updated", request.operator!.id, current.version, version, current.homeScore, current.awayScore,
         homeScore, awayScore, current.status, current.status, 0, 0, null,
-        JSON.stringify({ operation: "record_match_event", eventId, eventType, minute: body.minute, description }), now);
+        JSON.stringify({
+          operation: "record_match_event",
+          eventId,
+          eventType,
+          minute: body.minute,
+          description,
+          scoreValuesExplicit: eventType === "note" || scoringEventTypes.has(eventType)
+        }), now);
     db.prepare(`INSERT INTO match_score_timeline (id,match_id,minute,description,event_type,team_id,player_id,related_player_id,home_score,away_score,operator_id,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(eventId, matchId, body.minute, description, eventType, teamId, player?.id ?? null, relatedPlayer?.id ?? null, homeScore, awayScore, request.operator!.id, now, now);
-    if (!recalculateTimelineScoreSnapshots(db, matchId)) {
-      throw scoreError("timeline_goal_count_exceeds_authoritative_score", 409, "timeline_score_inconsistent");
+    recalculateTimelineScoreSnapshots(matchId);
+    if (homeScore !== current.homeScore || awayScore !== current.awayScore) {
+      recordAcceptedScoreUpdateInTransaction(db, {
+        matchId,
+        homeScore,
+        awayScore,
+        resultStatus: current.status as "scheduled" | "live" | "paused" | "ended" | "cancelled" | "postponed",
+        finalResultConfirmed: current.finalResultConfirmed,
+        sourceCategory: "manual_operator",
+        actorOperatorId: request.operator!.id,
+        createdAt: now
+      });
     }
     db.exec("COMMIT;");
     const state = readManualScoreState(matchId)!;
+    const recordedEvent = db.prepare(`SELECT id, minute, description, event_type AS eventType, team_id AS teamId,
+        player_id AS playerId, related_player_id AS relatedPlayerId, home_score AS homeScore, away_score AS awayScore,
+        created_at AS createdAt, updated_at AS updatedAt
+      FROM match_score_timeline WHERE id=?`).get(eventId);
+    ScoreService.clearCache("scores:");
     ScoreService.notifyManualScoreUpdate(matchId, version);
-    response.status(201).json({ data: { id: eventId, minute: Number(body.minute), description, eventType, teamId, playerId: player?.id ?? null, relatedPlayerId: relatedPlayer?.id ?? null, homeScore, awayScore, createdAt: now, updatedAt: now, scoreState: state } });
+    response.status(201).json({ data: { ...recordedEvent, scoreState: state } });
   } catch (error) {
     try { db.exec("ROLLBACK;"); } catch { /* transaction may already be committed */ }
     handleScoreError(error, response);
@@ -693,13 +788,18 @@ scoresRouter.patch("/manual/:id/events/:eventId", protectedRoute, requireAdmin, 
       } | undefined;
     if (!event) throw scoreError("match_event_not_found", 404, "match_event_not_found");
     const nextEventType = (body.eventType as string | undefined) ?? event.eventType;
-    const nextTeamId = body.teamId !== undefined ? body.teamId as string | null : event.teamId;
-    const nextPlayerId = body.playerId !== undefined ? body.playerId as string | null : event.playerId;
-    const nextRelatedPlayerId = body.relatedPlayerId !== undefined ? body.relatedPlayerId as string | null : event.relatedPlayerId;
+    let nextTeamId = body.teamId !== undefined ? body.teamId as string | null : event.teamId;
+    let nextPlayerId = body.playerId !== undefined ? body.playerId as string | null : event.playerId;
+    let nextRelatedPlayerId = body.relatedPlayerId !== undefined ? body.relatedPlayerId as string | null : event.relatedPlayerId;
     const editsEventDetails = body.eventType !== undefined || body.teamId !== undefined || body.playerId !== undefined
       || body.relatedPlayerId !== undefined || body.description !== undefined;
     let description = event.description;
-    if (nextEventType === "note" && editsEventDetails) {
+    if (nextEventType === "halftime") {
+      description = "Half-time";
+      nextTeamId = null;
+      nextPlayerId = null;
+      nextRelatedPlayerId = null;
+    } else if (nextEventType === "note" && editsEventDetails) {
       description = typeof body.description === "string" ? body.description.trim() : event.description;
       if (!description) throw scoreError("event_description_required", 400, "invalid_event_payload");
     } else if (nextEventType !== "note" && editsEventDetails) {
@@ -740,6 +840,7 @@ scoresRouter.patch("/manual/:id/events/:eventId", protectedRoute, requireAdmin, 
     const nextVersion = current.version + 1;
     db.prepare(`UPDATE match_score_timeline SET minute=?, description=?, event_type=?, team_id=?, player_id=?, related_player_id=?, updated_at=?
       WHERE id=? AND match_id=?`).run(body.minute, description, nextEventType, nextTeamId, nextPlayerId, nextRelatedPlayerId, updatedAt, eventId, matchId);
+    recalculateTimelineScoreSnapshots(matchId);
     db.prepare("UPDATE match_score_state SET version=?, updated_by_operator_id=?, updated_at=? WHERE match_id=?")
       .run(nextVersion, request.operator!.id, updatedAt, matchId);
     db.prepare(`INSERT INTO match_score_audit (id,match_id,action,operator_id,previous_version,new_version,
@@ -752,14 +853,15 @@ scoresRouter.patch("/manual/:id/events/:eventId", protectedRoute, requireAdmin, 
         JSON.stringify({ operation: "edit_match_event", eventId,
           previous: { minute: event.minute, description: event.description, eventType: event.eventType, teamId: event.teamId, playerId: event.playerId, relatedPlayerId: event.relatedPlayerId },
           next: { minute: body.minute, description, eventType: nextEventType, teamId: nextTeamId, playerId: nextPlayerId, relatedPlayerId: nextRelatedPlayerId } }), updatedAt);
-    if (!recalculateTimelineScoreSnapshots(db, matchId)) {
-      throw scoreError("timeline_goal_count_exceeds_authoritative_score", 409, "timeline_score_inconsistent");
-    }
     db.exec("COMMIT;");
     const updatedState = readManualScoreState(matchId)!;
+    const updatedEvent = db.prepare(`SELECT id, minute, description, event_type AS eventType, team_id AS teamId,
+        player_id AS playerId, related_player_id AS relatedPlayerId, home_score AS homeScore, away_score AS awayScore,
+        created_at AS createdAt, updated_at AS updatedAt
+      FROM match_score_timeline WHERE id=? AND match_id=?`).get(eventId, matchId);
     ScoreService.clearCache("scores:");
     ScoreService.notifyManualScoreUpdate(matchId, nextVersion);
-    response.json({ data: { id: event.id, minute: Number(body.minute), description, eventType: nextEventType, teamId: nextTeamId, playerId: nextPlayerId, relatedPlayerId: nextRelatedPlayerId, updatedAt, scoreState: updatedState } });
+    response.json({ data: { ...updatedEvent, scoreState: updatedState } });
   } catch (error) {
     try { db.exec("ROLLBACK;"); } catch { /* transaction may already be committed */ }
     handleScoreError(error, response);
@@ -799,6 +901,7 @@ scoresRouter.delete("/manual/:id/events/:eventId", protectedRoute, requireAdmin,
     const nextVersion = current.version + 1;
     const deletion = db.prepare("DELETE FROM match_score_timeline WHERE id=? AND match_id=?").run(eventId, matchId);
     if (deletion.changes !== 1) throw scoreError("match_event_not_found", 404, "match_event_not_found");
+    recalculateTimelineScoreSnapshots(matchId);
     db.prepare("UPDATE match_score_state SET version=?, updated_by_operator_id=?, updated_at=? WHERE match_id=?")
       .run(nextVersion, request.operator!.id, now, matchId);
     db.prepare(`INSERT INTO match_score_audit (id,match_id,action,operator_id,previous_version,new_version,
@@ -809,9 +912,6 @@ scoresRouter.delete("/manual/:id/events/:eventId", protectedRoute, requireAdmin,
         current.homeScore, current.awayScore, current.homeScore, current.awayScore, current.status, current.status,
         current.finalResultConfirmed ? 1 : 0, current.finalResultConfirmed ? 1 : 0, reason || null,
         JSON.stringify({ operation: "delete_match_event", event }), now);
-    if (!recalculateTimelineScoreSnapshots(db, matchId)) {
-      throw scoreError("timeline_goal_count_exceeds_authoritative_score", 409, "timeline_score_inconsistent");
-    }
     db.exec("COMMIT;");
     const updatedState = readManualScoreState(matchId)!;
     ScoreService.clearCache("scores:");
@@ -831,8 +931,8 @@ scoresRouter.post("/manual/:id/start", protectedRoute, requireAdmin, (request, r
     const fixtureTime = db.prepare("SELECT starts_at AS startsAt FROM matches WHERE id=?").get(matchId) as { startsAt: string } | undefined;
     const historical = state.status === "paused";
     const clockStart = historical ? now : fixtureTime?.startsAt && String(fixtureTime.startsAt).includes("T") ? fixtureTime.startsAt : now;
-    db.prepare(`INSERT OR IGNORE INTO match_score_clock_state (match_id,phase,is_running,running_since,elapsed_seconds,version,updated_by_operator_id,created_at,updated_at) VALUES (?,?,?,?,0,1,?,?,?)`)
-      .run(matchId, historical ? "paused" : "first_half", historical ? 0 : 1, historical ? null : clockStart, input.operatorId, now, now);
+    db.prepare(`INSERT OR IGNORE INTO match_score_clock_state (match_id,phase,is_running,running_since,elapsed_seconds,actual_started_at,phase_started_at,version,updated_by_operator_id,created_at,updated_at) VALUES (?,?,?, ?,0,?,?,1,?,?,?)`)
+      .run(matchId, historical ? "paused" : "first_half", historical ? 0 : 1, historical ? null : clockStart, clockStart, clockStart, input.operatorId, now, now);
     db.prepare(`INSERT INTO match_score_clock_audit (id,match_id,action,operator_id,previous_state,new_state,created_at) VALUES (?,?,?,?,?,?,?)`)
       .run(crypto.randomUUID(), matchId, historical ? "record_historical_fixture" : "start_first_half", input.operatorId, null, JSON.stringify({ phase: historical ? "paused" : "first_half", running: !historical, runningSince: historical ? null : clockStart, elapsedSeconds: 0 }), now);
     return state;
@@ -866,8 +966,8 @@ scoresRouter.post("/manual/:id/clock", protectedRoute, requireAdmin, (request: A
         const scheduled = fixture?.startsAt && String(fixture.startsAt).includes("T") && Date.parse(fixture.startsAt) <= Date.now() ? fixture.startsAt : now;
         const phase = endedResult ? "ended" : "first_half";
         const running = !endedResult;
-        db.prepare(`INSERT INTO match_score_clock_state (match_id,phase,is_running,running_since,elapsed_seconds,version,updated_by_operator_id,created_at,updated_at) VALUES (?,?,?,?,0,1,?,?,?)`)
-          .run(id, phase, running ? 1 : 0, running ? scheduled : null, request.operator!.id, now, now);
+        db.prepare(`INSERT INTO match_score_clock_state (match_id,phase,is_running,running_since,elapsed_seconds,actual_started_at,phase_started_at,version,updated_by_operator_id,created_at,updated_at) VALUES (?,?,?,?,0,?,?,1,?,?,?)`)
+          .run(id, phase, running ? 1 : 0, running ? scheduled : null, scheduled, scheduled, request.operator!.id, now, now);
         db.prepare(`INSERT INTO match_score_clock_audit (id,match_id,action,operator_id,previous_state,new_state,created_at) VALUES (?,?,?,?,?,?,?)`)
           .run(crypto.randomUUID(), id, endedResult ? "initialize_ended_clock" : "initialize_clock", request.operator!.id, null, JSON.stringify({ phase, running, runningSince: running ? scheduled : null, elapsedSeconds: 0 }), now);
         db.exec("COMMIT;");

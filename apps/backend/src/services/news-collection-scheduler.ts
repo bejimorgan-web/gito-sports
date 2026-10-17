@@ -14,6 +14,16 @@ export interface NewsSourceCollectionState {
   lastCollectionDuplicateCount?: number | null;
 }
 
+export function ensureNewsCollectionSchedulerSchema(db: DatabaseSync): void {
+  db.exec(`
+      CREATE TABLE IF NOT EXISTS news_collection_locks (
+        source_id TEXT PRIMARY KEY,
+        lock_until INTEGER NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+  `);
+}
+
 export class NewsCollectionScheduler {
   private initialized = false;
 
@@ -28,13 +38,7 @@ export class NewsCollectionScheduler {
     }
 
     this.initialized = true;
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS news_collection_locks (
-        source_id TEXT PRIMARY KEY,
-        lock_until INTEGER NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-    `);
+    ensureNewsCollectionSchedulerSchema(this.db);
   }
 
   async runDueCollections(): Promise<void> {

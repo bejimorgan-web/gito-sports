@@ -24,6 +24,7 @@ import 'package:timezone/timezone.dart' as tz;
 
 import 'services/ad_manager.dart';
 import 'screens/mobile_catalog_screens.dart';
+import 'screens/mobile_standings_section.dart';
 
 const appLogoUrl =
     'https://cdn.iconscout.com/icon/free/png-256/free-sports-4457831-3693644.png';
@@ -3041,8 +3042,11 @@ class SeasonCompetitionContent extends StatelessWidget {
                 emptyText: 'No results available.',
                 api: api,
               ),
-              const _UnavailableSection(
-                  message: 'Standings are not available for this competition.'),
+              MobileStandingsSection(
+                competitionId: season.competitionId,
+                seasonId: season.id,
+                api: api,
+              ),
               _TeamsSection(teams: teams),
               const _UnavailableSection(
                   message: 'Statistics are not available yet.'),

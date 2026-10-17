@@ -21,6 +21,7 @@ export function allowSqliteInstantiation<T>(callback: () => T): T {
  */
 export class DatabaseSync {
   private db: Database;
+  private transactionActive = false;
 
   constructor(path: string, options?: { readonly?: boolean }) {
     if (!allowDirectInstantiation) {
@@ -40,7 +41,14 @@ export class DatabaseSync {
   }
 
   exec(sql: string) {
-    return this.db.exec(sql);
+    const result = this.db.exec(sql);
+    if (/^\s*BEGIN\b/i.test(sql)) this.transactionActive = true;
+    if (/^\s*(COMMIT|ROLLBACK)\b/i.test(sql)) this.transactionActive = false;
+    return result;
+  }
+
+  get inTransaction(): boolean {
+    return this.transactionActive;
   }
 
   transaction<T extends (...args: any[]) => any>(fn: T) {

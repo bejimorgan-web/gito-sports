@@ -8,19 +8,264 @@ import { env, runtimeConfig } from "../config/env.js";
 import { listBackups } from "../services/database-backup-service.js";
 import { readAiNewsSchema, readInitialSchema, readNewsSchema } from "./schema.js";
 import { startBackupService, stopBackupService } from "../services/database-backup-service.js";
-import { scheduleBackgroundJob } from "../background/backgroundJobRunner.js";
-import { stopBackgroundJobs } from "../background/backgroundJobRunner.js";
+import { ensureBackgroundJobSchema, scheduleBackgroundJob, stopBackgroundJobs } from "../background/backgroundJobRunner.js";
 import { importMigrationFile, isDatabaseCatalogEmpty, isMigrationImported } from "./migration-import.js";
-import { NewsCollectionScheduler } from "../services/news-collection-scheduler.js";
+import { assertMigrationState, initializeMigrationBaseline, runMigrations, type SqlMigration } from "./migration-runner.js";
+import { competitionEntryMigration } from "./competition-entry-migration.js";
+import { standingsRevisionsMigration } from "./standings-revisions-migration.js";
+import { standingsCoverageMigration } from "./standings-coverage-migration.js";
+import { standingsScheduleManifestMigration } from "./standings-schedule-manifest-migration.js";
+import { standingsGovernanceMigration } from "./standings-governance-migration.js";
+import { standingsSourceEvidenceMigration } from "./standings-source-evidence-migration.js";
+import { NewsCollectionScheduler, ensureNewsCollectionSchedulerSchema } from "../services/news-collection-scheduler.js";
 import { NewsService } from "../services/news-service.js";
-import { NewsWebRssGeneratorService } from "../services/news-web-rss-generator-service.js";
-import { migrateManualTimelineSnapshots } from "../services/manual-score-timeline.js";
+import { NewsWebRssGeneratorService, ensureNewsGeneratedRssSchema } from "../services/news-web-rss-generator-service.js";
 
 let database: DatabaseSync | null = null;
-const EXPECTED_SCHEMA_VERSION = 1;
+const BASELINE_SCHEMA_VERSION = 1;
+const EXPECTED_SCHEMA_VERSION = 7;
+const SUPPORTED_SCHEMA_VERSIONS = [BASELINE_SCHEMA_VERSION, 2, 3, 4, 5, 6, EXPECTED_SCHEMA_VERSION] as const;
+const REQUIRED_BASELINE_TABLES = [
+  "sports",
+  "countries",
+  "competitions",
+  "seasons",
+  "teams",
+  "matches",
+  "operator_users"
+] as const;
+const REQUIRED_BASELINE_COLUMNS: Record<(typeof REQUIRED_BASELINE_TABLES)[number], readonly string[]> = {
+  sports: ["id", "name", "slug", "created_at", "updated_at"],
+  countries: ["id", "name", "iso2_code", "iso3_code", "created_at", "updated_at"],
+  competitions: ["id", "name", "slug", "scope", "competition_type", "participant_type", "status", "created_at", "updated_at"],
+  seasons: ["id", "competition_id", "name", "status"],
+  teams: ["id", "name", "type", "status", "created_at", "updated_at"],
+  matches: ["id", "competition_id", "home_team_id", "away_team_id", "status", "created_at", "updated_at"],
+  operator_users: ["id", "name", "email", "role", "status", "created_at", "updated_at"]
+};
+// Exact sqlite_master fingerprint from the disposable current-working-tree bootstrap; not production evidence.
+const CURRENT_BOOTSTRAP_SCHEMA_FINGERPRINT = "ca6e024e89ff2d958384f9e3117d5fbad0d686ae584daf9a2c385a3d589ccd26";
+// Version 1 is initialized only after the fresh bootstrap; this definition hashes that fingerprint, not executable SQL.
+const BASELINE_MIGRATION: SqlMigration = {
+  version: BASELINE_SCHEMA_VERSION,
+  name: "current-working-tree-bootstrap",
+  sql: `sqlite_master-sha256:${CURRENT_BOOTSTRAP_SCHEMA_FINGERPRINT}`,
+  bootstrapBaseline: true
+};
+const VERIFIED_LEGACY_BASELINE_MIGRATION: SqlMigration = {
+  version: BASELINE_SCHEMA_VERSION,
+  name: "verified-existing-gito-database-v1",
+  sql: "verified-legacy-v1-structural-contract:core-catalog-and-match-columns; no-v2-standings-objects",
+  bootstrapBaseline: true
+};
+// Computed from a disposable current-working-tree bootstrap followed by migration v2.
+// It is not evidence for a historical or production schema.
+const COMPETITION_ENTRIES_SCHEMA_FINGERPRINT = "3182d51e7ced7a700f20fe6a065943b59123cad4ac64e99ccb3b0a1596658862";
+// Computed from a disposable current-working-tree bootstrap followed by migrations v2 and v3.
+// It is not evidence for a historical or production schema.
+const STANDINGS_REVISIONS_SCHEMA_FINGERPRINT = "174b841e4dd4c45a82db6a7173cd7dadcd0f4a1d8f4c12b6b46302b19fd8f570";
+// Computed from a disposable current-working-tree bootstrap followed by migrations v2 through v4.
+const STANDINGS_COVERAGE_SCHEMA_FINGERPRINT = "9f86792d2acce5ad477ea1cd0365c682df07424cd6d36aa3e49744ca8a42d957";
+// Computed from a disposable current-working-tree bootstrap followed through migration v5.
+const STANDINGS_SCHEDULE_MANIFEST_SCHEMA_FINGERPRINT = "43bcb4900dbee7a5a8e3a59b6142df53bf1664a9ef76f4578c1dd642fbcf3d86";
+const APPLICATION_MIGRATIONS = [
+  BASELINE_MIGRATION,
+  competitionEntryMigration,
+  standingsRevisionsMigration,
+  standingsCoverageMigration,
+  standingsScheduleManifestMigration,
+  standingsGovernanceMigration,
+  standingsSourceEvidenceMigration
+] as const;
+
+function migrationDefinitionsForDatabase(database: DatabaseSync): readonly SqlMigration[] {
+  const baselineRow = hasTable(database, "schema_migrations")
+    ? database.prepare("SELECT name FROM schema_migrations WHERE version = 1").get() as { name?: string } | undefined
+    : undefined;
+  const isVerifiedLegacy = baselineRow?.name === VERIFIED_LEGACY_BASELINE_MIGRATION.name
+    || (!baselineRow
+      && Number((database.prepare("PRAGMA user_version").get() as { user_version?: number }).user_version ?? 0) === BASELINE_SCHEMA_VERSION
+      && hasSupportedLegacyV1Shape(database));
+  return isVerifiedLegacy
+    ? [VERIFIED_LEGACY_BASELINE_MIGRATION, ...APPLICATION_MIGRATIONS.slice(1)]
+    : APPLICATION_MIGRATIONS;
+}
 
 export function isDatabaseInitialized() {
   return database !== null;
+}
+
+function getTableNames(database: DatabaseSync): string[] {
+  return (database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as Array<{ name: string }>).map((row) => row.name);
+}
+
+function getBootstrapSchemaFingerprint(database: DatabaseSync): string {
+  const schemaObjects = database.prepare(
+    "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT IN (?, ?) AND tbl_name NOT IN (?, ?) ORDER BY type, name"
+  ).all("schema_migrations", "migration_meta", "schema_migrations", "migration_meta");
+  return crypto.createHash("sha256").update(JSON.stringify(schemaObjects)).digest("hex");
+}
+
+function hasSupportedLegacyV1Shape(database: DatabaseSync): boolean {
+  const requiredColumns: Record<string, readonly string[]> = {
+    competitions: ["id", "name", "slug", "scope", "created_at", "updated_at"],
+    seasons: ["id", "competition_id", "name"],
+    teams: ["id", "name", "created_at", "updated_at"],
+    matches: ["id", "competition_id", "season_id", "home_team_id", "away_team_id", "starts_at", "status", "created_at", "updated_at"],
+    operator_users: ["id", "role", "status"]
+  };
+  for (const [table, expectedColumns] of Object.entries(requiredColumns)) {
+    if (!hasTable(database, table)) return false;
+    const actualColumns = new Set((database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(({ name }) => name));
+    if (!expectedColumns.every((column) => actualColumns.has(column))) return false;
+  }
+  const migrationObjects = [
+    "competition_entries", "fixture_participants", "match_result_revisions", "standings_snapshots",
+    "standings_coverage_assessments", "standings_schedule_manifests", "standings_rulesets"
+  ];
+  if (migrationObjects.some((name) => hasTable(database, name))) return false;
+  const migrationIndexes = new Set((database.prepare(`
+    SELECT name FROM sqlite_master WHERE type = 'index'
+  `).all() as Array<{ name: string }>).map(({ name }) => name));
+  if (["idx_seasons_competition_id_id", "idx_matches_participant_context"].some((name) => migrationIndexes.has(name))) return false;
+  return (database.prepare("PRAGMA foreign_key_check").all() as Array<unknown>).length === 0;
+}
+
+function assertVersionedMigrationShape(database: DatabaseSync, schemaVersion: number): void {
+  const requirements: Array<{ version: number; table: string; columns: readonly string[] }> = [
+    { version: 2, table: "competition_entries", columns: ["id", "competition_id", "season_id", "entry_type", "team_id", "player_id"] },
+    { version: 2, table: "fixture_participants", columns: ["id", "match_id", "competition_id", "season_id", "entry_id", "slot"] },
+    { version: 3, table: "match_result_revisions", columns: ["id", "match_id", "competition_id", "season_id", "revision_number", "home_score", "away_score", "validation_state"] },
+    { version: 3, table: "standings_snapshots", columns: ["id", "competition_id", "season_id", "sequence", "ruleset_id", "ruleset_version", "content_hash", "content_json"] },
+    { version: 4, table: "standings_coverage_assessments", columns: ["id", "snapshot_id", "manifest_id", "eligibility_state", "schedule_state"] },
+    { version: 4, table: "standings_coverage_fixtures", columns: ["assessment_id", "match_id", "fixture_status"] },
+    { version: 5, table: "standings_schedule_manifests", columns: ["id", "competition_id", "season_id", "version", "state", "content_hash"] },
+    { version: 5, table: "standings_schedule_manifest_fixtures", columns: ["manifest_id", "fixture_key", "home_team_id", "away_team_id"] },
+    { version: 6, table: "standings_rulesets", columns: ["id", "competition_id", "season_id", "ruleset_json", "ruleset_hash", "status", "proposed_by_operator_id", "approved_by_operator_id"] },
+    { version: 6, table: "standings_schedule_manifests", columns: ["source_name", "source_reference"] },
+    { version: 7, table: "standings_schedule_manifests", columns: ["source_content_hash"] }
+  ];
+  for (const requirement of requirements.filter(({ version }) => schemaVersion >= version)) {
+    if (!hasTable(database, requirement.table)) {
+      throw new Error(`[startup] schema mismatch: migration v${schemaVersion} requires table ${requirement.table}`);
+    }
+    const columns = new Set((database.prepare(`PRAGMA table_info(${requirement.table})`).all() as Array<{ name: string }>).map(({ name }) => name));
+    const missing = requirement.columns.filter((column) => !columns.has(column));
+    if (missing.length > 0) {
+      throw new Error(`[startup] schema mismatch: ${requirement.table} lacks migration v${schemaVersion} columns ${missing.join(", ")}`);
+    }
+  }
+}
+
+function assertMigrationImportMetadataSchema(database: DatabaseSync): void {
+  const exists = database.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'migration_meta'"
+  ).get();
+  if (!exists) {
+    return;
+  }
+
+  const row = database.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'migration_meta'"
+  ).get() as { sql?: string } | undefined;
+  const normalizedSql = row?.sql?.replace(/\s+/g, " ").trim();
+  if (normalizedSql !== 'CREATE TABLE "migration_meta" ( id TEXT PRIMARY KEY, migration_version TEXT NOT NULL, imported_at TEXT NOT NULL )') {
+    throw new Error("[startup] schema mismatch: migration_meta has an unsupported structure");
+  }
+}
+
+export function assertDatabaseStartupCompatibility(database: DatabaseSync, options: { allowFreshDatabase?: boolean; databasePath?: string; readOnlyMode?: boolean } = {}) {
+  const tableNames = new Set(getTableNames(database));
+  const schemaObjectCount = Number((database.prepare(
+    "SELECT COUNT(*) AS count FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
+  ).get() as { count: number }).count);
+  const schemaVersion = Number((database.prepare("PRAGMA user_version").get() as { user_version?: number | string } | undefined)?.user_version ?? 0);
+  const integrity = String((database.prepare("PRAGMA integrity_check").get() as { integrity_check?: string } | undefined)?.integrity_check ?? "unknown");
+
+  if (integrity !== "ok") {
+    throw new Error(`[startup] database integrity check failed for ${options.databasePath ?? "database"}: ${integrity}`);
+  }
+
+  if (schemaObjectCount === 0) {
+    if (options.allowFreshDatabase && schemaVersion === 0) {
+      return;
+    }
+    if (schemaVersion !== 0) {
+      throw new Error(`[startup] empty database declares unsupported schema version ${schemaVersion}`);
+    }
+    if (options.readOnlyMode) {
+      throw new Error("[startup] read-only mode cannot initialize a fresh database; initialize it before opening read-only");
+    }
+    throw new Error("[startup] refusing empty uninitialized database; initialize via the supported bootstrap path");
+  }
+
+  if (schemaVersion === 0) {
+    throw new Error("[startup] refusing database with schema objects and user_version = 0; verify and migrate it separately");
+  }
+
+  if (!(SUPPORTED_SCHEMA_VERSIONS as readonly number[]).includes(schemaVersion)) {
+    throw new Error(`[startup] Unsupported schema version ${schemaVersion}. Expected one of ${SUPPORTED_SCHEMA_VERSIONS.join(", ")}.`);
+  }
+
+  for (const tableName of REQUIRED_BASELINE_TABLES) {
+    if (!tableNames.has(tableName)) {
+      throw new Error(`[startup] schema mismatch: required table ${tableName} is missing`);
+    }
+
+    const columnList = database.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+    const availableColumns = new Set(columnList.map((column) => column.name));
+    const missingColumns = REQUIRED_BASELINE_COLUMNS[tableName].filter((columnName) => !availableColumns.has(columnName));
+    if (missingColumns.length > 0) {
+      throw new Error(`[startup] schema mismatch: table ${tableName} is missing required columns: ${missingColumns.join(", ")}`);
+    }
+  }
+
+  const foreignKeyViolations = database.prepare("PRAGMA foreign_key_check").all() as Array<Record<string, unknown>>;
+  if (foreignKeyViolations.length > 0) {
+    throw new Error(`[startup] schema mismatch: foreign_key_check reported ${foreignKeyViolations.length} violations`);
+  }
+
+  assertMigrationImportMetadataSchema(database);
+
+  const legacyBaselineRow = tableNames.has("schema_migrations")
+    ? database.prepare("SELECT name FROM schema_migrations WHERE version = 1").get() as { name?: string } | undefined
+    : undefined;
+  const verifiedV1BaselineName = legacyBaselineRow?.name === VERIFIED_LEGACY_BASELINE_MIGRATION.name
+    || legacyBaselineRow?.name === BASELINE_MIGRATION.name;
+  const isVerifiedLegacyBaseline = schemaVersion === BASELINE_SCHEMA_VERSION
+    && hasSupportedLegacyV1Shape(database)
+    && (tableNames.has("schema_migrations") ? verifiedV1BaselineName : true);
+  if (schemaVersion === BASELINE_SCHEMA_VERSION && !isFreshBootstrapShape(database) && !isVerifiedLegacyBaseline) {
+    throw new Error("[startup] schema mismatch: version-one database does not match a supported bootstrap schema");
+  }
+  if (schemaVersion >= 2) {
+    assertVersionedMigrationShape(database, schemaVersion);
+  }
+  if (schemaVersion >= 6) {
+    const governanceTables = new Set(getTableNames(database));
+    const rulesetColumns = new Set((database.prepare("PRAGMA table_info(standings_rulesets)").all() as Array<{ name: string }>).map(({ name }) => name));
+    const manifestColumns = new Set((database.prepare("PRAGMA table_info(standings_schedule_manifests)").all() as Array<{ name: string }>).map(({ name }) => name));
+    if (!governanceTables.has("standings_rulesets")
+      || !["id", "competition_id", "season_id", "ruleset_json", "ruleset_hash", "status", "proposed_by_operator_id", "approved_by_operator_id"].every((column) => rulesetColumns.has(column))
+      || !["source_name", "source_reference"].every((column) => manifestColumns.has(column))
+      || (schemaVersion >= 7 && !manifestColumns.has("source_content_hash"))) {
+      throw new Error(`[startup] schema mismatch: standings governance migration v${schemaVersion} is incomplete`);
+    }
+  }
+
+  if (options.readOnlyMode && isVerifiedLegacyBaseline && !tableNames.has("schema_migrations")) {
+    throw new Error("[startup] read-only mode requires the migration ledger; open writable once to apply verified migrations");
+  }
+
+  try {
+    if (!isVerifiedLegacyBaseline || tableNames.has("schema_migrations")) {
+      assertMigrationState(database, migrationDefinitionsForDatabase(database));
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown migration-ledger validation error";
+    throw new Error(`[startup] schema migration state is not verified: ${message}`);
+  }
+
 }
 
 function getCount(database: DatabaseSync, table: string) {
@@ -34,16 +279,7 @@ function getCount(database: DatabaseSync, table: string) {
 
 function ensureSchemaVersion(database: DatabaseSync) {
   const row = database.prepare("PRAGMA user_version").get() as { user_version: number | string } | undefined;
-  let current = Number(row?.user_version ?? 0);
-
-  if (!Number.isFinite(current)) {
-    current = 0;
-  }
-
-  if (current === 0) {
-    database.exec(`PRAGMA user_version = ${EXPECTED_SCHEMA_VERSION};`);
-    current = EXPECTED_SCHEMA_VERSION;
-  }
+  const current = Number(row?.user_version ?? 0);
 
   if (current !== EXPECTED_SCHEMA_VERSION) {
     throw new Error(
@@ -51,7 +287,22 @@ function ensureSchemaVersion(database: DatabaseSync) {
     );
   }
 
+  assertMigrationState(database, migrationDefinitionsForDatabase(database));
   return current;
+}
+
+function assertSchemaVersionCompatible(database: DatabaseSync) {
+  const row = database.prepare("PRAGMA user_version").get() as { user_version: number | string } | undefined;
+  const current = Number(row?.user_version ?? 0);
+  const tableNames = getTableNames(database);
+
+  if (current === 0 && tableNames.length > 0) {
+    throw new Error("[startup] refusing populated database with user_version = 0; verify and migrate it separately");
+  }
+
+  if (Number.isFinite(current) && current !== 0 && !(SUPPORTED_SCHEMA_VERSIONS as readonly number[]).includes(current)) {
+    throw new Error(`[startup] Unsupported schema version ${current}. Expected one of ${SUPPORTED_SCHEMA_VERSIONS.join(", ")}.`);
+  }
 }
 
 function validateDatabaseStartup(database: DatabaseSync, databasePath: string) {
@@ -98,7 +349,7 @@ function isLikelyGiToDatabase(databasePath: string): boolean {
       }
 
       const schemaVersion = Number((db.prepare("PRAGMA user_version").get() as { user_version?: number } | undefined)?.user_version ?? 0);
-      if (schemaVersion !== EXPECTED_SCHEMA_VERSION) {
+      if (!(SUPPORTED_SCHEMA_VERSIONS as readonly number[]).includes(schemaVersion)) {
         return false;
       }
 
@@ -175,9 +426,43 @@ export function getDatabase(): DatabaseSync {
   }
 
   const resolvedDatabasePath = runtimeConfig.newsTestMode ? ":memory:" : env.absoluteDatabasePath;
+
+  if (runtimeConfig.dbReadOnlyMode) {
+    if (runtimeConfig.newsTestMode) {
+      throw new Error("[startup] read-only mode cannot use the in-memory news test database");
+    }
+    if (!fs.existsSync(resolvedDatabasePath)) {
+      throw new Error("[startup] read-only mode requires an existing initialized database");
+    }
+    const stats = fs.statSync(resolvedDatabasePath);
+    if (!stats.isFile() || stats.size === 0) {
+      throw new Error("[startup] read-only mode requires a non-empty database file");
+    }
+
+    database = allowSqliteInstantiation(() => new DatabaseSync(resolvedDatabasePath, { readonly: true }));
+    try {
+      assertDatabaseStartupCompatibility(database, {
+        databasePath: resolvedDatabasePath,
+        readOnlyMode: true
+      });
+      const schemaVersion = Number(
+        (database.prepare("PRAGMA user_version").get() as { user_version?: number } | undefined)?.user_version ?? 0
+      );
+      if (schemaVersion !== EXPECTED_SCHEMA_VERSION) {
+        throw new Error(`[startup] read-only mode requires schema version ${EXPECTED_SCHEMA_VERSION}; open writable once to apply verified migrations`);
+      }
+      validateDatabaseStartup(database, resolvedDatabasePath);
+      return database;
+    } catch (error) {
+      database.close();
+      database = null;
+      throw error;
+    }
+  }
+
   const legacyDatabasePath = process.env.LEGACY_DATABASE_PATH ?? "/tmp/gito.sqlite";
 
-  if (!runtimeConfig.newsTestMode) {
+  if (!runtimeConfig.newsTestMode && process.env.NODE_ENV !== "test") {
     const migrationResult = maybeMigrateLegacyDatabasePathIfNeeded(resolvedDatabasePath, legacyDatabasePath);
     if (migrationResult.migrated) {
       console.log(`[startup] migration_status=${migrationResult.reason}`);
@@ -198,7 +483,7 @@ export function getDatabase(): DatabaseSync {
       database = allowSqliteInstantiation(() => new DatabaseSync(":memory:"));
       database.exec(readInitialSchema());
       database.exec(readNewsSchema());
-      ensureSchemaVersion(database);
+      assertSchemaVersionCompatible(database);
       return database;
     }
     const autoRestore = runtimeConfig.autoRestoreBackup;
@@ -266,8 +551,27 @@ export function getDatabase(): DatabaseSync {
     }
   }
 
-  // Open DB. If read-only mode requested, use better-sqlite3's readonly option to prevent writes.
+  // Open DB after path provisioning; compatibility validation precedes schema and data changes.
   database = allowSqliteInstantiation(() => new DatabaseSync(resolvedDatabasePath, runtimeConfig.dbReadOnlyMode ? { readonly: true } : undefined));
+
+  const freshBootstrap = database.prepare(
+    "SELECT COUNT(*) AS count FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
+  ).get() as { count: number };
+  const isFreshBootstrap = Number(freshBootstrap.count) === 0
+    && Number((database.prepare("PRAGMA user_version").get() as { user_version?: number } | undefined)?.user_version ?? 0) === 0;
+
+  try {
+    assertDatabaseStartupCompatibility(database, {
+      allowFreshDatabase: isFreshBootstrap,
+      databasePath: resolvedDatabasePath,
+      readOnlyMode: runtimeConfig.dbReadOnlyMode
+    });
+  } catch (err) {
+    database.close();
+    database = null;
+    console.error("[startup] compatibility preflight failed before startup mutation", err);
+    throw err;
+  }
 
   try {
     database.exec("PRAGMA foreign_keys = ON;");
@@ -276,15 +580,27 @@ export function getDatabase(): DatabaseSync {
     throw err;
   }
 
-  // If DB was freshly created (size zero), apply initial schema
-  try {
-    const stats = fs.statSync(resolvedDatabasePath);
-    if (stats.size === 0) {
-      database.exec(readInitialSchema());
+  if (isFreshBootstrap) {
+    try {
+      database.transaction(() => {
+        database!.exec(readInitialSchema());
+        database!.exec(`PRAGMA user_version = ${BASELINE_SCHEMA_VERSION};`);
+      })();
       console.log("[startup] applied initial schema to new database");
+    } catch (err) {
+      console.error("[startup] failed to apply initial schema to new database", err);
+      throw err;
     }
-  } catch (err) {
-    console.error("[startup] error checking DB file after open", err);
+  } else {
+    const existingVersion = Number((database.prepare("PRAGMA user_version").get() as { user_version?: number } | undefined)?.user_version ?? 0);
+    if (existingVersion === BASELINE_SCHEMA_VERSION
+      && !hasTable(database, "schema_migrations")
+      && hasSupportedLegacyV1Shape(database)) {
+      initializeMigrationBaseline(database, VERIFIED_LEGACY_BASELINE_MIGRATION, {
+        existingSchemaVerified: true
+      });
+    }
+    runMigrations(database, migrationDefinitionsForDatabase(database));
   }
 
   try {
@@ -299,11 +615,32 @@ export function getDatabase(): DatabaseSync {
     }
     ensureManualScoreSchema(database);
   } catch (err) {
-    console.error("[startup] failed to apply News/AI schema", err);
+    console.error("[startup] failed to apply additive database schema", err);
     throw err;
   }
 
   migrateExistingOperationalState(database);
+
+  ensureNewsCollectionSchedulerSchema(database);
+  ensureNewsGeneratedRssSchema(database);
+  ensureBackgroundJobSchema(database);
+
+  if (isFreshBootstrap) {
+    const actualFingerprint = getBootstrapSchemaFingerprint(database);
+    if (actualFingerprint !== CURRENT_BOOTSTRAP_SCHEMA_FINGERPRINT) {
+      throw new Error(`[startup] fresh bootstrap schema differs from its reviewed current-working-tree fingerprint; refusing to initialize the migration ledger (expected ${CURRENT_BOOTSTRAP_SCHEMA_FINGERPRINT}, received ${actualFingerprint})`);
+    }
+    initializeMigrationBaseline(database, BASELINE_MIGRATION, {
+      freshBootstrapVerified: isFreshBootstrap
+    });
+  }
+
+  runMigrations(database, migrationDefinitionsForDatabase(database));
+
+  assertDatabaseStartupCompatibility(database, {
+    databasePath: resolvedDatabasePath,
+    readOnlyMode: runtimeConfig.dbReadOnlyMode
+  });
 
   try {
     bootstrapAdminUserIfNeeded(database);
@@ -342,10 +679,15 @@ export function getDatabase(): DatabaseSync {
     }
   }
 
+  assertDatabaseStartupCompatibility(database, {
+    databasePath: resolvedDatabasePath,
+    readOnlyMode: runtimeConfig.dbReadOnlyMode
+  });
+
   // Validate startup and ensure DB is healthy. If validation throws, propagate up.
   validateDatabaseStartup(database, resolvedDatabasePath);
 
-  if (!runtimeConfig.newsTestMode) {
+  if (!runtimeConfig.newsTestMode && process.env.NODE_ENV !== "test") {
     try {
       const newsService = new NewsService();
       const scheduler = new NewsCollectionScheduler(newsService, database);
@@ -366,6 +708,10 @@ export function getDatabase(): DatabaseSync {
   }
 
   return database;
+}
+
+function isFreshBootstrapShape(database: DatabaseSync): boolean {
+  return getBootstrapSchemaFingerprint(database) === CURRENT_BOOTSTRAP_SCHEMA_FINGERPRINT;
 }
 
 export function closeDatabase(): void {
@@ -415,7 +761,7 @@ export function ensureManualScoreSchema(database: DatabaseSync) {
     return;
   }
 
-  ensureSchemaVersion(database);
+  assertSchemaVersionCompatible(database);
 
   if (!hasTable(database, "matches") || !hasTable(database, "operator_users")) {
     throw new Error("[startup] cannot apply manual score schema without matches and operator_users tables.");
@@ -472,6 +818,10 @@ export function ensureManualScoreSchema(database: DatabaseSync) {
       elapsed_seconds INTEGER NOT NULL DEFAULT 0 CHECK (elapsed_seconds >= 0),
       first_half_added_minutes INTEGER CHECK (first_half_added_minutes BETWEEN 0 AND 30),
       second_half_added_minutes INTEGER CHECK (second_half_added_minutes BETWEEN 0 AND 30),
+      actual_started_at TEXT,
+      phase_started_at TEXT,
+      halftime_started_at TEXT,
+      halftime_ends_at TEXT,
       version INTEGER NOT NULL DEFAULT 1,
       updated_by_operator_id TEXT,
       created_at TEXT NOT NULL,
@@ -492,6 +842,35 @@ export function ensureManualScoreSchema(database: DatabaseSync) {
     );
     CREATE INDEX IF NOT EXISTS idx_match_score_clock_audit_match ON match_score_clock_audit(match_id, created_at DESC);
 
+    CREATE TABLE IF NOT EXISTS match_score_system_audit (
+      id TEXT PRIMARY KEY,
+      match_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      previous_state TEXT,
+      new_state TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_match_score_system_audit_match ON match_score_system_audit(match_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS match_score_operator_notifications (
+      id TEXT PRIMARY KEY,
+      match_id TEXT NOT NULL,
+      event_key TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      event_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      acknowledged_at TEXT,
+      acknowledged_by_operator_id TEXT,
+      UNIQUE (match_id, event_key),
+      FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,
+      FOREIGN KEY (acknowledged_by_operator_id) REFERENCES operator_users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_score_operator_notifications_pending
+      ON match_score_operator_notifications(acknowledged_at, event_at DESC);
+
     CREATE TABLE IF NOT EXISTS match_score_timeline (
       id TEXT PRIMARY KEY,
       match_id TEXT NOT NULL,
@@ -510,33 +889,30 @@ export function ensureManualScoreSchema(database: DatabaseSync) {
       FOREIGN KEY (operator_id) REFERENCES operator_users(id)
     );
     CREATE INDEX IF NOT EXISTS idx_match_score_timeline_match ON match_score_timeline(match_id, minute, created_at);
-    CREATE TABLE IF NOT EXISTS match_score_system_audit (
-      id TEXT PRIMARY KEY,
-      match_id TEXT NOT NULL,
-      action TEXT NOT NULL,
-      previous_state TEXT,
-      new_state TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_match_score_system_audit_match ON match_score_system_audit(match_id, created_at DESC);
-    CREATE TABLE IF NOT EXISTS match_score_operator_notifications (
-      id TEXT PRIMARY KEY,
-      match_id TEXT NOT NULL,
-      event_key TEXT NOT NULL,
-      event_type TEXT NOT NULL,
-      title TEXT NOT NULL,
-      message TEXT NOT NULL,
-      event_at TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      acknowledged_at TEXT,
-      acknowledged_by_operator_id TEXT,
-      UNIQUE (match_id, event_key),
-      FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,
-      FOREIGN KEY (acknowledged_by_operator_id) REFERENCES operator_users(id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_score_operator_notifications_pending
-      ON match_score_operator_notifications(acknowledged_at, event_at DESC);
+  `);
+
+  const clockColumns: Array<[string, string]> = [
+    ["actual_started_at", "TEXT"],
+    ["phase_started_at", "TEXT"],
+    ["halftime_started_at", "TEXT"],
+    ["halftime_ends_at", "TEXT"]
+  ];
+  for (const [column, definition] of clockColumns) {
+    if (!hasColumn(database, "match_score_clock_state", column)) {
+      database.exec(`ALTER TABLE match_score_clock_state ADD COLUMN ${column} ${definition}`);
+    }
+  }
+  database.exec(`
+    UPDATE match_score_clock_state
+    SET actual_started_at = COALESCE(actual_started_at, running_since)
+    WHERE phase IN ('first_half', 'second_half') AND running_since IS NOT NULL;
+    UPDATE match_score_clock_state
+    SET phase_started_at = COALESCE(phase_started_at, running_since, updated_at)
+    WHERE phase_started_at IS NULL;
+    UPDATE match_score_clock_state
+    SET halftime_started_at = COALESCE(halftime_started_at, updated_at),
+        halftime_ends_at = COALESCE(halftime_ends_at, datetime(updated_at, '+15 minutes') || 'Z')
+    WHERE phase = 'halftime';
   `);
 
   const timelineColumns: Array<[string, string]> = [
@@ -551,7 +927,6 @@ export function ensureManualScoreSchema(database: DatabaseSync) {
       database.exec(`ALTER TABLE match_score_timeline ADD COLUMN ${column} ${definition}`);
     }
   }
-  migrateManualTimelineSnapshots(database);
 }
 
 function ensureNewsSchemaColumns(database: DatabaseSync) {
@@ -566,6 +941,9 @@ function ensureNewsSchemaColumns(database: DatabaseSync) {
     if (hasTable(database, "players") && !hasColumn(database, "players", "injury_notes")) database.exec("ALTER TABLE players ADD COLUMN injury_notes TEXT");
     if (hasTable(database, "players") && !hasColumn(database, "players", "secondary_positions_json")) {
       database.exec("ALTER TABLE players ADD COLUMN secondary_positions_json TEXT NOT NULL DEFAULT '[]'");
+    }
+    if (hasTable(database, "players") && !hasColumn(database, "players", "import_details_json")) {
+      database.exec("ALTER TABLE players ADD COLUMN import_details_json TEXT NOT NULL DEFAULT '{}'");
     }
   database.exec(`
     CREATE TABLE IF NOT EXISTS news_generated_rss_sources (
