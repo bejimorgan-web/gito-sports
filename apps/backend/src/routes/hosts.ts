@@ -3,6 +3,7 @@ import { Router } from "express";
 import type { CreateHostRequest, UpdateHostRequest } from "@gito/shared";
 import { protectedRoute } from "../middleware/protected.js";
 import { addHostToSport, createHost, deleteHost, getHostById, listHosts, removeHostFromSport, updateHost } from "../repositories/hosts-repository.js";
+import { importHostClubs } from "../repositories/teams-repository.js";
 
 export const hostsRouter = Router();
 
@@ -18,6 +19,17 @@ hostsRouter.get("/:hostId", (request, response) => {
     return;
   }
   response.json({ data: host });
+});
+
+hostsRouter.post("/:hostId/clubs/import", protectedRoute, (request, response) => {
+  try {
+    const result = importHostClubs(String(request.params.hostId ?? ""), request.body?.rows);
+    response.status(200).json({ data: result });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const status = message === "host_not_found" ? 404 : message.includes("mismatch") || message.includes("duplicate") ? 409 : 400;
+    response.status(status).json({ error: message, message });
+  }
 });
 
 hostsRouter.post("/:hostId/sports/:sportId", protectedRoute, (request, response) => {

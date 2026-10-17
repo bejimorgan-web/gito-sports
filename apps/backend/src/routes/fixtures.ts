@@ -1,9 +1,25 @@
 import { Router } from "express";
-import { createCanonicalFixture, deleteCanonicalFixture, getCanonicalFixtureById, listCanonicalFixtures, updateCanonicalFixture } from "../repositories/fixtures-repository.js";
+import { createCanonicalFixture, deleteCanonicalFixture, getCanonicalFixtureById, importCanonicalFixtures, listCanonicalFixtures, updateCanonicalFixture } from "../repositories/fixtures-repository.js";
 import { protectedRoute } from "../middleware/protected.js";
 import { clearFixtureLineup, getFixtureLineups, saveFixtureLineup } from "../repositories/fixture-lineups-repository.js";
 
 export const fixturesRouter = Router();
+
+fixturesRouter.post("/import", protectedRoute, (request, response) => {
+  try {
+    const result = importCanonicalFixtures({
+      hostId: String(request.body?.hostId ?? ""),
+      competitionId: String(request.body?.competitionId ?? ""),
+      seasonId: String(request.body?.seasonId ?? ""),
+      rows: request.body?.rows
+    });
+    response.json({ data: result });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const status = message.endsWith("_not_found") ? 404 : message.includes("mismatch") ? 409 : 400;
+    response.status(status).json({ error: message, message });
+  }
+});
 
 fixturesRouter.get("/", (request, response) => {
   response.json({ data: listCanonicalFixtures({

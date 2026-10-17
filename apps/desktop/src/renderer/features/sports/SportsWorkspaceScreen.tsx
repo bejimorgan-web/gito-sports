@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   Competition,
@@ -23,6 +23,7 @@ import { resolveAssetUrl } from "../../components/asset-url";
 import { Modal } from "../../components/Modal";
 import { Toast } from "../../components/Toast";
 import { SeasonMembershipPanel } from "./SeasonMembershipPanel";
+import { downloadCsv, parseCsvFile } from "../../services/csv-files";
 
 const competitionScopes: CompetitionScope[] = ["domestic", "continental", "international", "global", "regional", "friendly", "custom"];
 const competitionTypes: CompetitionType[] = ["league", "cup", "tournament", "championship", "friendly", "custom"];
@@ -152,6 +153,8 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
   type ToastItem = { id: string; message: string; type?: "success" | "error" | "info" };
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [isLogoUploading, setIsLogoUploading] = useState(false);
+  const hostRosterFileRef = useRef<HTMLInputElement>(null);
+  const [isImportingHostRoster, setIsImportingHostRoster] = useState(false);
 
 
   const pushToast = (message: string, type: "success" | "error" | "info" = "success") => {
@@ -310,6 +313,36 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
     } catch {
       setStatus("Unable to load sports workspace data.");
     }
+  };
+
+  const exportHostRoster = () => {
+    const host = sportHosts.find((item) => item.id === selectedClubHostId);
+    if (!host) { setStatus("Select a host before exporting its roster."); return; }
+    const roster = teams.filter((team) => team.hostId === host.id && (team.type === "club" || team.type === "national"));
+    downloadCsv(`${host.name.replace(/[^a-z0-9-_]+/gi, "-")}-team-roster.csv`, ["team_id", "sport_id", "host_id", "team_name", "team_type", "short_name", "home_stadium_name", "home_stadium_photo_url", "logo_url"], roster.map((team) => ({
+      team_id: team.id, sport_id: team.sportId, host_id: team.hostId, team_name: team.name, team_type: team.type,
+      short_name: team.shortName, home_stadium_name: team.homeStadiumName, home_stadium_photo_url: team.homeStadiumPhotoUrl, logo_url: team.logoUrl
+    })));
+    setStatus(`Exported ${roster.length} teams for ${host.name}.`);
+  };
+
+  const importHostRoster = async (file?: File) => {
+    const host = sportHosts.find((item) => item.id === selectedClubHostId);
+    if (!file || !host) return;
+    setIsImportingHostRoster(true);
+    try {
+      const rows = await parseCsvFile(file);
+      const requiredColumns = ["sport_id", "host_id", "team_name", "team_type"];
+      if (!rows.every((row) => requiredColumns.every((column) => column in row))) throw new Error(`Roster CSV must include these columns: ${requiredColumns.join(", ")}.`);
+      const result = await apiClient.importHostClubs(host.id, rows.map((row) => ({
+        teamId: row.team_id ?? "", sportId: row.sport_id ?? "", hostId: row.host_id ?? "", teamName: row.team_name ?? "",
+        teamType: row.team_type ?? "club", shortName: row.short_name ?? "", homeStadiumName: row.home_stadium_name ?? "",
+        homeStadiumPhotoUrl: row.home_stadium_photo_url ?? "", logoUrl: row.logo_url ?? ""
+      })), accessToken);
+      await loadData();
+      setStatus(`Host roster imported: ${result.createdCount} added, ${result.skippedCount} already present.`);
+    } catch (error) { setStatus(error instanceof Error ? error.message : "Unable to import host roster."); }
+    finally { setIsImportingHostRoster(false); if (hostRosterFileRef.current) hostRosterFileRef.current.value = ""; }
   };
 
   useEffect(() => {
@@ -905,10 +938,14 @@ export function SportsWorkspaceScreen({ accessToken }: { accessToken: string }) 
                     ))}
                   </select>
                 </label>
-                <button type="button" onClick={() => openTeamEditor()} disabled={isCatalogView}>
-                  Add Club
-                </button>
+                <div className="button-row">
+                  <button type="button" className="secondary" onClick={exportHostRoster} disabled={isCatalogView || selectedClubHostId === "all"}>Export Host Team Roster CSV</button>
+                  <button type="button" className="secondary" onClick={() => hostRosterFileRef.current?.click()} disabled={isCatalogView || selectedClubHostId === "all" || isImportingHostRoster}>{isImportingHostRoster ? "Importing…" : "Import Host Team Roster CSV"}</button>
+                  <button type="button" onClick={() => openTeamEditor()} disabled={isCatalogView}>Add Club</button>
+                  <input ref={hostRosterFileRef} type="file" accept=".csv,text/csv" hidden onChange={(event) => void importHostRoster(event.target.files?.[0])} />
+                </div>
               </div>
+              <p className="field-note">The roster includes clubs and national teams. Existing IDs or names are skipped. For a new team, leave team_id blank and fill sport_id, host_id, team_name, and team_type. Logo URLs are optional.</p>
               <div className="entity-list">
                 {visibleClubs.length > 0 ? (
                   visibleClubs.map((team) => (

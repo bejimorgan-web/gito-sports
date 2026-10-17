@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Competition, Host, Season, Sport, Team } from "@gito/shared";
 import { apiClient } from "../../services/api-client";
 import { TeamCrest } from "../../components/TeamCrest";
@@ -8,6 +8,7 @@ import {
   utcToOperatorKickoff,
 } from "./fixture-time";
 import { FootballLineupEditor } from "./FootballLineupEditor";
+import { downloadCsv, parseCsvFile } from "../../services/csv-files";
 
 function getParticipantLabel(participantType?: string) {
   if (participantType === "nationalTeams") return "National Team";
@@ -44,6 +45,8 @@ export function FixtureWorkspaceScreen({
   const [createAwayTeamId, setCreateAwayTeamId] = useState("");
   const [createKickoff, setCreateKickoff] = useState("");
   const [createVenueName, setCreateVenueName] = useState("");
+  const [isImportingFixtures, setIsImportingFixtures] = useState(false);
+  const fixtureFileRef = useRef<HTMLInputElement>(null);
 
   const selectedSport = sports.find((sport) => sport.id === selectedSportId) ?? null;
   const selectedHost = hosts.find((host) => host.id === selectedHostId) ?? null;
@@ -116,10 +119,9 @@ export function FixtureWorkspaceScreen({
         }
 
         const seasonParticipants = await apiClient.listSeasonTeams(selectedCompetitionId, selectedSeasonId);
-        const participantIds = new Set(seasonParticipants.map((entry) => entry.teamId));
-        const nextParticipants = competitionParticipants.filter((team) => participantIds.has(team.id));
+        const nextParticipants = seasonParticipants.map((entry) => entry.team).filter((team): team is Team => Boolean(team));
         setParticipants(nextParticipants);
-        if (selectedParticipantId && !participantIds.has(selectedParticipantId)) {
+        if (selectedParticipantId && !nextParticipants.some((team) => team.id === selectedParticipantId)) {
           setSelectedParticipantId("");
         }
       } catch (error) {
@@ -183,6 +185,37 @@ export function FixtureWorkspaceScreen({
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Unable to load fixtures.");
     }
+  };
+
+  const exportFixtureHostRoster = () => {
+    if (!selectedHost || !selectedCompetition || !selectedSeason) { setStatus("Select a host, competition, and season first."); return; }
+    const seasonHostTeams = participants.filter((team) => team.hostId === selectedHost.id);
+    downloadCsv(`${selectedHost.name.replace(/[^a-z0-9-_]+/gi, "-")}-${selectedSeason.name}-fixture-teams.csv`, ["team_id", "team_name", "team_type"], seasonHostTeams.map((team) => ({ team_id: team.id, team_name: team.name, team_type: team.type })));
+    setStatus(`Exported ${seasonHostTeams.length} season teams from ${selectedHost.name}. Fixture imports require these season members.`);
+  };
+
+  const exportFixtureSchedule = () => {
+    if (!selectedCompetition || !selectedSeason) { setStatus("Select a competition and season first."); return; }
+    downloadCsv(`${selectedCompetition.name.replace(/[^a-z0-9-_]+/gi, "-")}-${selectedSeason.name}-fixtures.csv`, ["fixture_id", "home_team_name", "away_team_name", "starts_at", "venue_name"], fixtures.map((fixture) => ({
+      fixture_id: fixture.id, home_team_name: fixture.homeTeam?.name, away_team_name: fixture.awayTeam?.name, starts_at: fixture.startsAt, venue_name: fixture.venueName
+    })));
+    setStatus(`Exported ${fixtures.length} fixtures. Keep existing fixture IDs; leave fixture_id blank for new fixtures.`);
+  };
+
+  const importFixtureSchedule = async (file?: File) => {
+    if (!file || !selectedHostId || !selectedCompetitionId || !selectedSeasonId) return;
+    setIsImportingFixtures(true);
+    try {
+      const rows = await parseCsvFile(file);
+      const required = ["fixture_id", "home_team_name", "away_team_name", "starts_at", "venue_name"];
+      if (!rows.every((row) => required.every((column) => column in row))) throw new Error(`Fixture CSV must include these columns: ${required.join(", ")}.`);
+      const result = await apiClient.importFixtures({ hostId: selectedHostId, competitionId: selectedCompetitionId, seasonId: selectedSeasonId, rows: rows.map((row) => ({
+        fixtureId: row.fixture_id ?? "", homeTeamName: row.home_team_name ?? "", awayTeamName: row.away_team_name ?? "", startsAt: row.starts_at ?? "", venueName: row.venue_name ?? ""
+      })) }, accessToken);
+      await loadFixtures();
+      setStatus(`Fixture CSV imported: ${result.createdCount} added, ${result.skippedCount} existing or duplicate rows skipped.`);
+    } catch (error) { setStatus(error instanceof Error ? error.message : "Unable to import fixture schedule."); }
+    finally { setIsImportingFixtures(false); if (fixtureFileRef.current) fixtureFileRef.current.value = ""; }
   };
 
   useEffect(() => {
@@ -361,11 +394,16 @@ export function FixtureWorkspaceScreen({
           <h3>Canonical fixtures</h3>
           <div className="button-row">
             <span className="status-pill">{status}</span>
+            <button type="button" className="secondary" onClick={exportFixtureHostRoster} disabled={!selectedHostId || !selectedCompetitionId || !selectedSeasonId}>Export Season Teams CSV</button>
+            <button type="button" className="secondary" onClick={exportFixtureSchedule} disabled={!selectedCompetitionId || !selectedSeasonId}>Export Fixture CSV</button>
+            <button type="button" className="secondary" onClick={() => fixtureFileRef.current?.click()} disabled={!selectedHostId || !selectedCompetitionId || !selectedSeasonId || isImportingFixtures}>{isImportingFixtures ? "Importing…" : "Import Fixture CSV"}</button>
+            <input ref={fixtureFileRef} type="file" accept=".csv,text/csv" hidden onChange={(event) => void importFixtureSchedule(event.target.files?.[0])} />
             <button type="button" onClick={() => setShowCreatePanel((value) => !value)}>
               {showCreatePanel ? "Hide form" : "+ Create canonical fixture"}
             </button>
           </div>
         </div>
+        <p className="field-note">Fixture IDs are skipped on import. Leave fixture_id blank for a new fixture; team names must be season members and starts_at must include a timezone.</p>
 
         {showCreatePanel ? (
           <div className="console-panel" style={{ marginTop: 16 }}>

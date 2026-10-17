@@ -41,6 +41,39 @@ export function createSeasonTeamMembership(competitionId: string, seasonId: stri
   return mapMembership(getDatabase().prepare("SELECT * FROM competition_season_teams WHERE id = ?").get(id));
 }
 
+/** Atomically replace a season's participant list with teams from its host. */
+export function replaceSeasonTeamMemberships(competitionId: string, seasonId: string, teamIds: string[]) {
+  assertCompetitionSeason(competitionId, seasonId);
+  const database = getDatabase();
+  const competition = database.prepare("SELECT sport_id, participant_type, host_id FROM competitions WHERE id = ?").get(competitionId) as { sport_id: string; participant_type: string; host_id: string | null } | undefined;
+  if (!competition) throw new Error("competition_not_found");
+  if (!competition.host_id) throw new Error("competition_host_required");
+  if (!Array.isArray(teamIds) || teamIds.length > 2000) throw new Error("invalid_season_team_ids");
+  const uniqueIds = [...new Set(teamIds.map((id) => String(id).trim()).filter(Boolean))];
+  const expectedType = competition.participant_type === "nationalTeams" ? "national" : competition.participant_type === "clubs" ? "club" : "custom";
+  const teams = uniqueIds.map((teamId) => {
+    const team = database.prepare("SELECT id, sport_id, host_id, type FROM teams WHERE id = ?").get(teamId) as { id: string; sport_id: string; host_id: string | null; type: string } | undefined;
+    if (!team) throw new Error("team_not_found");
+    if (team.sport_id !== competition.sport_id) throw new Error("team_sport_mismatch");
+    if (team.host_id !== competition.host_id) throw new Error("team_host_mismatch");
+    if (expectedType !== "custom" && team.type !== expectedType) throw new Error("team_participant_type_mismatch");
+    return team.id;
+  });
+
+  const timestamp = now();
+  const replace = database.transaction(() => {
+    database.prepare("DELETE FROM competition_season_teams WHERE competition_id = ? AND season_id = ?").run(competitionId, seasonId);
+    const addCompetitionTeam = database.prepare("INSERT OR IGNORE INTO competition_teams (id, competition_id, team_id, created_at) VALUES (?, ?, ?, ?)");
+    const addSeasonTeam = database.prepare("INSERT INTO competition_season_teams (id, competition_id, season_id, team_id, membership_status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)");
+    for (const teamId of teams) {
+      addCompetitionTeam.run(crypto.randomUUID(), competitionId, teamId, timestamp);
+      addSeasonTeam.run(crypto.randomUUID(), competitionId, seasonId, teamId, timestamp, timestamp);
+    }
+  });
+  replace();
+  return { teamIds: teams, count: teams.length };
+}
+
 export function deleteSeasonTeamMembership(competitionId: string, seasonId: string, teamId: string): boolean {
   assertCompetitionSeason(competitionId, seasonId);
   return getDatabase().prepare("DELETE FROM competition_season_teams WHERE competition_id = ? AND season_id = ? AND team_id = ?").run(competitionId, seasonId, teamId).changes > 0;

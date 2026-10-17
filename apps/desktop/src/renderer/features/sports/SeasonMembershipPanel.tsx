@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Competition, Host, Season, Team } from "@gito/shared";
 import { apiClient } from "../../services/api-client";
+import { downloadCsv, normalizeCsvName, parseCsvFile } from "../../services/csv-files";
 
 interface Props {
   teams: Team[];
@@ -11,9 +12,9 @@ interface Props {
 }
 
 export function SeasonMembershipPanel({ teams, hosts, competitions, selectedSportId, accessToken }: Props) {
-  const clubs = teams.filter((team) => team.sportId === selectedSportId && team.type === "club");
+  const clubs = teams.filter((team) => team.sportId === selectedSportId && (team.type === "club" || team.type === "national"));
   const [hostId, setHostId] = useState("all");
-  const sportCompetitions = competitions.filter((competition) => competition.sportId === selectedSportId && competition.participantType === "clubs");
+  const sportCompetitions = competitions.filter((competition) => competition.sportId === selectedSportId && (competition.participantType === "clubs" || competition.participantType === "nationalTeams"));
   const [teamId, setTeamId] = useState("");
   const [competitionId, setCompetitionId] = useState("");
   const [seasonId, setSeasonId] = useState("");
@@ -25,6 +26,9 @@ export function SeasonMembershipPanel({ teams, hosts, competitions, selectedSpor
   const [competitionMembers, setCompetitionMembers] = useState<Team[]>([]);
   const [status, setStatus] = useState("Ready");
   const [isSavingSeason, setIsSavingSeason] = useState(false);
+  const [hostTeams, setHostTeams] = useState<Team[]>([]);
+  const [isImportingRoster, setIsImportingRoster] = useState(false);
+  const seasonRosterFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setTeamId("");
@@ -37,6 +41,7 @@ export function SeasonMembershipPanel({ teams, hosts, competitions, selectedSpor
   }, [selectedSportId]);
 
   const visibleClubs = hostId === "all" ? clubs : clubs.filter((team) => team.hostId === hostId);
+  const selectedCompetition = sportCompetitions.find((competition) => competition.id === competitionId);
 
   useEffect(() => {
     if (!competitionId) {
@@ -51,6 +56,14 @@ export function SeasonMembershipPanel({ teams, hosts, competitions, selectedSpor
       })
       .catch(() => setStatus("Unable to load competition memberships."));
   }, [competitionId]);
+
+  useEffect(() => {
+    if (!selectedCompetition?.hostId) { setHostTeams([]); return; }
+    const type = selectedCompetition.participantType === "nationalTeams" ? "national" : "club";
+    void apiClient.listTeams("legacy", { sportId: selectedSportId, hostId: selectedCompetition.hostId, type })
+      .then(setHostTeams)
+      .catch(() => { setHostTeams([]); setStatus("Unable to load the competition host roster."); });
+  }, [selectedCompetition?.hostId, selectedCompetition?.participantType, selectedSportId]);
 
   useEffect(() => {
     if (!competitionId || !seasonId) {
@@ -107,6 +120,41 @@ export function SeasonMembershipPanel({ teams, hosts, competitions, selectedSpor
     } catch (error) { setStatus(error instanceof Error ? error.message : "Unable to remove season membership."); }
   };
 
+  const exportSeasonRoster = () => {
+    if (!selectedCompetition?.hostId || !seasonId) { setStatus("Select a hosted competition and season first."); return; }
+    const host = hosts.find((item) => item.id === selectedCompetition.hostId);
+    const season = seasons.find((item) => item.id === seasonId);
+    const safeName = `${host?.name ?? "host"}-${season?.name ?? "season"}`.replace(/[^a-z0-9-_]+/gi, "-");
+    downloadCsv(`${safeName}-team-roster.csv`, ["team_id", "team_name", "team_type"], hostTeams.map((team) => ({ team_id: team.id, team_name: team.name, team_type: team.type })));
+    setStatus(`Exported ${hostTeams.length} host teams. Importing this file sets the season's exact team list.`);
+  };
+
+  const importSeasonRoster = async (file?: File) => {
+    if (!file || !selectedCompetition || !seasonId) return;
+    setIsImportingRoster(true);
+    try {
+      const rows = await parseCsvFile(file);
+      if (!rows.length) throw new Error("Add at least one team row before importing a season roster.");
+      if (!rows.every((row) => "team_name" in row)) throw new Error("Season roster CSV must include the team_name column.");
+      const names = new Set<string>();
+      const ids = rows.map((row) => {
+        const normalized = normalizeCsvName(row.team_name ?? "");
+        if (!normalized) throw new Error("Every season roster row needs a team_name.");
+        if (names.has(normalized)) throw new Error(`Duplicate team name in CSV: ${row.team_name}`);
+        names.add(normalized);
+        const team = hostTeams.find((candidate) => normalizeCsvName(candidate.name) === normalized);
+        if (!team) throw new Error(`Team is not registered under this competition's host: ${row.team_name}`);
+        return team.id;
+      });
+      if (!window.confirm(`Replace the ${seasons.find((season) => season.id === seasonId)?.name ?? "selected season"} team list with these ${ids.length} teams?`)) return;
+      const result = await apiClient.replaceSeasonTeams(competitionId, seasonId, ids, accessToken);
+      setMembers(await apiClient.listSeasonTeams(competitionId, seasonId));
+      setCompetitionMembers(await apiClient.listCompetitionTeams(competitionId));
+      setStatus(`Season roster set: ${result.count} teams assigned.`);
+    } catch (error) { setStatus(error instanceof Error ? error.message : "Unable to import season roster."); }
+    finally { setIsImportingRoster(false); if (seasonRosterFileRef.current) seasonRosterFileRef.current.value = ""; }
+  };
+
   return (
     <section className="console-panel">
       <div className="panel-heading">
@@ -122,10 +170,10 @@ export function SeasonMembershipPanel({ teams, hosts, competitions, selectedSpor
           </select>
         </label>
         <label>
-          Club
+          {selectedCompetition?.participantType === "nationalTeams" ? "National team" : "Club"}
           <select value={teamId} onChange={(event) => setTeamId(event.target.value)}>
             <option value="">Select club</option>
-            {visibleClubs.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+            {visibleClubs.filter((team) => !selectedCompetition || (selectedCompetition.participantType === "nationalTeams" ? team.type === "national" : team.type === "club")).map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
           </select>
         </label>
         <label>
@@ -156,6 +204,12 @@ export function SeasonMembershipPanel({ teams, hosts, competitions, selectedSpor
         <button type="button" onClick={() => void addCompetitionMembership()} disabled={!teamId || !competitionId || competitionMembers.some((team) => team.id === teamId)}>Add competition membership</button>
         <button type="button" onClick={() => void addSeasonMembership()} disabled={!teamId || !competitionId || !seasonId || members.some((member) => member.teamId === teamId)}>Add season membership</button>
       </div>
+      {competitionId && seasonId ? <div className="button-row">
+        <button type="button" className="secondary" onClick={exportSeasonRoster} disabled={!selectedCompetition?.hostId}>Export Host Roster CSV</button>
+        <button type="button" className="secondary" onClick={() => seasonRosterFileRef.current?.click()} disabled={!selectedCompetition?.hostId || isImportingRoster}>{isImportingRoster ? "Importing…" : "Import Season Roster CSV"}</button>
+        <input ref={seasonRosterFileRef} type="file" accept=".csv,text/csv" hidden onChange={(event) => void importSeasonRoster(event.target.files?.[0])} />
+        <span className="field-note">The imported names replace this season’s team list; names must match the host roster.</span>
+      </div> : null}
       {seasonId ? (
         <div className="entity-list">
           {members.map((member) => (

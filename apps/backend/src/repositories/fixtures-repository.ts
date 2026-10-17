@@ -14,6 +14,14 @@ export interface CanonicalFixtureInput {
   externalMatchId?: string | null;
 }
 
+export interface CanonicalFixtureImportRow {
+  fixtureId?: string;
+  homeTeamName?: string;
+  awayTeamName?: string;
+  startsAt?: string;
+  venueName?: string;
+}
+
 function validateFixtureInput(input: CanonicalFixtureInput) {
   const db = getDatabase();
   if (input.homeTeamId === input.awayTeamId) throw new Error("home_and_away_must_differ");
@@ -64,6 +72,61 @@ export function createCanonicalFixture(input: CanonicalFixtureInput) {
   const timestamp = new Date().toISOString();
   db.prepare("INSERT INTO matches (id, competition_id, season_id, home_team_id, away_team_id, starts_at, venue_name, venue_image_url, external_provider, external_match_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, input.competitionId, input.seasonId ?? null, input.homeTeamId, input.awayTeamId, input.startsAt, input.venueName ?? null, input.venueImageUrl ?? null, input.externalProvider ?? null, input.externalMatchId ?? null, input.status ?? "scheduled", timestamp, timestamp);
   return getCanonicalFixtureById(id);
+}
+
+/** Add new fixtures from an editable CSV export; existing exported fixture IDs are skipped. */
+export function importCanonicalFixtures(input: { hostId: string; competitionId: string; seasonId: string; rows: CanonicalFixtureImportRow[] }) {
+  const db = getDatabase();
+  if (!Array.isArray(input.rows) || input.rows.length > 2000) throw new Error("invalid_fixture_import_rows");
+  const competition = db.prepare("SELECT id, host_id, sport_id, participant_type FROM competitions WHERE id = ?").get(input.competitionId) as { id: string; host_id: string | null; sport_id: string; participant_type: string } | undefined;
+  if (!competition) throw new Error("competition_not_found");
+  if (competition.host_id !== input.hostId) throw new Error("fixture_host_competition_mismatch");
+  const season = db.prepare("SELECT id, competition_id FROM seasons WHERE id = ?").get(input.seasonId) as { id: string; competition_id: string } | undefined;
+  if (!season) throw new Error("season_not_found");
+  if (season.competition_id !== input.competitionId) throw new Error("competition_season_mismatch");
+  const expectedType = competition.participant_type === "nationalTeams" ? "national" : competition.participant_type === "clubs" ? "club" : undefined;
+  const skippedIds = new Set<string>();
+  const created: any[] = [];
+  const seen = new Set<string>();
+  const resolveTeam = (nameValue: string | undefined) => {
+    const name = String(nameValue ?? "").trim();
+    if (!name) throw new Error("fixture_team_name_required");
+    const team = db.prepare("SELECT t.id, t.type FROM teams t JOIN competition_season_teams cst ON cst.team_id = t.id WHERE t.host_id = ? AND t.sport_id = ? AND cst.competition_id = ? AND cst.season_id = ? AND lower(trim(t.name)) = lower(trim(?)) LIMIT 1")
+      .get(input.hostId, competition.sport_id, input.competitionId, input.seasonId, name) as { id: string; type: string } | undefined;
+    if (!team) throw new Error(`fixture_team_not_in_season:${name}`);
+    if (expectedType && team.type !== expectedType) throw new Error("team_participant_type_mismatch");
+    return team;
+  };
+
+  const run = db.transaction(() => {
+    for (const row of input.rows) {
+      if (row.fixtureId) {
+        const existing = db.prepare("SELECT id, competition_id, season_id FROM matches WHERE id = ?").get(row.fixtureId) as { id: string; competition_id: string; season_id: string | null } | undefined;
+        if (!existing || existing.competition_id !== input.competitionId || existing.season_id !== input.seasonId) throw new Error("fixture_import_id_mismatch");
+        skippedIds.add(existing.id);
+        continue;
+      }
+      const homeTeam = resolveTeam(row.homeTeamName);
+      const awayTeam = resolveTeam(row.awayTeamName);
+      const signature = `${homeTeam.id}:${awayTeam.id}:${String(row.startsAt ?? "").trim()}`.toLocaleLowerCase();
+      if (seen.has(signature)) { skippedIds.add(signature); continue; }
+      seen.add(signature);
+      const fixtureInput: CanonicalFixtureInput = {
+        competitionId: input.competitionId,
+        seasonId: input.seasonId,
+        homeTeamId: homeTeam.id,
+        awayTeamId: awayTeam.id,
+        startsAt: String(row.startsAt ?? "").trim(),
+        venueName: String(row.venueName ?? "").trim() || null,
+        status: "scheduled"
+      };
+      const equivalent = findEquivalentCanonicalFixtures(fixtureInput);
+      if (equivalent.length) { skippedIds.add(`${homeTeam.id}:${awayTeam.id}:${fixtureInput.startsAt}`); continue; }
+      created.push(createCanonicalFixture(fixtureInput));
+    }
+  });
+  run();
+  return { created, createdCount: created.length, skippedCount: skippedIds.size };
 }
 
 export function updateCanonicalFixture(fixtureId: string, input: Partial<CanonicalFixtureInput>) {

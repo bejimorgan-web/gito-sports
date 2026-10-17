@@ -130,6 +130,64 @@ export function createTeam(input: CreateTeamRequest): Team {
   };
 }
 
+export interface HostClubImportRow {
+  teamId?: string;
+  teamName?: string;
+  sportId?: string;
+  hostId?: string;
+  teamType?: string;
+  shortName?: string;
+  homeStadiumName?: string;
+  homeStadiumPhotoUrl?: string;
+  logoUrl?: string;
+}
+
+/** Add only new clubs from a host roster file. Existing exported rows are inert. */
+export function importHostClubs(hostId: string, rows: HostClubImportRow[]) {
+  const database = getDatabase();
+  const host = database.prepare("SELECT id, sport_id, host_type FROM hosts WHERE id = ? AND status = 'active'").get(hostId) as { id: string; sport_id: string; host_type: string } | undefined;
+  if (!host) throw new Error("host_not_found");
+  if (host.host_type !== "country") throw new Error("team_country_host_required");
+  if (!Array.isArray(rows) || rows.length > 2000) throw new Error("invalid_club_import_rows");
+
+  const created: Team[] = [];
+  const skipped = new Set<string>();
+  const seen = new Set<string>();
+  const importRows = database.transaction(() => {
+    for (const row of rows) {
+      const name = String(row.teamName ?? "").trim();
+      const normalizedName = name.normalize("NFKC").toLocaleLowerCase();
+      if (!name) throw new Error("club_name_required");
+      if ((row.hostId && row.hostId !== hostId) || (row.sportId && row.sportId !== host.sport_id)) throw new Error("club_import_host_or_sport_mismatch");
+      if (row.teamId) {
+        const exportedTeam = database.prepare("SELECT id, host_id FROM teams WHERE id = ?").get(row.teamId) as { id: string; host_id: string | null } | undefined;
+        if (!exportedTeam || exportedTeam.host_id !== hostId) throw new Error("club_import_team_id_mismatch");
+        skipped.add(row.teamId);
+        continue;
+      }
+      if (seen.has(normalizedName)) { skipped.add(name); continue; }
+      seen.add(normalizedName);
+      const existing = database.prepare("SELECT id FROM teams WHERE host_id = ? AND lower(name) = lower(?) LIMIT 1").get(hostId, name) as { id: string } | undefined;
+      if (existing) { skipped.add(existing.id); continue; }
+      if (row.hostId !== hostId || row.sportId !== host.sport_id) throw new Error("club_import_host_or_sport_required");
+      const type = row.teamType;
+      if (type !== "club" && type !== "national") throw new Error("club_type_must_be_club_or_national");
+      created.push(createTeam({
+        sportId: host.sport_id,
+        hostId,
+        name,
+        type,
+        ...(row.shortName?.trim() ? { shortName: row.shortName.trim() } : {}),
+        ...(row.homeStadiumName?.trim() ? { homeStadiumName: row.homeStadiumName.trim() } : {}),
+        ...(row.homeStadiumPhotoUrl?.trim() ? { homeStadiumPhotoUrl: row.homeStadiumPhotoUrl.trim() } : {}),
+        ...(row.logoUrl?.trim() ? { logoUrl: row.logoUrl.trim() } : {})
+      }));
+    }
+  });
+  importRows();
+  return { created, createdCount: created.length, skippedCount: skipped.size };
+}
+
 export function updateTeam(teamId: string, input: Partial<CreateTeamRequest> & { status?: Team["status"] }): Team | undefined {
   const database = getDatabase();
   const existing = database

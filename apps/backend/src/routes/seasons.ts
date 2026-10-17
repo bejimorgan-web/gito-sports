@@ -2,7 +2,7 @@ import { Router } from "express";
 import type { AuthenticatedRequest } from "../middleware/protected.js";
 import { protectedRoute } from "../middleware/protected.js";
 import { createSeason, getSeasonById, listSeasons, updateSeason } from "../repositories/seasons-repository.js";
-import { createSeasonTeamMembership, deleteSeasonTeamMembership, listSeasonTeamMemberships } from "../repositories/competition-season-teams-repository.js";
+import { createSeasonTeamMembership, deleteSeasonTeamMembership, listSeasonTeamMemberships, replaceSeasonTeamMemberships } from "../repositories/competition-season-teams-repository.js";
 
 function handleError(error: unknown, response: any) {
   const message = error instanceof Error ? error.message : String(error);
@@ -27,6 +27,17 @@ competitionSeasonsRouter.post("/", protectedRoute, (request, response) => {
 competitionSeasonsRouter.get("/:seasonId/teams", (request, response) => {
   try { response.json({ data: listSeasonTeamMemberships(String((request.params as any).competitionId ?? ""), String(request.params.seasonId ?? "")) }); }
   catch (error) { handleError(error, response); }
+});
+
+competitionSeasonsRouter.put("/:seasonId/teams/import", protectedRoute, (request, response) => {
+  try {
+    const result = replaceSeasonTeamMemberships(
+      String((request.params as any).competitionId ?? ""),
+      String(request.params.seasonId ?? ""),
+      request.body?.teamIds
+    );
+    response.json({ data: result });
+  } catch (error) { handleError(error, response); }
 });
 
 competitionSeasonsRouter.post("/:seasonId/teams", protectedRoute, (request, response) => {

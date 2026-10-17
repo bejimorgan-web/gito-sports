@@ -894,6 +894,11 @@ export const apiClient = {
   deleteHost(hostId: string, accessToken: string) {
     return request<void>(`/hosts/${hostId}`, { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } });
   },
+  importHostClubs(hostId: string, rows: Array<Record<string, string>>, accessToken: string) {
+    return request<{ created: Team[]; createdCount: number; skippedCount: number }>(`/hosts/${encodeURIComponent(hostId)}/clubs/import`, {
+      method: "POST", headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ rows })
+    });
+  },
   listCompetitions(mode?: 'legacy' | 'catalog', hostId?: string) {
     const path = buildApiPath('/competitions', { mode, ...(hostId ? { hostId } : {}) });
     return request<Competition[]>(path);
@@ -1024,6 +1029,11 @@ export const apiClient = {
   removeSeasonTeam(competitionId: string, seasonId: string, teamId: string, accessToken: string) {
     return request<void>(`/competitions/${competitionId}/seasons/${seasonId}/teams/${teamId}`, { method: 'DELETE', headers: { authorization: `Bearer ${accessToken}` } });
   },
+  replaceSeasonTeams(competitionId: string, seasonId: string, teamIds: string[], accessToken: string) {
+    return request<{ teamIds: string[]; count: number }>(`/competitions/${competitionId}/seasons/${seasonId}/teams/import`, {
+      method: "PUT", headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ teamIds })
+    });
+  },
   listPlayers(filters?: { teamId?: string; countryId?: string; status?: string }) {
     return request<Player[]>(buildApiPath('/catalog/players', filters));
   },
@@ -1129,6 +1139,11 @@ export const apiClient = {
   },
   createFixture(input: any, accessToken: string) {
     return request<any>('/fixtures', { method: 'POST', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
+  },
+  importFixtures(input: { hostId: string; competitionId: string; seasonId: string; rows: Array<Record<string, string>> }, accessToken: string) {
+    return request<{ created: any[]; createdCount: number; skippedCount: number }>("/fixtures/import", {
+      method: "POST", headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input)
+    });
   },
   updateFixture(fixtureId: string, input: any, accessToken: string) {
     return request<any>(`/fixtures/${fixtureId}`, { method: 'PUT', headers: { authorization: `Bearer ${accessToken}` }, body: JSON.stringify(input) });
