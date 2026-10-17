@@ -90,6 +90,8 @@ export function createApp() {
     helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }),
     express.static(uploadDirectory)
   );
+  app.use("/health", healthRouter);
+  app.use(readinessGuard);
   app.use("/upload", uploadsRouter);
 
   // Migration routes handle auth internally. Bypass any global auth middleware.
@@ -146,7 +148,6 @@ export function createApp() {
 
   app.use("/auth", authRouter);
   app.use("/api/admin", adminRouter);
-  app.use("/health", healthRouter);
   app.use("/system", systemRouter);
   // Expose restore audit read-only router (dynamic import)
   import("./routes/system_restore_audit.js").then((mod) => {
@@ -170,13 +171,13 @@ export function createApp() {
   app.use("/clubs", clubsRouter);
   app.use("/matches", matchesRouter);
   app.use("/fixtures", fixturesRouter);
-  app.use("/mobile", readinessGuard, mobileRouter);
-  app.use("/analytics", readinessGuard, analyticsRouter);
-  app.use("/mobile/analytics", readinessGuard, analyticsRouter);
+  app.use("/mobile", mobileRouter);
+  app.use("/analytics", analyticsRouter);
+  app.use("/mobile/analytics", analyticsRouter);
   app.use("/operations", operationsRouter);
   app.use("/scores", scoresRouter);
   app.use("/news", newsRouter);
-  app.use("/api/football", readinessGuard, footballRouter);
+  app.use("/api/football", footballRouter);
   app.use('/api/admin/migration', migrationRouter);
   app.use('/api/admin/fixture-reconciliation', fixtureReconciliationRouter);
   app.use("/catalog", playerCatalogRouter);

@@ -16,7 +16,12 @@ test("public debug endpoints report status without exposing credentials", async 
   process.env.UPLOAD_DIR = path.join(temporaryRoot, "uploads");
 
   try {
-    const { createApp } = await import("./app.js");
+    const [{ createApp }, readiness] = await Promise.all([
+      import("./app.js"),
+      import("./core/server-readiness.js")
+    ]);
+    readiness.initializeCoreReadiness(() => {}, () => {});
+    readiness.markServerReady();
     const server = createApp().listen(0, "127.0.0.1");
     t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
     await new Promise<void>((resolve) => server.once("listening", resolve));

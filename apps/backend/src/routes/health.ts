@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { getDatabase, isDatabaseInitialized } from "../db/connection.js";
 import { isMigrationImported, getMigrationMetadata } from "../db/migration-import.js";
+import { hasStartupFailed, isServerReady, markStartupFailed } from "../core/server-readiness.js";
 
 export const healthRouter = Router();
 
@@ -17,7 +18,9 @@ function getCount(database: ReturnType<typeof getDatabase>, table: string) {
 function databaseSchemaReady(database: ReturnType<typeof getDatabase>): boolean {
   try {
     const schemaVersion = Number((database.prepare("PRAGMA user_version").get() as { user_version?: number }).user_version ?? 0);
-    if (schemaVersion !== 1) return false;
+    // getDatabase() only completes after startup compatibility checks have
+    // accepted the current schema and all required migrations have run.
+    if (!Number.isSafeInteger(schemaVersion) || schemaVersion < 1) return false;
     const requiredTables = [
       "sports",
       "teams",
@@ -41,9 +44,9 @@ function databaseSchemaReady(database: ReturnType<typeof getDatabase>): boolean 
 }
 
 healthRouter.get("/", (_request, response) => {
-  if (!isDatabaseInitialized()) {
-    response.status(200).json({
-      status: "starting",
+  if (!isServerReady() || hasStartupFailed() || !isDatabaseInitialized()) {
+    response.set("Retry-After", "5").status(503).json({
+      status: hasStartupFailed() ? "degraded" : "starting",
       service: "gito-backend",
       databaseReady: false,
       migrationImported: false,
@@ -53,31 +56,47 @@ healthRouter.get("/", (_request, response) => {
     return;
   }
 
-  const db = getDatabase();
+  try {
+    const db = getDatabase();
+    const counts = {
+      sports: getCount(db, "sports"),
+      competitions: getCount(db, "competitions"),
+      seasons: getCount(db, "seasons"),
+      teams: getCount(db, "teams"),
+      matches: getCount(db, "matches"),
+      publication_artifacts: getCount(db, "publication_artifacts"),
+      publication_delivery: getCount(db, "publication_delivery"),
+      operator_users: getCount(db, "operator_users"),
+    };
 
-  const counts = {
-    sports: getCount(db, "sports"),
-    competitions: getCount(db, "competitions"),
-    seasons: getCount(db, "seasons"),
-    teams: getCount(db, "teams"),
-    matches: getCount(db, "matches"),
-    publication_artifacts: getCount(db, "publication_artifacts"),
-    publication_delivery: getCount(db, "publication_delivery"),
-    operator_users: getCount(db, "operator_users"),
-  };
+    const databaseReady = databaseSchemaReady(db) && counts.operator_users > 0;
+    const migrationImported = isMigrationImported(db);
+    const migrationMeta = migrationImported ? getMigrationMetadata(db) : null;
 
-  const databaseReady = databaseSchemaReady(db) && counts.operator_users > 0;
+    if (!databaseReady) {
+      markStartupFailed();
+      console.error("[health] database readiness validation failed");
+    }
 
-  const migrationImported = isMigrationImported(db);
-  const migrationMeta = migrationImported ? getMigrationMetadata(db) : null;
-
-  response.json({
-    status: databaseReady ? "ok" : "degraded",
-    service: "gito-backend",
-    databaseReady,
-    migrationImported,
-    migrationMeta,
-    recordCounts: counts,
-    timestamp: new Date().toISOString(),
-  });
+    response.status(databaseReady ? 200 : 503).json({
+      status: databaseReady ? "ok" : "degraded",
+      service: "gito-backend",
+      databaseReady,
+      migrationImported,
+      migrationMeta,
+      recordCounts: counts,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    markStartupFailed();
+    console.error("[health] database readiness check failed", error);
+    response.set("Retry-After", "5").status(503).json({
+      status: "degraded",
+      service: "gito-backend",
+      databaseReady: false,
+      migrationImported: false,
+      recordCounts: {},
+      timestamp: new Date().toISOString()
+    });
+  }
 });

@@ -8,8 +8,8 @@ import { MobileFeatureService } from "./services/mobile-feature-service.js";
 import {
   allCoreReadinessFlagsReady,
   getReadinessStatus,
+  initializeCoreReadiness,
   markServerReady,
-  setBootstrapInitialized,
   setReady
 } from "./core/server-readiness.js";
 import * as Sentry from "@sentry/node";
@@ -70,16 +70,10 @@ async function initializeFootballService() {
 }
 
 function markInitialReadiness() {
-  try {
-    getDatabase();
-    setReady("databaseReady");
-    MobileFeatureService.repairMobileFeatureFlags();
-    setReady("featureFlagsReady");
-    setReady("analyticsReady");
-    setBootstrapInitialized();
-  } catch (error) {
-    console.error('[startup] initial readiness bootstrapping failed', error instanceof Error ? error.message : error);
-  }
+  return initializeCoreReadiness(
+    () => getDatabase(),
+    () => MobileFeatureService.repairMobileFeatureFlags()
+  );
 }
 
 // run lightweight uploads validation before starting the server
@@ -103,7 +97,10 @@ if (runtimeConfig.errorReportingEnabled && runtimeConfig.sentryDsn) {
     // Bind the Render port before synchronous SQLite migration work begins.
     // This lets health checks observe a starting state instead of timing out.
     await new Promise<void>((resolve) => setImmediate(resolve));
-    markInitialReadiness();
+    if (!markInitialReadiness()) {
+      console.warn('[startup] refusing to start background services while core initialization is unavailable', getReadinessStatus());
+      return;
+    }
     startManualScoreScheduler();
 
     const footballReady = await initializeFootballService();

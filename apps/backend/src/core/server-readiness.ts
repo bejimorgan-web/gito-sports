@@ -13,13 +13,23 @@ const readinessFlags: Record<ReadinessFlag, boolean> = {
 
 let serverReady = false;
 let bootstrapInitialized = false;
+let startupFailed = false;
 
 export function setReady(flag: ReadinessFlag) {
   readinessFlags[flag] = true;
 }
 
 export function isServerReady() {
-  return serverReady;
+  return serverReady && !startupFailed;
+}
+
+export function hasStartupFailed() {
+  return startupFailed;
+}
+
+export function markStartupFailed() {
+  startupFailed = true;
+  serverReady = false;
 }
 
 export function getReadinessStatus() {
@@ -30,6 +40,8 @@ export function getReadinessStatus() {
 }
 
 export function markServerReady() {
+  if (startupFailed) return;
+
   if (!serverReady) {
     serverReady = true;
     console.log("[SERVER READY TRUE]");
@@ -42,6 +54,38 @@ export function isBootstrapInitialized() {
 
 export function setBootstrapInitialized() {
   bootstrapInitialized = true;
+}
+
+/**
+ * Run required synchronous startup work before publishing core readiness.
+ * A failed attempt resets old flags and remains unavailable until a later
+ * successful initialization attempt completes.
+ */
+export function initializeCoreReadiness(
+  initializeDatabase: () => unknown,
+  repairFeatureFlags: () => void,
+  logFailure: (error: unknown) => void = (error) => console.error("[startup] initial readiness bootstrapping failed", error)
+): boolean {
+  serverReady = false;
+  bootstrapInitialized = false;
+  startupFailed = false;
+  for (const flag of Object.keys(readinessFlags) as ReadinessFlag[]) {
+    readinessFlags[flag] = false;
+  }
+
+  try {
+    initializeDatabase();
+    setReady("databaseReady");
+    repairFeatureFlags();
+    setReady("featureFlagsReady");
+    setReady("analyticsReady");
+    setBootstrapInitialized();
+    return true;
+  } catch (error) {
+    markStartupFailed();
+    logFailure(error);
+    return false;
+  }
 }
 
 export function allReadinessFlagsReady() {
